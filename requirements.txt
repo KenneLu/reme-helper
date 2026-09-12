@@ -1,0 +1,7 @@
+# Runtime dependencies of reme-helper (the tray app itself).
+# PyInstaller is a build-time dependency; build.bat installs it separately.
+psutil>=5.9
+pystray>=0.19
+Pillow>=10.0
+PyYAML>=6.0
+packaging>=23.0

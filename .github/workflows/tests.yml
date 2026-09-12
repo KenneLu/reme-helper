@@ -1,0 +1,62 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Each suite is its own step so a failure names the suite in the UI.
+      # tests/conftest.py puts src/ on sys.path; run them from the repo root.
+      - name: Unit tests and settings matrix
+        run: python tests/test_helper.py
+
+      - name: Baseline snapshot
+        run: python tests/test_baseline.py
+
+      - name: i18n table and source coverage
+        run: python tests/test_i18n.py
+
+      - name: API key field
+        run: python tests/test_key_field.py
+
+      - name: Settings window UI test
+        run: python tests/test_settings_ui.py
+
+      - name: Theme consistency
+        run: python tests/test_theme_ui.py
+
+      - name: English mode scan
+        run: python tests/test_en_mode.py
+
+      - name: Console lifecycle
+        run: python tests/test_console_lifecycle.py
+
+      - name: Release config template carries no local data
+        run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            log/tests/*.log
+            log/*.log
+          if-no-files-found: ignore

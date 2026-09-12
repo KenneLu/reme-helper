@@ -1,0 +1,79 @@
+name: release
+
+# Tag a commit and this builds the Windows package, verifies it, and attaches it
+# to a GitHub Release. The zip is the download users get: the exe plus the docs
+# and the license. The tagging convention matches CHANGELOG.md sections.
+#
+#   git tag v<version> && git push origin v<version>   (release.bat does this)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Read version from src/main.py
+        id: version
+        shell: pwsh
+        run: |
+          $line = Select-String -Path src/main.py -Pattern '^VERSION = ' | Select-Object -First 1
+          if (-not $line) { throw "VERSION not found in src/main.py" }
+          $version = ($line.Line -split '"')[1]
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "package=reme-helper-$version" >> $env:GITHUB_OUTPUT
+          Write-Host "version=$version"
+
+      # build.bat runs every test suite as a gate, then PyInstaller, then the
+      # packaged checks (--smoke / --ui-check / --make-icon / --release).
+      # "release" turns on the --release gate; "norun"/"nopause" keep CI from
+      # launching the tray app or waiting for a keypress.
+      - name: Build release
+        shell: cmd
+        run: build.bat release norun nopause
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $pkg = "${{ steps.version.outputs.package }}"
+          $dir = "release/$pkg"
+          if (-not (Test-Path "$dir/$pkg.exe")) { throw "build produced no exe in $dir" }
+          Compress-Archive -Path "$dir/*" -DestinationPath "release/$pkg-windows-x64.zip"
+          Get-FileHash "release/$pkg-windows-x64.zip" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  $pkg-windows-x64.zip" } |
+            Set-Content "release/$pkg-windows-x64.zip.sha256"
+          Get-ChildItem release | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.package }}-windows-x64
+          path: |
+            release/*.zip
+            release/*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $pkg = "${{ steps.version.outputs.package }}"
+          $notes = "Windows package: unpack and run ``$pkg.exe``. See README.md for setup, CHANGELOG.md for what changed."
+          gh release create $tag "release/$pkg-windows-x64.zip" "release/$pkg-windows-x64.zip.sha256" `
+            --title "$pkg" --notes $notes
