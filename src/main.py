@@ -6378,6 +6378,20 @@ def helper_latest_release() -> dict:
     return {"tag": tag, "zip": zip_url, "sha256": sha_url}
 
 
+def http_error_hint(exc: Exception) -> str:
+    """把 GitHub 的配额拒绝翻译成用户能行动的说明。
+
+    匿名访问 api.github.com 是**每出口 IP 每小时 60 次**，而且与同一网络下的其他工具
+    **共用**这份配额。用完之后返回 403，而 str(exc) 只会说 "HTTP Error 403: rate limit
+    exceeded" —— 对用户没有任何行动指引：既不知道这是临时的，也不知道该等还是该改配置。
+    （本机实测踩到过：调试期间的轮询把配额用光，用户的检查更新随即失败。）
+    """
+    if getattr(exc, "code", None) in (403, 429):
+        return t("（这是 GitHub 的匿名访问配额，同一网络下的其他工具也会消耗它；"
+                 "过几分钟再试即可，不是配置问题）")
+    return ""
+
+
 def check_helper_update() -> tuple[bool, str]:
     """托盘「检查 ReMe 助手更新」：**只查、只提示**，绝不自动替换。
 
@@ -6388,7 +6402,7 @@ def check_helper_update() -> tuple[bool, str]:
         latest = helper_latest_release()
     except Exception as exc:  # noqa: BLE001 - 网络问题不该弄崩托盘
         HELPER_UPDATE_STATE.update(checked=True, latest="", newer=False, detail=str(exc))
-        return False, t("检查更新失败：") + str(exc)
+        return False, t("检查更新失败：") + str(exc) + http_error_hint(exc)
     newer = parse_version(latest["tag"]) > parse_version(VERSION)
     HELPER_UPDATE_STATE.update(checked=True, latest=latest["tag"], newer=newer, detail="")
     if newer:

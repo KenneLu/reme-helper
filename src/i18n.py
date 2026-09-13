@@ -372,6 +372,10 @@ TEXT: list[tuple[str, str]] = [
     ("响应里没有可用的稳定版本号", "The response contained no usable stable version"),
     ("没检测到 ReMe，先安装再检查更新", "No ReMe found; install it before checking for updates"),
     ("检查更新失败：", "Update check failed: "),
+    ("（这是 GitHub 的匿名访问配额，同一网络下的其他工具也会消耗它；"
+     "过几分钟再试即可，不是配置问题）",
+     " (this is GitHub's anonymous rate limit, shared with other tools on the same network - "
+     "wait a few minutes and retry; nothing is misconfigured)"),
     # ---- ReMe 助手自己的更新（见 main.check_helper_update / download_and_apply_helper_update）----
     ("检查 ReMe 助手更新", "Check for ReMe Helper updates"),
     ("下载并更新 ReMe 助手", "Download and update ReMe Helper"),
