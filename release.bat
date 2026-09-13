@@ -69,7 +69,12 @@ echo [OK] Tag %TAG% created.
 
 git push origin "%TAG%"
 if errorlevel 1 (
-  echo [ERROR] Failed to push %TAG%. Is the remote configured? (git remote -v)
+  rem Brackets, not parentheses: cmd.exe does not nest-count parens inside a
+  rem parenthesised if-block, so "(git remote -v)" would close the block early
+  rem and turn the following "exit /b 1" into an unconditional top-level command.
+  rem That made this script exit 1 on SUCCESS, after the tag had already been
+  rem pushed - the worst possible failure mode for a release script.
+  echo [ERROR] Failed to push %TAG%. Is the remote configured? See: git remote -v
   exit /b 1
 )
 echo [OK] Tag %TAG% pushed - CI is building the release.
