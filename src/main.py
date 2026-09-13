@@ -35,27 +35,39 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.6"
-# 三个目录，别混在一起：
+VERSION = "1.0.7"
+# 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
-#               机器相关的可写状态（config.json）放这里。
+#               **只放程序本身**：用户数据（配置、日志）都不在这儿。
 #   RUN_DIR     分发包目录——打包态是 exe 旁边，开发态是仓库根。静态资源（doc/、图标）
 #               与「跑一次就丢」的诊断输出（smoke / ui-check / release / lang-audit）走这里。
 #   APP_LOG_DIR 应用自己的日志，属于用户数据：%LOCALAPPDATA%\reme-helper\log\。
 #               放包里的后果很实际——应用正在跑时日志被占用，构建就没法把 release 目录
 #               清干净（实测 rmdir 直接失败），发布包里会一直挂着一个 log/。
+#   CONFIG_PATH 机器相关的可写状态，也属于用户数据：%LOCALAPPDATA%\reme-helper\config.json。
+#               理由与日志一样，外加更要紧的一条：**原地更新要能整目录替换**，配置若住在
+#               exe 旁边，updater 就得为它写例外。
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 PACKAGE_DIR = APP_DIR if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 RUN_DIR = APP_DIR if getattr(sys, "frozen", False) else PACKAGE_DIR
-CONFIG_PATH = APP_DIR / "config.json"
 LOCAL_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
                       or Path.home() / ".local" / "share") / APP_ID
+# config.json 以前住在 APP_DIR；旧位置只在首次播种/迁移时读一次（见 seed_config）。
+LEGACY_CONFIG_PATH = APP_DIR / "config.json"
+# REME_HELPER_CONFIG 是显式覆盖，给测试与便携用：打包自检靠它去读发布包里的**出厂模板**，
+# 否则它会读到开发机上的活配置（那样 --release 的断言必然失败）。
+CONFIG_PATH = (Path(os.environ["REME_HELPER_CONFIG"]).expanduser()
+               if os.environ.get("REME_HELPER_CONFIG")
+               else LOCAL_DATA_DIR / "config.json")
 # 诊断输出跟着「这次运行的那个包」走：构建脚本就在 %RELEASE_DIR%\log\ 里读它、清它。
 DIAG_LOG_DIR = RUN_DIR / "log"
 RUN_LOG_DIR = DIAG_LOG_DIR
 APP_LOG_DIR = LOCAL_DATA_DIR / "log"
 LOG_DIR = APP_LOG_DIR
 LOG_PATH = LOG_DIR / "reme-helper.log"
+# `--quit` 的请求文件：`reme-helper --quit` 写它，运行中的实例在 quit_watch_loop 里发现后
+# 删掉它并走正常的退出路径。用文件而不是命名事件：零 Win32 句柄管理，且天然幂等。
+QUIT_REQUEST_PATH = LOCAL_DATA_DIR / "quit.request"
 # exe 与窗口共用的图标：由 --make-icon 用托盘那套画法生成，构建时喂给 PyInstaller。
 ICON_PATH = RUN_DIR / f"{APP_ID}.ico"
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -1080,6 +1092,31 @@ def load_config() -> dict:
     return cfg
 
 
+def seed_config() -> None:
+    """首次运行：把 config.json 放进用户数据目录（**播种 + 迁移二合一**）。
+
+    源文件 `APP_DIR/config.json` 有**两种身份**，取决于用户是怎么拿到它的：
+      * 新装 —— 发布包里那份是 `make_release_config.py` 生成的**出厂模板**
+      * 老用户升级 —— 那份是**他自己的活配置**
+    所以「新位置不存在就复制过去」这一段代码同时覆盖播种与迁移，不必分两条路。
+
+    幂等：第二次启动时新位置已存在，直接返回。**只复制、不删除** —— 旧文件留着当回退材料。
+    显式覆盖（REME_HELPER_CONFIG）时什么都不做：那种情况下调用方自己指定了配置，不该被我们
+    的播种逻辑插一脚。
+    """
+    if os.environ.get("REME_HELPER_CONFIG"):
+        return
+    if CONFIG_PATH.exists() or not LEGACY_CONFIG_PATH.is_file():
+        return
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LEGACY_CONFIG_PATH, CONFIG_PATH)
+        log(f"config seeded: {LEGACY_CONFIG_PATH} -> {CONFIG_PATH}")
+    except OSError as exc:  # noqa: BLE001 - 读不到旧文件就按出厂默认跑，别拦住启动
+        log(f"config seed failed: {exc}")
+
+
+seed_config()
 CFG = load_config()
 
 
@@ -5872,6 +5909,26 @@ def monitor_loop() -> None:
             refresh_tray_menu()
 
 
+def quit_watch_loop() -> None:
+    """`--quit` 的接收端：轮询请求文件，发现就删掉它并走退出路径。
+
+    为什么**单开一个循环**：monitor_loop 的节拍是 `probe_interval_sec`（默认 20 s），
+    满足不了「`--quit` 后 2 秒内退出」的判据；这里用 1.0 s，且不碰探测节拍。
+    """
+    while not STOP_EVENT.wait(1.0):
+        try:
+            if not QUIT_REQUEST_PATH.exists():
+                continue
+            QUIT_REQUEST_PATH.unlink()
+        except OSError as exc:  # noqa: BLE001 - 读不到就下一轮再看，别把线程弄死
+            log(f"quit request unreadable: {exc}")
+            continue
+        log("quit requested via --quit")
+        if TRAY_ICON is not None:
+            shutdown_tray(TRAY_ICON)
+        return
+
+
 def refresh_aux_windows() -> None:
     """语言切换后刷新辅助窗口：指引窗口整体重建，说明文档只换标题。
 
@@ -5913,11 +5970,48 @@ def close_settings_window() -> None:
         ui_post(work)
 
 
-def quit_app(icon, _item) -> None:
+def request_quit() -> int:
+    """`--quit`：请正在运行的实例退出。
+
+    它自己不清理任何东西 —— 只写一个请求文件，由运行中的实例在 quit_watch_loop 里接手、
+    走 shutdown_tray()（摘隧道、停掉自己启动的 ReMe）。没有实例在跑时也返回 0：要达成的
+    目标是「确保没有实例在跑」，而它已经成立。
+    """
+    running = not single_instance_free()
+    try:
+        QUIT_REQUEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        QUIT_REQUEST_PATH.write_text(time.strftime("%Y-%m-%dT%H:%M:%S\n"), encoding="utf-8")
+    except OSError as exc:
+        log(f"--quit: cannot write {QUIT_REQUEST_PATH}: {exc}")
+        print(f"cannot write the quit request: {exc}")
+        return 1
+    if running:
+        detail = f"{APP_ID} is running; asked it to quit (gone within ~2 s)"
+    else:
+        detail = f"no running {APP_ID} instance found - nothing to stop"
+        try:
+            QUIT_REQUEST_PATH.unlink()
+        except OSError:
+            pass
+    log(f"--quit: {detail}")
+    print(detail)
+    return 0
+
+
+def begin_shutdown() -> None:
+    """退出的第一步：停掉探测、摘掉隧道、停掉「自己启动的」那个 ReMe。
+
+    抽出来是为了让托盘菜单退出与 `--quit` **走同一条清理路径** —— 不许有第二套关闭逻辑。
+    """
     STOP_EVENT.set()
     stop_all_tunnels()
     if SERVICE_PROCESS is not None:
         stop_service()
+
+
+def shutdown_tray(icon) -> None:
+    """走完整退出路径（菜单项与 quit_watch_loop 共用）。"""
+    begin_shutdown()
 
     def finish() -> None:
         host = UI_HOST.get("root")
@@ -5932,6 +6026,11 @@ def quit_app(icon, _item) -> None:
         ui_post(finish)
         threading.Timer(4.0, lambda: os._exit(0)).start()   # UI 线程没响应也要能退出
     icon.stop()
+
+
+def quit_app(icon, _item) -> None:
+    """托盘菜单的「退出」。"""
+    shutdown_tray(icon)
 
 
 def smoke() -> int:
@@ -6035,7 +6134,10 @@ def release_check() -> int:
     detail = ""
     try:
         checks.append(("frozen", bool(getattr(sys, "frozen", False))))
-        checks.append(("config loaded", APP_DIR.joinpath("config.json").is_file()))
+        # 配置现在住在用户数据目录。打包自检跑在发布目录里，且 build.bat 用
+        # REME_HELPER_CONFIG 指向随包的出厂模板，所以这里断言的是「模板读得到」——
+        # 若它读到开发机上的活配置，下面几条 llm empty / no personal targets 必然失败。
+        checks.append(("config loaded", CONFIG_PATH.is_file()))
         checks.append(("app_dir == exe dir", Path(sys.executable).parent == APP_DIR))
         # 出厂模板的形状：其余键都在，且没有把开发机的数据带出去。
         # 注意 targets 不能断言「为空」——载入时会把空列表规范化成示例目标，
@@ -6235,6 +6337,10 @@ def main() -> int:
         return release_check()
     if "--lang-audit" in sys.argv:
         return lang_audit()
+    # --quit 必须在 acquire_single_instance() 之前处理：它的整个意义就是「有实例在跑时
+    # 请那个实例退出」，走到下面只会变成 warn_duplicate_instance() 然后自己退出。
+    if "--quit" in sys.argv:
+        return request_quit()
     if not acquire_single_instance():
         warn_duplicate_instance()
         return 0
@@ -6245,6 +6351,7 @@ def main() -> int:
                              t(APP_NAME), build_menu())
     threading.Thread(target=monitor_loop, daemon=True).start()
     threading.Thread(target=menu_refresh_loop, daemon=True).start()
+    threading.Thread(target=quit_watch_loop, daemon=True).start()
 
     def setup(icon):
         icon.visible = True

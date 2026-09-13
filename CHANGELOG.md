@@ -3,8 +3,19 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## v1.0.7
+
+- **`--quit`：脚本可以请正在运行的实例退出了**：原来只有托盘菜单能停进程，而这台机器上合成输入完全不落地（`SendInput` 的移动与键盘都是空操作，只有 `SetCursorPos` 有效），agent 与远程操作者都点不动菜单——构建脚本因此卡死（`build.bat` 拒绝在任何 reme-helper 运行时构建：文件会被锁住，两个托盘还会抢同一份配置、服务与隧道）。`--quit` 只写一个请求文件就立刻返回；运行中的实例在专用循环里（1 秒节拍）发现它，走与托盘「退出」**完全相同**的清理路径（清理抽成了 `begin_shutdown()` / `shutdown_tray()`，只此一套）。
+- **配置搬进用户数据目录**：`config.json` 从 exe 旁边移到 `%LOCALAPPDATA%\reme-helper\config.json`。理由是原地更新要能整目录替换——配置住在程序目录里，更新器就得为某一个文件写例外。首次运行时自动播种：新装用户拿到包里的出厂模板，老用户拿到自己那份（**只复制、不删除**，旧文件留作回退材料），幂等。
+- **exe 定名 `reme-helper.exe`（不再带版本号）**：开机自启的注册表值存的是 exe 的完整路径，带版本号的名字会让每次原地更新都留下一个指向旧文件的残留项。发布目录与 zip 仍然带版本。构建脚本相应引入 `APPNAME`，并补了一条「包是不是空的」断言——`--name` 与 robocopy 的源目录一旦脱节，robocopy 会静默拷 0 个文件而返回码又低于 8。
+- **打包自检读的是随包的出厂模板**：`build.bat` 用 `REME_HELPER_CONFIG` 把 `--smoke` / `--ui-check` / `--release` 指向发布目录里那份 `config.json`。没有这个覆盖，配置搬家后 `--release` 会读到开发机上的活配置，它自己的 `llm empty` / `no personal targets` 断言必然失败。
+- **测试套件不再死在 runner 的编码上**：`tests/test_i18n.py` 在 CI 上报 `UnicodeEncodeError: 'charmap' codec can't encode characters`，本机却是过的。检查名是中文，而 runner 的 stdout 是管道 ⇒ Windows Python 用 locale 默认编码（cp1252）而不是 UTF-8 ⇒ 第一句非 ASCII 打印就把套件打死，根本轮不到报告。修在两层：`tests/conftest.py` 把 stdout/stderr `reconfigure` 成 UTF-8（`errors="replace"`，报告阶段永不崩），两个工作流加 job 级 `PYTHONUTF8=1`（套件之外的步骤也打印中文）。
+- **手动触发 release 工作流现在一眼看得出来是「只构建」**：`run-name` 会写 `build only (no release)`。行为本来就是这样（发布那一步卡在 `refs/tags/v` 上），只是以前在列表里看不出来，容易被当成一次真发布。
+- **开发态的 `src/config.json` 也进了 `.gitignore`**：应用在开发态把配置写在 `src/`，而忽略规则只盖了仓库根，于是保存过一次设置就会冒出一个带 LLM 端点与 VM 目标的未跟踪文件。
+
 ## v1.0.6
 
+- **CI 真的跑得起来了（第一次推送是红的）**：两套工作流都先在工作机上装一份 ReMe（`H:\Tools\ReMe`，版本与开发机一致）再跑门禁。测试套件与打包自检都是**集成门禁**，不是纯单元测试：它们要读官方 `default.yaml`、要用 venv 里的 Python 报包版本号、要 `reme.exe` 存在——干净 runner 上这三样都没有，第一次推送的 `tests` 就挂在 `FileNotFoundError: 官方default配置不存在`。装 ReMe 的动作抽成 composite action `.github/actions/setup-reme`（`subst H:` 造出默认根目录，`pip install reme-ai` 不带 `core` extra——没有一道门禁会真的启动服务），两个工作流共用一份版本钉，并在装完后自检三个文件与版本号。
 - **文档合并为单一 `doc/`**：删掉与之并存的 `docs/`，改为按语言分目录——`doc/zh/`、`doc/en/` 下各有 `setup.md`（接入文档）与 `configuration.md`（配置参考），`doc/capture.mjs` 是共用一份的 Codex 捕获脚本。两个近似同名的目录只会让人分不清「哪份要发、哪份给人看」；现在 `doc/` 既是运行时被应用读取的目录，也是唯一的文档目录。
 - **Skill 只装一处**：`~/.agents/skills/<名字>/` 是用户级规范位置，Codex 与 DeepSeek Harness 都读它；此前 clear-code 同时存在于 `~/.agents/skills/` 与 `~/.codex/skills/`，实测在 Codex 里被加载**两次**（同名 skill 出现两遍），已删除 Codex 侧的副本。README 增加「Skill installation」一节写明这条规则。
 - **README 重写为 GitHub 风格**：英文 `README.md` 为主、中文 `README.zh-CN.md` 同构，结构与 clear-code 对齐（定位一句话 + 配置什么 + 接入什么 + 开始使用 + 仓库结构 + 构建 + 数据边界），去掉评判性措辞，改为陈述本工具负责的部分。

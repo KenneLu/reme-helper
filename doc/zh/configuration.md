@@ -109,9 +109,9 @@ VM 127.0.0.1:22333  ── ssh -R ──▶  Windows 127.0.0.1:2333
 
 ## 数据边界
 
-- 工具自己的配置在 exe 旁边；日志在用户数据目录（`%LOCALAPPDATA%\reme-helper\log\reme-helper.log`，1MB 滚动、保留 3 份备份）。ReMe 数据仍在 ReMe 的 workspace，**卸载或删除 reme-helper 不会删除记忆**；
+- 工具的**配置与日志都在用户数据目录**（`%LOCALAPPDATA%\reme-helper\`：`config.json` 与 `log\reme-helper.log`，日志 1MB 滚动、保留 3 份备份）。ReMe 数据仍在 ReMe 的 workspace，**卸载或删除 reme-helper 不会删除记忆**；
 - 退出工具会停止由本次工具启动或接管的 ReMe 进程与 SSH 隧道；
-- 发布包里的 `config.json` 是出厂模板（不含任何开发机信息），由 `make_release_config.py` 生成；你自己的 `config.json` 永远不会被打进发布包（已 gitignore）。
+- 发布包里的 `config.json` 是出厂模板（不含任何开发机信息），由 `make_release_config.py` 生成。**首次运行**时工具会把它——老用户则是包外那份自己的配置——复制到用户数据目录；**只复制、不删除**，所以原地更新既不会丢配置，也不会被包里的模板覆盖你已经改过的设置。
 
 ## 构建与发布
 

@@ -51,8 +51,12 @@ if not defined VERSION (
   exit /b 1
 )
 set PACKAGE=reme-helper-%VERSION%
+rem The release folder and the zip keep the version, but the exe inside must NOT:
+rem the autostart registry value stores the full path to the exe, so a versioned
+rem name would leave a stale entry behind on every in-place update.
+set APPNAME=reme-helper
 set RELEASE_DIR=release\%PACKAGE%
-set FROZEN_EXE=%RELEASE_DIR%\%PACKAGE%.exe
+set FROZEN_EXE=%RELEASE_DIR%\%APPNAME%.exe
 set BUILD_CACHE=.cache
 set STAGING=%BUILD_CACHE%\dist
 set WRK=%BUILD_CACHE%\work
@@ -174,7 +178,7 @@ rem Size control: numpy and the PIL avif/webp decoders are unused here and cost
 rem about 34MB (package was ~70.7MB, becomes ~34.5MB). stdlib test/debug modules
 rem dropped as well.
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
-  --name %PACKAGE% ^
+  --name %APPNAME% ^
   --icon "%CD%\reme-helper.ico" ^
   --add-data "%CD%\reme-helper.ico;." ^
   --add-data "%CD%\doc;doc" ^
@@ -204,7 +208,7 @@ if errorlevel 1 (
 
 echo [PACK] assembling %RELEASE_DIR% ...
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
-robocopy "%STAGING%\%PACKAGE%" "%RELEASE_DIR%" /E /R:1 /W:1 /NFL /NDL /NP >nul
+robocopy "%STAGING%\%APPNAME%" "%RELEASE_DIR%" /E /R:1 /W:1 /NFL /NDL /NP >nul
 if errorlevel 8 (
   echo [ERROR] Package copy failed.
   if not defined NOPAUSE pause
@@ -231,7 +235,15 @@ if errorlevel 1 (
 rem Deliverable checks: exe + integration doc. The app looks in doc first and
 rem then in _internal\doc, so both layouts remain covered.
 if not exist "%FROZEN_EXE%" (
-  echo [ERROR] %PACKAGE%.exe missing from the release.
+  echo [ERROR] %APPNAME%.exe missing from the release.
+  if not defined NOPAUSE pause
+  exit /b 1
+)
+rem Guard against a silently empty package: --name and the robocopy source must
+rem stay in step. If they ever drift, robocopy copies nothing and still returns
+rem below 8, so the zip would ship with the exe and no runtime at all.
+if not exist "%RELEASE_DIR%\_internal\base_library.zip" (
+  echo [ERROR] _internal has no runtime - the package is incomplete.
   if not defined NOPAUSE pause
   exit /b 1
 )
@@ -248,6 +260,12 @@ if not exist "%RELEASE_DIR%\doc\capture.mjs" (
 if not exist "%RELEASE_DIR%\_internal\doc\en\setup.md" (
   echo [WARN] doc not found under _internal - the copy next to the exe still works.
 )
+
+rem Point every packaged check at the config that ships with THIS package, not at
+rem whatever the developer's machine keeps in %LOCALAPPDATA%\reme-helper. Without
+rem this the --release gate reads a live config and trips its own assertions
+rem (llm empty / no personal targets / no autostart).
+set "REME_HELPER_CONFIG=%RELEASE_DIR%\config.json"
 
 echo [TEST] smoke test ...
 "%FROZEN_EXE%" --smoke
@@ -304,7 +322,7 @@ if exist "%RELEASE_DIR%\log" (
 
 echo [DONE] release: %FROZEN_EXE%
 if defined RUN_AFTER (
-  echo [RUN] starting %PACKAGE%.exe ...
+  echo [RUN] starting %APPNAME%.exe ...
   start "" "%FROZEN_EXE%"
 )
 if not defined NOPAUSE pause
