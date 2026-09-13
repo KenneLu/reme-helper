@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -20,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+import zipfile
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, ttk
@@ -5766,6 +5768,15 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("检查 ReMe 更新"),
                          lambda _icon, _item: run_action(check_reme_update),
                          enabled=lambda _item: reme_installed()),
+        # 助手自己的更新：同样只提示不自动。查到有新版之后第二项才可点；
+        # 点了会下载、校验、把替换交给独立进程，然后本进程退出。
+        pystray.MenuItem(menu_text("检查 ReMe 助手更新"),
+                         lambda _icon, _item: run_action(check_helper_update)),
+        pystray.MenuItem(menu_text("下载并更新 ReMe 助手"),
+                         lambda _icon, _item: run_action(update_helper_from_tray, refresh=False),
+                         enabled=lambda _item: bool(UPDATE_STATE.get("newer"))),
+        pystray.MenuItem(menu_text("复制助手更新步骤（交给 AI 执行）"),
+                         lambda _icon, _item: copy_helper_upgrade_prompt_from_tray()),
         pystray.MenuItem(menu_text("复制更新步骤（交给 AI 执行）"),
                          lambda _icon, _item: copy_upgrade_prompt_from_tray(),
                          enabled=lambda _item: reme_installed()),
@@ -6031,6 +6042,239 @@ def shutdown_tray(icon) -> None:
 def quit_app(icon, _item) -> None:
     """托盘菜单的「退出」。"""
     shutdown_tray(icon)
+
+
+# ---------------------------------------------------------------------------
+# 在线自更新（W4）
+#
+# 三段：查（GitHub Releases API）→ 下并校验（zip + sha256）→ 换（独立进程 + 自己退出）。
+# 为什么非要"独立进程"：**Windows 上正在运行的 exe 与已加载的 DLL 换不掉**。所以流程是
+# 先起一个 .bat，再由主进程走 shutdown_tray() 退出；.bat 等进程消失后铺文件、重启、自删。
+# 这也是 tufup（PyUpdater 的继任者）在 Windows 上的做法。
+#
+# 配置已经不在安装目录了（见 CONFIG_PATH），所以这里可以整目录铺过去，不必给任何文件写例外。
+# ---------------------------------------------------------------------------
+HELPER_RELEASES_API = f"https://api.github.com/repos/KenneLu/{APP_ID}/releases/latest"
+HELPER_ASSET_SUFFIX = "-windows-x64.zip"
+HELPER_EXE = f"{APP_ID}.exe"
+HELPER_UPDATE_LOG = LOCAL_DATA_DIR / "update.log"
+# 旧版本备份放**用户数据目录**，不放安装目录里：
+#   * 安装目录那份要用 robocopy /purge 清掉上一版的残留文件，备份若在里面就会被一起删；
+#   * 而且备份若在 install 下，`robocopy install install\_backup /e` 会扫到自己的输出。
+HELPER_UPDATE_BACKUP = LOCAL_DATA_DIR / "_backup"
+# 等旧进程退出的上限：120 次 × 约 1 秒（`ping -n 2` 的节奏）
+HELPER_UPDATE_WAIT = 120
+
+UPDATE_STATE: dict = {"checked": False, "latest": "", "newer": False, "detail": ""}
+
+# .bat 模板。**ASCII-only**：cmd.exe 按机器 ANSI 代码页解析 .bat，中文注释会变乱码甚至
+# 吃掉命令（build.bat 顶上写着同一条纪律）。解释一律留在 Python 侧。
+# 刻意**不用括号块**：cmd 对块内 errorlevel 的解析不可靠，全程 goto 流程。
+HELPER_UPDATE_BAT = r"""@echo off
+setlocal
+set "INSTALL={install}"
+set "STAGE={stage}"
+set "BACKUP={backup}"
+set "LOG={log}"
+echo [{stamp}] start install=%INSTALL% backup=%BACKUP% >> "%LOG%"
+set /a tries=0
+:wait
+tasklist /fi "imagename eq {exe}" 2>nul | find /i "{exe}" >nul
+if errorlevel 1 goto gone
+set /a tries+=1
+if %tries% geq {limit} goto giveup
+ping -n 2 127.0.0.1 >nul
+goto wait
+:gone
+if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
+robocopy "%INSTALL%" "%BACKUP%" /e /njh /njs /nfl /ndl >nul
+rem /purge also removes files the previous version left behind. The backup is
+rem deliberately outside INSTALL, otherwise /purge would delete it too.
+robocopy "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+echo [{stamp}] copied rc=%ERRORLEVEL% >> "%LOG%"
+start "" "%INSTALL%\{exe}"
+echo [{stamp}] done >> "%LOG%"
+goto cleanup
+:giveup
+echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
+:cleanup
+(goto) 2>nul & del "%~f0"
+"""
+
+
+def parse_version(text: str) -> tuple:
+    """``'v1.0.7'`` → ``(1, 0, 7)``。取不到数字就给 ``(0,)``，**绝不抛**。"""
+    parts = re.findall(r"\d+", str(text or ""))
+    return tuple(int(part) for part in parts[:3]) or (0,)
+
+
+def _http_text(url: str, timeout: float = 8.0) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": f"{APP_ID}/{VERSION}",
+                                                   "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def helper_latest_release() -> dict:
+    """``GET releases/latest`` → ``{"tag", "zip", "sha256"}``。失败抛异常，调用方转成人话。"""
+    data = json.loads(_http_text(HELPER_RELEASES_API))
+    tag = str(data.get("tag_name") or "").strip()
+    zip_url = sha_url = ""
+    for asset in data.get("assets") or []:
+        name = str(asset.get("name") or "")
+        url = str(asset.get("browser_download_url") or "")
+        if name.endswith(HELPER_ASSET_SUFFIX + ".sha256"):
+            sha_url = url
+        elif name.endswith(HELPER_ASSET_SUFFIX):
+            zip_url = url
+    if not tag or not zip_url:
+        raise RuntimeError(t("发布页上没有可下载的 zip"))
+    return {"tag": tag, "zip": zip_url, "sha256": sha_url}
+
+
+def check_helper_update() -> tuple[bool, str]:
+    """托盘「检查 ReMe 助手更新」：**只查、只提示**，绝不自动替换。
+
+    刻意与 ReMe 的检查保持同一种交互（只提示、不升级）：升级会动配置与配套工具，
+    该由用户决定什么时候做。
+    """
+    try:
+        latest = helper_latest_release()
+    except Exception as exc:  # noqa: BLE001 - 网络问题不该弄崩托盘
+        UPDATE_STATE.update(checked=True, latest="", newer=False, detail=str(exc))
+        return False, t("检查更新失败：") + str(exc)
+    newer = parse_version(latest["tag"]) > parse_version(VERSION)
+    UPDATE_STATE.update(checked=True, latest=latest["tag"], newer=newer, detail="")
+    if newer:
+        return True, t("有新版本，点「下载并更新」会自动替换并重启") + f"（{latest['tag']}）"
+    return True, t("已是最新版本") + f"（{VERSION}）"
+
+
+def download_and_apply_helper_update() -> tuple[bool, str]:
+    """托盘「下载并更新」：下载 → 校验 sha256 → 解压 → 起 updater。
+
+    它**不负责退出**：调用方看到 True 之后自己去 `shutdown_tray()`，好让托盘先把结果提示出来。
+    """
+    try:
+        latest = helper_latest_release()
+    except Exception as exc:  # noqa: BLE001
+        return False, t("检查更新失败：") + str(exc)
+    work = Path(tempfile.mkdtemp(prefix=f"{APP_ID}-update-"))
+    zip_path = work / f"{APP_ID}{HELPER_ASSET_SUFFIX}"
+    try:
+        request = urllib.request.Request(latest["zip"],
+                                         headers={"User-Agent": f"{APP_ID}/{VERSION}"})
+        with urllib.request.urlopen(request, timeout=60.0) as response, zip_path.open("wb") as out:
+            shutil.copyfileobj(response, out)
+    except Exception as exc:  # noqa: BLE001
+        return False, t("下载更新包失败：") + str(exc)
+    if latest["sha256"]:
+        try:
+            wanted = _http_text(latest["sha256"]).split()[0].strip().lower()
+            actual = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+        except Exception as exc:  # noqa: BLE001
+            return False, t("校验更新包失败：") + str(exc)
+        if wanted != actual:
+            return False, t("更新包校验失败：sha256 对不上")
+    stage = work / "stage"
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(stage)
+    except Exception as exc:  # noqa: BLE001
+        return False, t("解压更新包失败：") + str(exc)
+    if not (stage / HELPER_EXE).is_file():
+        return False, t("更新包里没有 ") + HELPER_EXE
+    text = HELPER_UPDATE_BAT.format(
+        install=APP_DIR, stage=stage, backup=HELPER_UPDATE_BACKUP,
+        log=HELPER_UPDATE_LOG, exe=HELPER_EXE,
+        limit=HELPER_UPDATE_WAIT, stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    script = Path(tempfile.gettempdir()) / f"{APP_ID}-update.bat"
+    try:
+        # cmd.exe 按机器 ANSI 代码页解析 .bat ⇒ 按 ANSI 落盘（安装路径里可能有中文）
+        script.write_text(text, encoding="mbcs", errors="replace")
+    except (LookupError, UnicodeError):
+        script.write_text(text, encoding="utf-8")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    try:
+        subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=flags, close_fds=True)
+    except OSError as exc:
+        return False, t("启动更新程序失败：") + str(exc)
+    log(f"update staged: {stage} -> {APP_DIR} (tag {latest['tag']}, bat {script})")
+    return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
+
+
+def update_helper_from_tray() -> tuple[bool, str]:
+    """托盘动作：更新一旦交出去，就把自己关掉 —— 剩下的由 updater 接手。"""
+    ok, detail = download_and_apply_helper_update()
+    if ok and TRAY_ICON is not None:
+        threading.Timer(1.5, lambda: shutdown_tray(TRAY_ICON)).start()
+    return ok, detail
+
+
+def helper_upgrade_prompt(target: str = "") -> str:
+    """给 AI 的**助手自己**更新提示词：两段式 —— 先只分析回报，等用户说「执行」才动手。
+
+    与 `reme_upgrade_prompt` 的区别只是升级对象（那个升 **ReMe**，这个升 **助手本身**），
+    但**不能互相复用**：牵动的东西、回滚方式都不一样。
+    """
+    root = str(APP_DIR)
+    latest = (target or UPDATE_STATE.get("latest")
+              or t("（还没查过，请自行查 GitHub Releases 的最新 tag）"))
+    running = t("运行中") if service_is_healthy() else t("已停止")
+    return "\n".join([
+        t("请帮我更新这台机器上的 ReMe 助手（Windows 托盘工具）。"),
+        t("先只做分析，把方案报给我；等我说「执行」再动手。"),
+        "",
+        t("## 现状"),
+        f"- {t('当前版本：')}{VERSION}",
+        f"- {t('目标版本：')}{latest}",
+        f"- {t('安装目录：')}{root}{t('（exe 固定叫 reme-helper.exe，名字不带版本号）')}",
+        f"- {t('配置与日志：')}%LOCALAPPDATA%\\reme-helper\\{t('（已不在安装目录里）')}",
+        f"- {t('ReMe 服务：')}http://127.0.0.1:2333{t('，当前')}{running}",
+        f"- {t('开机自启：')}HKCU\\...\\Run{t(' 的 reme-helper 值，存的是 exe 的完整路径')}",
+        "",
+        t("## 第一阶段：只分析，不动手"),
+        t("允许：读源码与 CHANGELOG、读配置、拉 GitHub Release 的元数据与 sha256。"),
+        t("在我说「执行」之前：不要下载替换、不要停止服务、不要改注册表。"),
+        t("请按这个格式回报："),
+        t("1. 版本与来源：当前 → 目标，数据从哪来"),
+        t("2. 新版有哪些变化（读 CHANGELOG.md）"),
+        t("3. 影响面：配置格式变没变、自启指向的 exe 路径会不会变、ReMe 与隧道要不要重启"),
+        t("4. 更新步骤：编号、简明、每一步带决策点"),
+        t("5. 风险与回滚：回滚要给出一条具体命令"),
+        t("6. 结论：有问题就列出来；没问题就说「没有问题」，然后停下等我回复「执行」"),
+        "",
+        t("## 第二阶段：我说「执行」之后"),
+        t("1. 先备份整个安装目录（更新脚本自己也会备份到 %LOCALAPPDATA%\\reme-helper\\_backup）"),
+        t("2. 退出运行中的助手：reme-helper.exe --quit"),
+        t("3. 下载 zip 与 .sha256，校验通过再解压"),
+        t("4. 把解压结果铺到安装目录，重启 reme-helper.exe"),
+        t("5. 验证：health_check 通过、托盘版本行显示新版本"),
+        t("6. 回报新版本号"),
+        "",
+        t("## 硬约束"),
+        t("- 不要改 %LOCALAPPDATA%\\reme-helper\\config.json 的内容（需要时只备份）"),
+        t("- 不要动 ReMe 的 workspace 与 .env"),
+        t("- 任何一步失败就停下来告诉我，不要自行绕过"),
+    ])
+
+
+def copy_helper_upgrade_prompt_from_tray() -> None:
+    """托盘：把「助手自己的更新步骤」放进剪贴板。
+
+    与 ReMe 那条一样，刻意**不做**一键升级：更新会动安装目录与自启注册表，
+    必须先让 AI 分析并等用户确认。
+    """
+    def work() -> None:
+        copied = False
+        try:
+            copied = copy_to_clipboard(helper_upgrade_prompt())
+        except Exception as exc:  # noqa: BLE001
+            log(f"tray copy helper upgrade prompt failed: {exc}")
+        notify("助手更新步骤已复制，粘贴给 AI 完成更新" if copied else "复制失败，请稍后再试")
+
+    ui_post(work)   # 剪贴板要一个活着的 Tk 窗口 → 只能在 UI 线程里做
 
 
 def smoke() -> int:
