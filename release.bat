@@ -15,6 +15,10 @@ rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+rem Releases come from here unless the environment says otherwise.
+set "RELEASE_BRANCH=main"
+if defined REME_RELEASE_BRANCH set "RELEASE_BRANCH=%REME_RELEASE_BRANCH%"
+
 set DRY_RUN=
 if /i "%~1"=="--dry-run" set DRY_RUN=1
 
@@ -37,6 +41,29 @@ if errorlevel 1 (
 git diff --cached --quiet 2>nul
 if errorlevel 1 (
   echo [ERROR] Staged but uncommitted changes present. Commit them first.
+  exit /b 1
+)
+
+rem A tag must point at a commit the world can already see. Both of these used to
+rem be checked by hand before every release; on one occasion the local branch was
+rem the thing that needed checking and nothing in this script would have caught
+rem it. Compare SHAs rather than parsing "git status": the sha is the fact.
+for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set BRANCH=%%b
+if /i not "%BRANCH%"=="%RELEASE_BRANCH%" (
+  echo [ERROR] On branch %BRANCH%, not %RELEASE_BRANCH%. Releases are tagged on %RELEASE_BRANCH%.
+  exit /b 1
+)
+for /f "delims=" %%l in ('git rev-parse HEAD') do set LOCAL_SHA=%%l
+for /f "delims=" %%r in ('git rev-parse @{u}') do set REMOTE_SHA=%%r
+if not defined REMOTE_SHA (
+  echo [ERROR] %RELEASE_BRANCH% has no upstream. Set one before releasing.
+  exit /b 1
+)
+if not "%LOCAL_SHA%"=="%REMOTE_SHA%" (
+  echo [ERROR] Local %RELEASE_BRANCH% is not what the remote has.
+  echo         local  = %LOCAL_SHA%
+  echo         remote = %REMOTE_SHA%
+  echo         Push or pull first - a tag must point at a commit everyone can see.
   exit /b 1
 )
 

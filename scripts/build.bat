@@ -105,59 +105,66 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem The suites write their logs to log\tests\, not to the repository root - see
+rem TOOL in tests/conftest.py. Every "type" below used to look in the root, so
+rem instead of printing the log it printed "The system cannot find the file
+rem specified." six times: the build's own "see <log>" pointer had never worked,
+rem and the noise was indistinguishable from a real error.
+set "TEST_LOGS=log\tests"
+
 echo [TEST] i18n table + source coverage ...
 "%PY%" tests\test_i18n.py
 if errorlevel 1 (
-  echo [ERROR] test_i18n.py failed. See i18n-test.log
+  echo [ERROR] test_i18n.py failed. See %TEST_LOGS%\i18n-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type i18n-test.log
+if exist "%TEST_LOGS%\i18n-test.log" type "%TEST_LOGS%\i18n-test.log"
 
 echo [TEST] API key field - load + mask + reveal ...
 "%PY%" tests\test_key_field.py
 if errorlevel 1 (
-  echo [ERROR] test_key_field.py failed. See key-field-test.log
+  echo [ERROR] test_key_field.py failed. See %TEST_LOGS%\key-field-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type key-field-test.log
+if exist "%TEST_LOGS%\key-field-test.log" type "%TEST_LOGS%\key-field-test.log"
 
 echo [TEST] settings window UI test ...
 "%PY%" tests\test_settings_ui.py
 if errorlevel 1 (
-  echo [ERROR] test_settings_ui.py failed. See settings-ui-test.log
+  echo [ERROR] test_settings_ui.py failed. See %TEST_LOGS%\settings-ui-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type settings-ui-test.log
+if exist "%TEST_LOGS%\settings-ui-test.log" type "%TEST_LOGS%\settings-ui-test.log"
 
 echo [TEST] theme consistency - no shift, no unreadable text ...
 "%PY%" tests\test_theme_ui.py
 if errorlevel 1 (
-  echo [ERROR] test_theme_ui.py failed. See theme-test.log
+  echo [ERROR] test_theme_ui.py failed. See %TEST_LOGS%\theme-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type theme-test.log
+if exist "%TEST_LOGS%\theme-test.log" type "%TEST_LOGS%\theme-test.log"
 
 echo [TEST] english mode scan ...
 "%PY%" tests\test_en_mode.py
 if errorlevel 1 (
-  echo [ERROR] test_en_mode.py failed. See en-mode-test.log
+  echo [ERROR] test_en_mode.py failed. See %TEST_LOGS%\en-mode-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type en-mode-test.log
+if exist "%TEST_LOGS%\en-mode-test.log" type "%TEST_LOGS%\en-mode-test.log"
 
 echo [TEST] console lifecycle - language and theme rebuilds ...
 "%PY%" tests\test_console_lifecycle.py
 if errorlevel 1 (
-  echo [ERROR] test_console_lifecycle.py failed. See console-lifecycle-test.log
+  echo [ERROR] test_console_lifecycle.py failed. See %TEST_LOGS%\console-lifecycle-test.log
   if not defined NOPAUSE pause
   exit /b 1
 )
-type console-lifecycle-test.log
+if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-lifecycle-test.log"
 
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
