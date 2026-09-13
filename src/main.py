@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -6100,6 +6100,11 @@ UPDATE_STATE: dict = {"checked": False, "latest": "", "newer": False, "detail": 
 # .bat 模板。**ASCII-only**：cmd.exe 按机器 ANSI 代码页解析 .bat，中文注释会变乱码甚至
 # 吃掉命令（build.bat 顶上写着同一条纪律）。解释一律留在 Python 侧。
 # 刻意**不用括号块**：cmd 对块内 errorlevel 的解析不可靠，全程 goto 流程。
+# 等待循环还刻意**不用管道**——理由写在循环上方，那是实测出来的。
+# ⚠️ 等待循环用 `{exe}`（= HELPER_EXE）这个**镜像名**判断旧进程有没有退出。对当前所有
+# 版本都是对的：更新器是 1.0.7 才有的，而 1.0.7 起 exe 就定名 reme-helper.exe，各版本
+# 同名。**若以后重新引入带版本号的 exe 名，这里会误判成"旧进程已退出"并去覆盖被锁住的
+# 文件**——改 HELPER_EXE 或改 exe 命名规则之前先回来看这条。
 HELPER_UPDATE_BAT = r"""@echo off
 setlocal
 set "INSTALL={install}"
@@ -6107,9 +6112,19 @@ set "STAGE={stage}"
 set "BACKUP={backup}"
 set "LOG={log}"
 echo [{stamp}] start install=%INSTALL% backup=%BACKUP% >> "%LOG%"
+set "POLL=%LOG%.poll"
 set /a tries=0
 :wait
-tasklist /fi "imagename eq {exe}" 2>nul | find /i "{exe}" >nul
+rem NO PIPE HERE, on purpose. This script is spawned with DETACHED_PROCESS and
+rem therefore has no console, and in that context "tasklist | find" NEVER
+rem RETURNS: find.exe blocks on stdin forever. The update then silently does not
+rem happen - the app quits, the tray has already said "update started", and
+rem nothing else ever occurs. Verified by spawning this exact script both ways:
+rem with a console the pipeline finishes in 0.13s, detached it hangs
+rem indefinitely. Sending the child's stdio to DEVNULL does not help; removing
+rem the pipe does. So tasklist writes to a file and find reads that file.
+tasklist /fi "imagename eq {exe}" /nh > "%POLL%" 2>nul
+find /i "{exe}" "%POLL%" >nul
 if errorlevel 1 goto gone
 set /a tries+=1
 if %tries% geq {limit} goto giveup
@@ -6128,6 +6143,7 @@ goto cleanup
 :giveup
 echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
 :cleanup
+del "%POLL%" >nul 2>nul
 (goto) 2>nul & del "%~f0"
 """
 
@@ -6602,10 +6618,26 @@ def warn_duplicate_instance() -> None:
         pass
 
 
+def utf8_diag_streams() -> None:
+    """把诊断参数的 stdout/stderr 固定成 UTF-8。
+
+    这些参数的意义就是让脚本与 CI **读到结论**，而结论是中文的。stdout 被重定向时
+    Python 用 locale 默认编码（这台机器是 cp936）写出去，读的人只会看到乱码——
+    测试套件在 CI 上踩的是同一个坑（见 tests/conftest.py）。冻结的 noconsole 态下
+    stream 是 None，reconfigure 会抛，所以整段包住。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 - noconsole 冻结态没有 stream，不是错误
+            pass
+
+
 def main() -> int:
     global TRAY_ICON
     enable_dpi_awareness()
     apply_theme()
+    utf8_diag_streams()
     if "--make-icon" in sys.argv:
         try:
             path = write_app_icon()
@@ -6629,6 +6661,23 @@ def main() -> int:
     # 请那个实例退出」，走到下面只会变成 warn_duplicate_instance() 然后自己退出。
     if "--quit" in sys.argv:
         return request_quit()
+    # 更新流程的无头孪生入口：与托盘那两个菜单项走**完全同一段代码**，只是不需要点菜单。
+    # 没有它，自更新只能在源码态验证——而这台机器上合成输入完全不落地（同 --quit 的理由），
+    # 菜单点不了；更要紧的是**发出去的那个 exe 才是要验的对象**，源码态验不到它。
+    if "--check-helper-update" in sys.argv:
+        ok, detail = check_helper_update()
+        print(detail)
+        return 0 if ok else 1
+    if "--helper-update" in sys.argv:
+        ok, detail = download_and_apply_helper_update()
+        print(detail)
+        if not ok:
+            return 1
+        # 更新器要等这个镜像名消失才能替换文件，所以这里必须真的退出。
+        # 直接 os._exit：正常收尾会去动 Tk 解释器，而这里只是要立刻放手。
+        sys.stdout.flush()
+        time.sleep(1.5)
+        os._exit(0)
     if not acquire_single_instance():
         warn_duplicate_instance()
         return 0
