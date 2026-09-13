@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.11"
+VERSION = "1.0.12"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -5928,26 +5928,35 @@ def monitor_loop() -> None:
     注意：以前这里每轮都无条件重画托盘菜单，而重画 = 销毁并重建菜单句柄——用户右键菜单
     正开着时就会「突然失焦」。现在只在菜单显示内容真的变了（状态签名不同）时才重画，
     而且 menu_is_open() 时会推迟。
+
+    **第一轮立即执行**（先探测、后等待）。`refresh_tunnels()` 要给每台 VM 起 ssh 并等
+    探测结果，VM 不在线时实测要 20 秒以上；它以前是启动路径上的**同步**调用、挡在托盘
+    图标创建之前，于是那 20 多秒里进程活着却**没有任何托盘图标**——纯托盘应用这段时间
+    完全无法操作，用户看到的往往还是上一次被杀掉的实例留下的幽灵图标，点了毫无反应。
+    现在图标先立起来，真实状态由这里的第一轮在后台补上。
     """
+    interval = CFG.get("probe_interval_sec", 20)
     last_signature = None
     last_icon = None
-    while not STOP_EVENT.wait(CFG.get("probe_interval_sec", 20)):
+    while True:
         before = state_copy()
         refresh_service_state()
         refresh_tunnels()
         after = state_copy()
         if before.get("phase") != after.get("phase"):
             log(f"state changed {before.get('phase')} -> {after.get('phase')}")
-        if TRAY_ICON is None:
-            continue
-        icon_state = (bool(after["healthy"]), any(TUNNEL_STATE.values()))
-        if icon_state != last_icon:
-            last_icon = icon_state
-            TRAY_ICON.icon = make_icon(*icon_state)
-        signature = tray_signature()
-        if signature != last_signature:
-            last_signature = signature
-            refresh_tray_menu()
+        if TRAY_ICON is not None:
+            icon_state = (bool(after["healthy"]), any(TUNNEL_STATE.values()))
+            if icon_state != last_icon:
+                last_icon = icon_state
+                TRAY_ICON.icon = make_icon(*icon_state)
+            signature = tray_signature()
+            if signature != last_signature:
+                last_signature = signature
+                refresh_tray_menu()
+        # 等待放在最后：第一轮必须立刻探测（见上面的说明）
+        if STOP_EVENT.wait(interval):
+            return
 
 
 def quit_watch_loop() -> None:
@@ -6682,9 +6691,13 @@ def main() -> int:
         warn_duplicate_instance()
         return 0
     sync_autostart_path()
+    # 这两个是**快**的：本地健康探测与读配置。它们决定图标首帧和 setup() 里的
+    # 「ReMe 启动后启动隧道」判断，所以留在同步路径上。
     refresh_service_state()
     seed_tunnels_wanted()
-    refresh_tunnels()
+    # 托盘图标必须先立起来。refresh_tunnels() 已移进 monitor_loop 的第一轮（立即执行）：
+    # 它要给每台 VM 起 ssh 并等探测结果，VM 不在线时实测 ≥20 秒。挡在这里的后果是
+    # 启动后 20 多秒内**没有任何托盘图标**（详见 monitor_loop 的说明）。
     TRAY_ICON = pystray.Icon(APP_ID, make_icon(STATE["healthy"], any(TUNNEL_STATE.values())),
                              t(APP_NAME), build_menu())
     threading.Thread(target=monitor_loop, daemon=True).start()
