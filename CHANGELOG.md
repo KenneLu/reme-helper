@@ -3,6 +3,23 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## v1.0.13
+
+- **两个版本行串台（真 bug，不只是措辞）**：`UPDATE_STATE` 被定义了**两次** —— ReMe 用的那份 `{checked_for, latest, at, error}` 与助手用的那份 `{checked, latest, newer, detail}`，**后者在模块加载时把前者覆盖掉**，于是两个检查共用同一个字典。两者都有 `latest` 键，所以「先查 ReMe、再查助手」之后，助手的新版本号会显示在 **ReMe 版本行**上——用户看到的就是「ReMe版本：0.4.1.11（有新版 v1.0.12）」。连带还有两处：`reme_upgrade_prompt` 会把助手的 tag 当成 ReMe 的升级目标写进给 AI 的提示词，反之亦然。现在拆成 `REME_UPDATE_STATE` 与 `HELPER_UPDATE_STATE`，各报各的结论。
+- **托盘菜单重新分区**：`ReMe版本` 与 `ReMe助手版本` 分成两行；下面按同一顺序分成两组 —— ReMe 组（`检查 ReMe 更新…` · `复制 ReMe 更新步骤（交给 AI 执行）`）、ReMe 助手组（`检查 ReMe 助手更新…` · `下载并更新 ReMe 助手` · `复制 ReMe 助手更新步骤（交给 AI 执行）`）。原先两组的顺序是交错的，两个「复制…」也没点明是谁的。
+- **检查更新与执行更新改走对话框**。用户主动点了这一项，他会**等着看结果**，而气泡会被系统的专注助手吞掉；「已经是最新」本来也没有别的反馈，用户只会以为点了没反应。更新成功尤其如此——进程马上要退出，气泡根本来不及被看见（实测用户就是因为这个以为更新失败）。
+  现在四种情况都有对话框：已是最新 → 一个「好」；有新版本 → 「立即更新 / 稍后」；检查失败 → 「复制…（交给 AI 执行） / 关闭」；更新失败 → 同样是「复制…（交给 AI 执行） / 关闭」；更新已交出 → 「立即重启」。ReMe 与 ReMe 助手两条链路都如此。右键菜单项照旧保留。
+- **对话框差点做成"看不见的窗口"**：`ui_dialog` 一开始照抄了既有写法 `dialog.transient(parent)`，而本应用的常驻根窗口**一直是隐藏的**（它只当 Tk 解释器用），控制台没开着时 `ui_parent()` 返回的正是它。实测 Tk 的行为是：**master 处于 withdrawn 时，设成它 transient 的 Toplevel 会跟着被 withdraw，`deiconify()` 也救不回来**：
+
+  | 变体（master 为隐藏根窗口） | 结果 |
+  |---|---|
+  | `transient(parent)` | `ismapped=0 viewable=0 state=withdrawn` |
+  | 不设 transient | `ismapped=1 viewable=1 state=normal` |
+  | `transient` + `deiconify()` | 仍然 `withdrawn` |
+
+  照抄的话，用户点「检查更新」会**什么都不出现**。现在加了一个 `attach_dialog()`：只在父窗口**真的可见**时才 `transient`；`choose_from_list` 有同样的潜在问题，一并走它。
+- 新增文案全部进中英对照表（`--lang-audit` missing=0）。
+
 ## v1.0.12
 
 - **托盘图标不再迟到 20 多秒**。启动路径上曾有三个**同步**调用挡在托盘图标创建之前：

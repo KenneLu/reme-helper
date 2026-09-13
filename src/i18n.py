@@ -365,7 +365,7 @@ TEXT: list[tuple[str, str]] = [
     ("（有新版 ", " (new version available: "),
     ("（已是最新）", " (up to date)"),
     ("检查 ReMe 更新", "Check for ReMe updates"),
-    ("复制更新步骤（交给 AI 执行）", "Copy update steps (for an AI to run)"),
+    ("复制 ReMe 更新步骤（交给 AI 执行）", "Copy ReMe update steps (for an AI to run)"),
     ("更新步骤已复制，粘贴给 AI 完成更新",
      "Update steps copied - paste them into an AI to finish the upgrade"),
     ("复制失败，请稍后再试", "Copy failed, please try again"),
@@ -387,8 +387,25 @@ TEXT: list[tuple[str, str]] = [
     ("启动更新程序失败：", "Could not start the updater: "),
     ("更新已开始，本窗口会关闭；新版本会自己起来",
      "Update started; this window closes and the new version starts itself"),
+    # ---- 检查/更新时的对话框（见 main.ui_dialog 与 tray_check_reme_update /
+    #      tray_check_helper_update / run_helper_update）----
+    ("ReMe助手版本：", "ReMe Helper version: "),
+    ("好", "OK"),
+    ("稍后", "Later"),
+    ("立即更新", "Update now"),
+    ("立即重启", "Restart now"),
+    ("更新 ReMe 助手", "Update ReMe Helper"),
+    ("有新版本 ", "A new version is available: "),
+    ("更新 ReMe 会动配置、依赖与配套工具，所以由 AI 按步骤执行：点下面的按钮复制提示词，粘贴给 AI 即可。",
+     "Updating ReMe touches its config, dependencies and companion tools, so an AI runs it step by step: "
+     "copy the prompt below and paste it into your AI."),
+    ("点「立即更新」会自动下载、校验，把当前版本留在 _backup，然后重启。",
+     "Click \"Update now\": the package is downloaded and verified, the current build is kept in _backup, "
+     "and the app restarts."),
+    ("替换完成后新版本会自己启动；点「立即重启」马上开始。",
+     "The new version starts itself once the swap finishes; click \"Restart now\" to begin immediately."),
     # ---- 助手自己的更新提示词（见 main.helper_upgrade_prompt）----
-    ("复制助手更新步骤（交给 AI 执行）", "Copy helper update steps (for an AI to run)"),
+    ("复制 ReMe 助手更新步骤（交给 AI 执行）", "Copy ReMe Helper update steps (for an AI to run)"),
     ("（还没查过，请自行查 GitHub Releases 的最新 tag）",
      " (not checked yet; look up the latest tag on GitHub Releases)"),
     ("请帮我更新这台机器上的 ReMe 助手（Windows 托盘工具）。",
@@ -429,8 +446,8 @@ TEXT: list[tuple[str, str]] = [
     ("（离线，或者 PyPI 被代理拦了？）", " (offline, or is PyPI blocked by a proxy?)"),
     ("ReMe 有新版本 ", "ReMe has a new version: "),
     ("（本机 ", " (this machine: "),
-    ("）。右键「复制更新步骤」交给 AI 执行",
-     "). Right-click \"Copy update steps\" and hand them to an AI"),
+    ("）。右键「复制 ReMe 更新步骤（交给 AI 执行）」",
+     "). Right-click \"Copy ReMe update steps (for an AI to run)\""),
     ("ReMe 已是最新版本 ", "ReMe is up to date: "),
     # ---- 升级提示词：两段式（先分析回报，等用户确认「执行」才动手）----
     ("请帮我升级这台机器上的 ReMe（本地优先的长期记忆服务）。",

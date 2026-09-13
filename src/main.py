@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.12"
+VERSION = "1.0.13"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -1286,7 +1286,7 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
     installed = current or versions.get("reme-ai", "") or "未知"
     # 目标版本可能还不知道（用户没点过「检查更新」）：那就直说，别写「未知」再跟一句括注，
     # 那样读起来自相矛盾。
-    target = latest or UPDATE_STATE.get("latest", "")
+    target = latest or REME_UPDATE_STATE.get("latest", "")
     target_hint = (t("（PyPI 最新稳定版；以你自己查到的为准）") if target
                    else t("还没查过，请自行查 PyPI 上的最新稳定版"))
     running = "运行中" if service_is_healthy() else "已停止"
@@ -1389,7 +1389,7 @@ PYPI_REME_JSON = "https://pypi.org/pypi/reme-ai/json"
 # 也不该反复读盘 —— 目录 mtime 一变（装了/升了包）就自动失效。
 _VERSION_CACHE: dict = {"key": None, "value": {}}
 # 最近一次「检查更新」的结果：托盘版本行要把它显示出来，气泡被系统吞掉也看得见。
-UPDATE_STATE: dict = {"checked_for": "", "latest": "", "at": 0.0, "error": ""}
+REME_UPDATE_STATE: dict = {"checked_for": "", "latest": "", "at": 0.0, "error": ""}
 
 
 def site_packages_dir(root: Path | None = None) -> Path | None:
@@ -1523,12 +1523,12 @@ def check_reme_update() -> tuple[bool, str]:
         return False, "没检测到 ReMe，先安装再检查更新"
     ok, detail = fetch_latest_reme_version()
     if not ok:
-        UPDATE_STATE.update(checked_for=current, latest="", at=time.time(), error=detail)
+        REME_UPDATE_STATE.update(checked_for=current, latest="", at=time.time(), error=detail)
         return False, f"检查更新失败：{detail}（离线，或者 PyPI 被代理拦了？）"
-    UPDATE_STATE.update(checked_for=current, latest=detail, at=time.time(), error="")
+    REME_UPDATE_STATE.update(checked_for=current, latest=detail, at=time.time(), error="")
     if version_is_newer(detail, current):
         return True, (f"ReMe 有新版本 {detail}（本机 {current}）。"
-                      "右键「复制更新步骤」交给 AI 执行")
+                      "右键「复制 ReMe 更新步骤（交给 AI 执行）」")
     return True, f"ReMe 已是最新版本 {current}"
 
 
@@ -2917,9 +2917,10 @@ def open_path(path) -> None:
 def choose_from_list(parent, title: str, options: list[str], prompt: str) -> str | None:
     """Small modal picker used when a scan finds several candidates."""
     chosen: dict[str, str | None] = {"value": None}
-    dialog = tk.Toplevel(parent if parent is not None else ui_parent())
+    master = parent if parent is not None else ui_parent()
+    dialog = tk.Toplevel(master)
     dialog.title(f"{t(APP_NAME)} · {title}")
-    dialog.transient(parent)
+    attach_dialog(master, dialog)
     dialog.grab_set()
     body = ttk.Frame(dialog, padding=14)
     body.pack(fill="both", expand=True)
@@ -3343,7 +3344,7 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
     window = tk.Toplevel(parent)
     window.title("编辑VM目标" if target else "添加VM目标")
     window.geometry("520x350")
-    window.transient(parent)
+    attach_dialog(parent, window)
     window.grab_set()
     body = ttk.Frame(window, padding=14)
     body.pack(fill="both", expand=True)
@@ -5641,23 +5642,168 @@ def tunnel_text(_item=None) -> str:
     return t("VM隧道：") + f"{connected}/{len(targets)}"
 
 
-def version_text(_item=None) -> str:
-    """托盘上的 ReMe 版本行。顺便把上次「检查更新」的结论带出来。
+def attach_dialog(parent, dialog) -> None:
+    """把对话框挂到父窗口上 —— **只在父窗口真的可见时才挂**。
 
-    气泡会被系统的专注助手吞掉，所以结论必须落在这行上才算真的看得见。
+    Tk 的规矩：master 处于 withdrawn 状态时，设成它 transient 的 Toplevel 会**跟着被
+    withdraw**，而且 `deiconify()` 也救不回来。实测三个变体（master 为隐藏根窗口）：
+
+        transient(parent)              → ismapped=0  viewable=0  state=withdrawn
+        不设 transient                 → ismapped=1  viewable=1  state=normal
+        transient + deiconify()        → ismapped=0  viewable=0  state=withdrawn
+
+    本应用的常驻根窗口**一直是隐藏的**（它只当 Tk 解释器用，见 ui_thread_main），而控制台
+    没开着时 `ui_parent()` 返回的正是它 —— 所以「无脑 transient」的后果就是**对话框永不
+    显示**，用户点了菜单什么都不出现。transient 只是「置顶于父窗口 + 不进任务栏」的
+    锦上添花，父窗口不可见时它毫无意义，因此直接跳过。
     """
+    try:
+        if parent is not None and parent.winfo_exists() and parent.winfo_viewable():
+            dialog.transient(parent)
+    except tk.TclError:
+        pass
+
+
+def ui_dialog(title: str, message: str, buttons: list[tuple[str, object]]) -> None:
+    """模态对话框：标题 + 正文 + 按钮组（每个按钮 = 文案 + 回调，回调可为 None）。
+
+    用在**用户主动发起、并且会等着看结果**的动作上（检查更新、执行更新）。这类动作用
+    气泡不合适：气泡会被系统的专注助手吞掉；而「已经是最新」本来就没有别的反馈，
+    用户只会以为点了没反应。更新成功尤其如此——进程马上就要退出，气泡根本来不及被看见
+    （实测用户就是因为这个以为更新失败了）。右键菜单项照旧保留，只是结论走对话框。
+    """
+    def build() -> None:
+        parent = ui_parent()
+        dialog = tk.Toplevel(parent)
+        dialog.title(f"{t(APP_NAME)} · {title}")
+        attach_dialog(parent, dialog)
+        dialog.resizable(False, False)
+        body = ttk.Frame(dialog, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=message, font=FONT_UI, wraplength=460,
+                  justify="left").pack(anchor="w", fill="x")
+        row = ttk.Frame(body)
+        row.pack(fill="x", pady=(16, 0))
+
+        def pick(action) -> None:
+            dialog.destroy()
+            if callable(action):
+                action()
+
+        for label, action in reversed(buttons):
+            ttk.Button(row, text=label,
+                       command=lambda a=action: pick(a)).pack(side="right", padx=(6, 0))
+        dialog.update_idletasks()
+        dialog.grab_set()
+        dialog.focus_force()
+
+    ui_post(build)
+
+
+def reme_version_text(_item=None) -> str:
+    """ReMe（服务）版本行。只反映 ReMe **自己**的更新结论。"""
     version = reme_versions().get("reme-ai", "")
     if not version:
         return t("ReMe版本：") + t("未安装")
     text = t("ReMe版本：") + version
-    if UPDATE_STATE.get("checked_for") != version:
+    if REME_UPDATE_STATE.get("checked_for") != version:
         return text
-    if UPDATE_STATE.get("error"):
+    if REME_UPDATE_STATE.get("error"):
         return text + t("（检查更新失败）")
-    latest = str(UPDATE_STATE.get("latest") or "")
+    latest = str(REME_UPDATE_STATE.get("latest") or "")
     if latest and version_is_newer(latest, version):
         return text + t("（有新版 ") + latest + "）"
     return text + t("（已是最新）")
+
+
+def helper_version_text(_item=None) -> str:
+    """ReMe 助手自己的版本行 —— 以前它和 ReMe 的结论共用一份状态，两件事混成一句。"""
+    text = t("ReMe助手版本：") + VERSION
+    if not HELPER_UPDATE_STATE.get("checked"):
+        return text
+    if HELPER_UPDATE_STATE.get("detail"):
+        return text + t("（检查更新失败）")
+    if HELPER_UPDATE_STATE.get("newer"):
+        return text + t("（有新版 ") + str(HELPER_UPDATE_STATE.get("latest") or "") + "）"
+    return text + t("（已是最新）")
+
+
+def tray_check_reme_update() -> None:
+    """托盘「检查 ReMe 更新…」：后台查询，结论用对话框呈现。"""
+    def work() -> None:
+        current = reme_versions().get("reme-ai", "")
+        ok, detail = check_reme_update()
+        if not ok:
+            ui_dialog(t("检查 ReMe 更新"), detail,
+                      [(t("复制 ReMe 更新步骤（交给 AI 执行）"), copy_upgrade_prompt_from_tray),
+                       (t("关闭"), None)])
+            return
+        latest = str(REME_UPDATE_STATE.get("latest") or "")
+        if latest and version_is_newer(latest, current):
+            ui_dialog(t("检查 ReMe 更新"),
+                      t("ReMe 有新版本 ") + latest + t("（本机 ") + current + t("）。") + "\n\n"
+                      + t("更新 ReMe 会动配置、依赖与配套工具，所以由 AI 按步骤执行："
+                          "点下面的按钮复制提示词，粘贴给 AI 即可。"),
+                      [(t("复制 ReMe 更新步骤（交给 AI 执行）"), copy_upgrade_prompt_from_tray),
+                       (t("稍后"), None)])
+        else:
+            ui_dialog(t("检查 ReMe 更新"),
+                      t("ReMe 已是最新版本（") + current + t("）。"),
+                      [(t("好"), None)])
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def tray_check_helper_update() -> None:
+    """托盘「检查 ReMe 助手更新…」：后台查询，结论用对话框呈现。"""
+    def work() -> None:
+        ok, detail = check_helper_update()
+        if not ok:
+            ui_dialog(t("检查 ReMe 助手更新"), detail,
+                      [(t("复制 ReMe 助手更新步骤（交给 AI 执行）"),
+                        copy_helper_upgrade_prompt_from_tray),
+                       (t("关闭"), None)])
+            return
+        if not HELPER_UPDATE_STATE.get("newer"):
+            ui_dialog(t("检查 ReMe 助手更新"), t("已是最新版本") + f"（{VERSION}）",
+                      [(t("好"), None)])
+            return
+        latest = str(HELPER_UPDATE_STATE.get("latest") or "")
+        ui_dialog(t("检查 ReMe 助手更新"),
+                  t("有新版本 ") + latest + t("（本机 ") + VERSION + t("）。") + "\n\n"
+                  + t("点「立即更新」会自动下载、校验，把当前版本留在 _backup，然后重启。"),
+                  [(t("立即更新"), run_helper_update),
+                   (t("稍后"), None)])
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def run_helper_update() -> None:
+    """下载 → 校验 → 交给独立进程替换，然后本进程退出。结论全程走对话框。"""
+    left = {"done": False}
+
+    def leave() -> None:
+        if left["done"]:
+            return
+        left["done"] = True
+        if TRAY_ICON is not None:
+            shutdown_tray(TRAY_ICON)
+
+    def work() -> None:
+        ok, detail = download_and_apply_helper_update()
+        if not ok:
+            ui_dialog(t("更新 ReMe 助手"), detail,
+                      [(t("复制 ReMe 助手更新步骤（交给 AI 执行）"),
+                        copy_helper_upgrade_prompt_from_tray),
+                       (t("关闭"), None)])
+            return
+        ui_dialog(t("更新 ReMe 助手"),
+                  detail + "\n\n" + t("替换完成后新版本会自己启动；点「立即重启」马上开始。"),
+                  [(t("立即重启"), leave)])
+        # 没人点也要走：更新器正等着这个进程退出才能替换文件。
+        threading.Timer(30.0, leave).start()
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def copy_upgrade_prompt_from_tray() -> None:
@@ -5790,26 +5936,29 @@ def build_menu() -> pystray.Menu:
         # 分组顺序 = 使用频率：状态(只读) → 控制台 → 服务 → VM 隧道 → 打开 → 设置 → 退出。
         # 每个区内部也按常用度排；「未检测到 ReMe」只在该出现的时候出现。
         pystray.MenuItem(status_text, None, enabled=False),
-        pystray.MenuItem(version_text, None, enabled=False),
+        # 两个版本行分开：ReMe（服务）在前，ReMe 助手（本工具）在后。
+        # 以前只有一行「ReMe版本」，助手的更新结论也被贴在上面，两件事混成一句。
+        pystray.MenuItem(reme_version_text, None, enabled=False),
+        pystray.MenuItem(helper_version_text, None, enabled=False),
         pystray.MenuItem(mode_text, None, enabled=False),
         pystray.MenuItem(tunnel_text, None, enabled=False),
         pystray.Menu.SEPARATOR,
-        # 版本行下面紧跟这两个：它们的结果正好显示在版本行上（只提示，不自动升级）
-        pystray.MenuItem(menu_text("检查 ReMe 更新"),
-                         lambda _icon, _item: run_action(check_reme_update),
+        # 分区与版本行同序：先 ReMe，再 ReMe 助手；每区最后一项都是「交给 AI」的兜底。
+        # 检查与更新都弹对话框（用户主动点了这一项，他会等着看结果）。
+        pystray.MenuItem(menu_text("检查 ReMe 更新…"),
+                         lambda _icon, _item: tray_check_reme_update(),
                          enabled=lambda _item: reme_installed()),
-        # 助手自己的更新：同样只提示不自动。查到有新版之后第二项才可点；
-        # 点了会下载、校验、把替换交给独立进程，然后本进程退出。
-        pystray.MenuItem(menu_text("检查 ReMe 助手更新"),
-                         lambda _icon, _item: run_action(check_helper_update)),
-        pystray.MenuItem(menu_text("下载并更新 ReMe 助手"),
-                         lambda _icon, _item: run_action(update_helper_from_tray, refresh=False),
-                         enabled=lambda _item: bool(UPDATE_STATE.get("newer"))),
-        pystray.MenuItem(menu_text("复制助手更新步骤（交给 AI 执行）"),
-                         lambda _icon, _item: copy_helper_upgrade_prompt_from_tray()),
-        pystray.MenuItem(menu_text("复制更新步骤（交给 AI 执行）"),
+        pystray.MenuItem(menu_text("复制 ReMe 更新步骤（交给 AI 执行）"),
                          lambda _icon, _item: copy_upgrade_prompt_from_tray(),
                          enabled=lambda _item: reme_installed()),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(menu_text("检查 ReMe 助手更新…"),
+                         lambda _icon, _item: tray_check_helper_update()),
+        pystray.MenuItem(menu_text("下载并更新 ReMe 助手"),
+                         lambda _icon, _item: run_helper_update(),
+                         enabled=lambda _item: bool(HELPER_UPDATE_STATE.get("newer"))),
+        pystray.MenuItem(menu_text("复制 ReMe 助手更新步骤（交给 AI 执行）"),
+                         lambda _icon, _item: copy_helper_upgrade_prompt_from_tray()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("ReMe 控制台…"), lambda _icon, _item: show_settings(), default=True),
         pystray.Menu.SEPARATOR,
@@ -6104,7 +6253,12 @@ HELPER_UPDATE_BACKUP = LOCAL_DATA_DIR / "_backup"
 # 等旧进程退出的上限：120 次 × 约 1 秒（`ping -n 2` 的节奏）
 HELPER_UPDATE_WAIT = 120
 
-UPDATE_STATE: dict = {"checked": False, "latest": "", "newer": False, "detail": ""}
+# ReMe 助手自己的更新状态。**必须与 REME_UPDATE_STATE 分开**：这两个字典以前都叫
+# UPDATE_STATE，后者在模块加载时把前者覆盖掉，于是两个检查共用一份 `latest`——
+# 查完 ReMe 再查助手，助手的新版本号会显示在 **ReMe 版本行**上（用户看到
+# 「ReMe版本：0.4.1.11（有新版 v1.0.12）」），而两条升级提示词也会互相拿到对方的
+# 版本号当作升级目标。
+HELPER_UPDATE_STATE: dict = {"checked": False, "latest": "", "newer": False, "detail": ""}
 
 # .bat 模板。**ASCII-only**：cmd.exe 按机器 ANSI 代码页解析 .bat，中文注释会变乱码甚至
 # 吃掉命令（build.bat 顶上写着同一条纪律）。解释一律留在 Python 侧。
@@ -6196,10 +6350,10 @@ def check_helper_update() -> tuple[bool, str]:
     try:
         latest = helper_latest_release()
     except Exception as exc:  # noqa: BLE001 - 网络问题不该弄崩托盘
-        UPDATE_STATE.update(checked=True, latest="", newer=False, detail=str(exc))
+        HELPER_UPDATE_STATE.update(checked=True, latest="", newer=False, detail=str(exc))
         return False, t("检查更新失败：") + str(exc)
     newer = parse_version(latest["tag"]) > parse_version(VERSION)
-    UPDATE_STATE.update(checked=True, latest=latest["tag"], newer=newer, detail="")
+    HELPER_UPDATE_STATE.update(checked=True, latest=latest["tag"], newer=newer, detail="")
     if newer:
         return True, t("有新版本，点「下载并更新」会自动替换并重启") + f"（{latest['tag']}）"
     return True, t("已是最新版本") + f"（{VERSION}）"
@@ -6259,14 +6413,6 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
 
 
-def update_helper_from_tray() -> tuple[bool, str]:
-    """托盘动作：更新一旦交出去，就把自己关掉 —— 剩下的由 updater 接手。"""
-    ok, detail = download_and_apply_helper_update()
-    if ok and TRAY_ICON is not None:
-        threading.Timer(1.5, lambda: shutdown_tray(TRAY_ICON)).start()
-    return ok, detail
-
-
 def helper_upgrade_prompt(target: str = "") -> str:
     """给 AI 的**助手自己**更新提示词：两段式 —— 先只分析回报，等用户说「执行」才动手。
 
@@ -6274,7 +6420,7 @@ def helper_upgrade_prompt(target: str = "") -> str:
     但**不能互相复用**：牵动的东西、回滚方式都不一样。
     """
     root = str(APP_DIR)
-    latest = (target or UPDATE_STATE.get("latest")
+    latest = (target or HELPER_UPDATE_STATE.get("latest")
               or t("（还没查过，请自行查 GitHub Releases 的最新 tag）"))
     running = t("运行中") if service_is_healthy() else t("已停止")
     return "\n".join([
