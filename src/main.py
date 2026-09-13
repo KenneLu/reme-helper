@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.16"
+VERSION = "1.0.17"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -6867,6 +6867,31 @@ def utf8_diag_streams() -> None:
 TRAY_ADD_STATE: dict = {"result": None, "error": 0}
 
 
+def install_unique_tray_uid() -> None:
+    """**已证伪的假设，保留在代码里作为记录 —— 不要调用它。**
+
+    假设：pystray 把 `hID = id(self)` 写死（`_win32.py:340`），而 `id()` 确定 ⇒
+    每次运行的 hID 相同 ⇒ 外壳按 (路径, hID) 缓存的那条记录会与第二次注册相撞。
+
+    实测结果（同一路径连跑四次，每次都正常 `--quit`）：
+
+        run 1: NIM_ADD -> 1     run 2: -> 0     run 3: -> 0     run 4: -> 0
+
+    **与修复前一模一样。** 换用「每次运行都不同」的 hID 完全没有改变行为，所以
+    缓存键**不是** (路径, uID)。假设作废，函数不再被调用。
+
+    顺带得到一个真实的教训：把 `win32.NOTIFYICONDATAW` 换成普通函数会让
+    `ctypes.sizeof()` 抛 `TypeError: this type has no size`，`setup()` 于是在
+    `visible = True` 里炸掉 —— 表现是"进程在跑、图标从未出现"，比原 bug 更难查。
+    必须子类化结构体（保留布局与 sizeof），而不是替换它。
+
+    目前已知的全部事实：失败时 `GetLastError` = `0x80004005` (E_FAIL)，即外壳给的
+    是一句无具体原因的失败；**每次新路径的第一次注册成功、之后必失败**（两条路径、
+    八次运行，无一例外）。在拿到比 E_FAIL 更具体的原因之前，不再猜。
+    """
+    raise NotImplementedError("disproven - see the docstring")
+
+
 def install_tray_trace() -> None:
     """把托盘的每一次通知写进日志。
 
@@ -7043,6 +7068,7 @@ def main() -> int:
         if CFG.get("start_on_launch") and not service_is_healthy():
             run_action(start_service)
 
+    # install_unique_tray_uid() 已证伪，不再调用（见它的 docstring）
     install_tray_trace()
     TRAY_ICON.run(setup=setup)
     # 正常情况走不到这里（run() 一直循环到退出）。真出现了，说明消息循环已经结束、
