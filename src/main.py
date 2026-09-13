@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -3258,6 +3258,36 @@ def toggle_autostart(_icon, _item) -> None:
     set_autostart(enabled)
     CFG["autostart"] = enabled
     save_config()
+
+
+def sync_autostart_path() -> None:
+    """自启开着的时候，把 Run 值指回**当前这个** exe。
+
+    1.0.6 的 exe 带版本号，所以它的自启值是
+    ``...\\reme-helper-1.0.6\\reme-helper-1.0.6.exe``。把新版**解压覆盖**到那个
+    目录（不是走更新器，而是手动替换）之后，那个文件就没了，值变成悬空——而
+    没有任何东西会去重写它：`set_autostart()` 只在用户点菜单切换时才跑。结果是
+    下次开机静默失效，用户只会觉得"自启莫名其妙坏了"。
+
+    幂等且便宜：只在自启开着、且存的值不是当前 exe 时才写。顺带也修好"整个文件夹
+    被移动/改名"的情况。路径来源与 `set_autostart` 一致，都是 `sys.executable`。
+    """
+    if os.name != "nt" or not CFG.get("autostart"):
+        return
+    try:
+        import winreg
+
+        current = str(Path(sys.executable).resolve())
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+            try:
+                stored, _ = winreg.QueryValueEx(key, APP_ID)
+            except FileNotFoundError:
+                stored = ""
+            if str(stored).strip('"') != current:
+                winreg.SetValueEx(key, APP_ID, 0, winreg.REG_SZ, f'"{current}"')
+                log(f"autostart path repaired: {stored!r} -> {current!r}")
+    except OSError as exc:  # noqa: BLE001 - 自启修不好也不该拦住托盘
+        log(f"autostart path repair failed: {exc}")
     if TRAY_ICON:
         refresh_tray_menu()
 
@@ -6602,6 +6632,7 @@ def main() -> int:
     if not acquire_single_instance():
         warn_duplicate_instance()
         return 0
+    sync_autostart_path()
     refresh_service_state()
     seed_tunnels_wanted()
     refresh_tunnels()
