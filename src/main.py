@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.13"
+VERSION = "1.0.14"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -3272,8 +3272,14 @@ def sync_autostart_path() -> None:
 
     幂等且便宜：只在自启开着、且存的值不是当前 exe 时才写。顺带也修好"整个文件夹
     被移动/改名"的情况。路径来源与 `set_autostart` 一致，都是 `sys.executable`。
+
+    ⚠️ **只在打包态修**：从源码跑（`python src\\main.py`）时 `sys.executable` 是
+    python.exe，照做会把自启值改成 python.exe —— 实测踩过一次。开发态没有"安装位置"
+    这个概念，本就不该动它。
     """
     if os.name != "nt" or not CFG.get("autostart"):
+        return
+    if not getattr(sys, "frozen", False):
         return
     try:
         import winreg
@@ -6096,7 +6102,10 @@ def monitor_loop() -> None:
             log(f"state changed {before.get('phase')} -> {after.get('phase')}")
         if TRAY_ICON is not None:
             icon_state = (bool(after["healthy"]), any(TUNNEL_STATE.values()))
-            if icon_state != last_icon:
+            # 图标还没注册进外壳时改它没有意义：pystray 会发 NIM_MODIFY，而外壳里还没有
+            # 这条记录，必然返回失败。**不要在 visible 之前更新 last_icon**，否则这一轮
+            # 的比对结果被吃掉，真正生效的那次就永远不来了。
+            if icon_state != last_icon and TRAY_ICON.visible:
                 last_icon = icon_state
                 TRAY_ICON.icon = make_icon(*icon_state)
             signature = tray_signature()
@@ -6788,8 +6797,97 @@ def utf8_diag_streams() -> None:
             pass
 
 
+def install_tray_trace() -> None:
+    """把托盘的每一次通知写进日志。
+
+    为什么需要：托盘「点了没反应」有两种**从外面看一模一样**的原因 ——
+
+      ① 外壳根本没把点击投递给本进程。最典型的是点在了**残留的幽灵图标**上：那个进程
+         早就没了，图标却还留在通知区里（Windows 10 的图标缓存 `IconStreams` 会留住
+         它），直到鼠标划过才可能被清掉。
+      ② 点击到了，但菜单没弹出来。pystray 弹菜单前必须先 `SetForegroundWindow`
+         （win32 后端 `_on_notify`），而 Windows 的前台锁定会让它失败；失败时
+         `TrackPopupMenuEx` 立刻返回 0，表现为「右键毫无反应」。
+
+    区分这两者只能靠**到达即记录**。日志量可忽略：一次用户交互一行。
+    只包 win32 后端，且可重入（装两次不会套两层）。
+    """
+    try:
+        import pystray._win32 as backend
+    except Exception as exc:  # noqa: BLE001 - 非 win32 后端就不装
+        log(f"tray trace: unavailable ({type(exc).__name__}: {exc})")
+        return
+    original = backend.Icon._on_notify
+    if getattr(original, "_reme_traced", False):
+        return
+    kinds = {0x0202: "left-click", 0x0205: "right-click",
+             0x0400: "NIN_SELECT", 0x0401: "NIN_KEYSELECT"}
+
+    def traced(self, wparam, lparam):
+        try:
+            menu = "ok" if self._menu_handle else "MISSING"
+        except Exception:  # noqa: BLE001
+            menu = "?"
+        log(f"tray notify: lparam=0x{lparam:X} ({kinds.get(lparam, 'other')}) menu={menu}")
+        result = original(self, wparam, lparam)
+        try:
+            import ctypes
+            fg = int(ctypes.windll.user32.GetForegroundWindow() or 0)
+            ours = int(getattr(self, "_hwnd", 0) or 0)
+            log(f"tray notify: handled; foreground=0x{fg:X} tray=0x{ours:X} "
+                f"{'ok' if fg == ours else 'NOT-FOREGROUND (menu would fail)'}")
+        except Exception:  # noqa: BLE001
+            pass
+        return result
+
+    traced._reme_traced = True
+    backend.Icon._on_notify = traced
+
+    # 另一半：**`Shell_NotifyIcon` 的返回值被 pystray 丢掉了**（它的 `_message` 只调用、
+    # 不看结果）。于是 NIM_ADD 失败时没有任何异常：窗口照建、注入消息照样能弹出菜单，
+    # 但外壳里根本没有这个图标 —— 真实点击无处可去，日志也一片安静。
+    # 包住那个 Win32 函数，把每次调用的结果写下来。
+    try:
+        win32 = backend.win32
+        original_notify = win32.Shell_NotifyIcon
+        codes = {0: "NIM_ADD", 1: "NIM_MODIFY", 2: "NIM_DELETE",
+                 3: "NIM_SETFOCUS", 4: "NIM_SETVERSION"}
+
+        state = {"added": False}
+
+        def traced_notify(code, data):
+            result = original_notify(code, data)
+            if code == 0:                                   # NIM_ADD
+                state["added"] = bool(result)
+                log(f"tray: Shell_NotifyIcon(NIM_ADD) -> {result}"
+                    + ("" if result else
+                       "   <-- FAILED, no icon in the tray (real clicks cannot reach us)"))
+            elif code == 2:                                 # NIM_DELETE
+                state["added"] = False
+                log(f"tray: Shell_NotifyIcon(NIM_DELETE) -> {result}")
+            elif not result and state["added"]:
+                # 注册成功之后的失败才是真问题。首次显示前的那一次 NIM_MODIFY 失败是
+                # **pystray 自己的前奏**（`_base.visible` setter：`_icon_valid` 为假时先
+                # `_update_icon()` 再 `_show()`），此时外壳里还没有这条记录，失败是必然的，
+                # 不该记成故障 —— 否则每次启动都有一行吓人的假警报。
+                import traceback
+                frames = traceback.extract_stack()[:-1][-3:]
+                where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(frames))
+                log(f"tray: Shell_NotifyIcon({codes.get(code, code)}) -> 0 FAILED from {where}")
+            return result
+
+        traced_notify._reme_traced = True
+        win32.Shell_NotifyIcon = traced_notify
+        log("tray trace: Shell_NotifyIcon instrumented")
+    except Exception as exc:  # noqa: BLE001
+        log(f"tray trace: Shell_NotifyIcon not instrumented ({type(exc).__name__}: {exc})")
+
+    log("tray trace installed")
+
+
 def main() -> int:
     global TRAY_ICON
+    started = time.monotonic()
     enable_dpi_awareness()
     apply_theme()
     utf8_diag_streams()
@@ -6846,16 +6944,24 @@ def main() -> int:
     # 启动后 20 多秒内**没有任何托盘图标**（详见 monitor_loop 的说明）。
     TRAY_ICON = pystray.Icon(APP_ID, make_icon(STATE["healthy"], any(TUNNEL_STATE.values())),
                              t(APP_NAME), build_menu())
+    log(f"tray: icon created (elapsed {time.monotonic() - started:.2f}s)")
     threading.Thread(target=monitor_loop, daemon=True).start()
     threading.Thread(target=menu_refresh_loop, daemon=True).start()
     threading.Thread(target=quit_watch_loop, daemon=True).start()
 
     def setup(icon):
         icon.visible = True
+        # 这一行是「托盘图标真的注册进外壳了」的证据。启动路径上任何一处变慢，
+        # 都能从它与上一行的时间差看出来（详见 monitor_loop 的说明）。
+        log(f"tray: icon shown (elapsed {time.monotonic() - started:.2f}s)")
         if CFG.get("start_on_launch") and not service_is_healthy():
             run_action(start_service)
 
+    install_tray_trace()
     TRAY_ICON.run(setup=setup)
+    # 正常情况走不到这里（run() 一直循环到退出）。真出现了，说明消息循环已经结束、
+    # 进程却还活着 —— 那就是「图标还在、点什么都没反应」的另一种成因。
+    log("tray: message loop ended")
     return 0
 
 
