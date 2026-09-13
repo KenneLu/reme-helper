@@ -9,6 +9,12 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    # Everything in this job prints Chinese (suite names, failure details, the
+    # app's own messages). A hosted runner's stdout is a pipe, so Python would
+    # otherwise encode it as the locale default (cp1252) and die on the first
+    # non-ASCII print before reporting anything.
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +22,10 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      # The suites check a real ReMe install, not a mock: put one where the app
+      # expects it before running anything. See the action for the details.
+      - uses: ./.github/actions/setup-reme
 
       - name: Install dependencies
         run: |

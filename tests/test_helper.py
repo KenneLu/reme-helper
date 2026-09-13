@@ -17,8 +17,8 @@ original = main.deep_copy(main.CFG)
 try:
     with tempfile.TemporaryDirectory(prefix="reme-helper-test-") as temp:
         # 显式固定能力集再断言。下面几条断言描述的是「auto_memory 开 / CC 关 / 资料关 /
-        # dream 开 / chat 关 / embedding 关」这一种组合的生成结果；不能依赖本机
-        # config.json 恰好是那个形状——build.bat 会把源码目录的 config.json 打进新包，
+        # dream 开 / chat 关 / embedding 关」这一种组合的生成结果；不能依赖本机那份
+        # config.json 恰好是那个形状——它住在用户数据目录里（见 seed_config），
         # 用户正常改一次设置就会把构建打挂。
         main.CFG["custom"].update(
             auto_memory=True, auto_memory_cc=False, auto_resource=False, auto_dream=True,
@@ -395,8 +395,11 @@ with _tempfile.TemporaryDirectory() as temp:
     (fake / "venv" / "Lib" / "site-packages" / "reme").mkdir(parents=True)
     assert main.looks_like_reme_install(fake) is True, "python + reme 包也算安装"
 
-found = [str(path) for path in main.scan_reme_installations()]
-assert str(main.reme_root()) in found, found  # 本机已安装，扫描必须能找到
+# 扫描返回的是**解析后**的路径（scan_reme_installations 里 resolve 过），所以这里也
+# 按解析后的路径比较：根目录本身可能是个映射盘或链接（CI 用 subst 造出 H:\Tools\ReMe，
+# 解析回来就是它的真实目标），按字符串比会假红。
+found = [Path(path).resolve() for path in main.scan_reme_installations()]
+assert main.reme_root().resolve() in found, found  # 本机已安装，扫描必须能找到
 
 draft = {"llm": {"base_url": "http://kept/v1", "model": ""},
          "embedding": {"base_url": "", "model": "text-embedding-v4"}}
@@ -549,11 +552,16 @@ _fake_key = main.target_key(_fake_target)
 _saved_targets = main.CFG["targets"]
 _saved_tunnels_on = main.CFG.get("start_tunnels_with_reme")
 _saved_up = main.service_up
+_saved_probe = main.probe_health
 _saved_command = main.ssh_command
 
 main.CFG["targets"] = [_fake_target]
 main.ssh_command = lambda target, remote=None: ["cmd", "/c", "exit", "1"]   # 起不来，但会被尝试
 main.service_up = lambda timeout=3.0: True                                  # 假装 ReMe 可用
+# start_tunnel 里还有一道自己的健康检查（真的去问 127.0.0.1:2333），refresh_tunnels 那道
+# service_up 管不着它：本机 ReMe 正在跑，以前这道"顺手"就过了；没有服务在跑的机器（CI）
+# 会在 start_tunnel 里被「ReMe尚未运行」挡回去，第 4 条断言于是假红。一并假装它在跑。
+main.probe_health = lambda *_args, **_kwargs: True
 
 # 1. 打开「随 ReMe 启动隧道」时，启用的目标应被播种为「希望连着」
 main.TUNNEL_WANTED.clear()
@@ -604,6 +612,7 @@ assert not started, "从未要求连接的隧道不该被自动拉起"
 main.CFG["targets"] = _saved_targets
 main.CFG["start_tunnels_with_reme"] = _saved_tunnels_on
 main.service_up = _saved_up
+main.probe_health = _saved_probe
 main.ssh_command = _saved_command
 main.TUNNEL_PROCS.clear()
 main.TUNNEL_STATE.clear()

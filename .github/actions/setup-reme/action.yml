@@ -1,0 +1,59 @@
+name: Set up ReMe
+description: >-
+  Install the ReMe package where reme-helper looks for it (H:\Tools\ReMe), so the
+  test suites and the packaged gates have an install to check against.
+
+# Why this exists
+# ---------------
+# The suites and the frozen gates are integration checks, not pure unit tests.
+# They read the official config from
+#     <root>\venv\Lib\site-packages\reme\config\default.yaml
+# run <root>\venv\Scripts\python.exe to read the installed package version, and
+# require <root>\venv\Scripts\reme.exe to exist. On a developer machine
+# H:\Tools\ReMe is already there; on a clean runner it is not - which is exactly
+# how the first CI run failed (FileNotFoundError: 官方default配置不存在).
+#
+# The default root is the literal path H:\Tools\ReMe, so the runner needs an H:
+# drive. subst gives it one without changing the application.
+#
+# No gate ever starts the ReMe service, so the package is installed without its
+# "core" extra (that extra pulls faiss, polars, neo4j, agentscope and more).
+# Keep REME_VERSION in step with the ReMe on the developer's machine: the app
+# derives its three configs from that exact default.yaml, so a version gap is a
+# gap in what CI proves.
+
+runs:
+  using: composite
+  steps:
+    - name: Install ReMe into H:\Tools\ReMe
+      shell: pwsh
+      env:
+        REME_VERSION: "0.4.1.11"
+      run: |
+        $ErrorActionPreference = "Stop"
+        New-Item -ItemType Directory -Force -Path C:\reme-root-drive | Out-Null
+        subst H: C:\reme-root-drive
+        New-Item -ItemType Directory -Force -Path H:\Tools\ReMe | Out-Null
+        python -m venv H:\Tools\ReMe\venv
+        H:\Tools\ReMe\venv\Scripts\python.exe -m pip install --upgrade pip
+        H:\Tools\ReMe\venv\Scripts\python.exe -m pip install "reme-ai==$env:REME_VERSION"
+
+    # Preflight, in the spirit of "a third-party tool should prove it is usable
+    # before the user finds out it is not": assert the three things the app
+    # actually touches, so a broken install names itself instead of surfacing
+    # later as a FileNotFoundError inside a test suite.
+    - name: Verify the install satisfies the app's checks
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $root = "H:\Tools\ReMe"
+        foreach ($needed in @(
+          "$root\venv\Scripts\python.exe",
+          "$root\venv\Scripts\reme.exe",
+          "$root\venv\Lib\site-packages\reme\config\default.yaml"
+        )) {
+          if (-not (Test-Path $needed)) { throw "ReMe install is incomplete: $needed is missing" }
+        }
+        $version = & "$root\venv\Scripts\python.exe" -c "import importlib.metadata; print(importlib.metadata.version('reme-ai'))"
+        if ($LASTEXITCODE -ne 0 -or -not $version) { throw "the venv Python cannot report the reme-ai version" }
+        Write-Host "ReMe $version installed at $root"

@@ -5,6 +5,16 @@ name: release
 # and the license. The tagging convention matches CHANGELOG.md sections.
 #
 #   git tag v<version> && git push origin v<version>   (release.bat does this)
+#
+# The two triggers are deliberately NOT equivalent:
+#   * tag push -> build, verify, and PUBLISH a GitHub Release
+#   * manual   -> build and upload the artifact only, never publish
+# The second half is already enforced by the "Publish GitHub Release" step, which
+# is gated on refs/tags/v. run-name makes the difference visible in the Actions
+# list, so a manual run cannot be mistaken for a release.
+
+# Manual runs are a dry run, and the run name says so.
+run-name: ${{ startsWith(github.ref, 'refs/tags/v') && format('release {0}', github.ref_name) || 'build only (no release)' }}
 
 on:
   push:
@@ -18,6 +28,11 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    # build.bat runs the suites as gates and the frozen exe as checks; both print
+    # Chinese. A hosted runner's stdout is a pipe, so without this Python encodes
+    # it as the locale default (cp1252) and dies on the first non-ASCII print.
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +40,10 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      # build.bat runs the suites and the frozen gates, all of which read a real
+      # ReMe install (exe, venv Python, official default.yaml). See the action.
+      - uses: ./.github/actions/setup-reme
 
       - name: Read version from src/main.py
         id: version
@@ -50,7 +69,10 @@ jobs:
         run: |
           $pkg = "${{ steps.version.outputs.package }}"
           $dir = "release/$pkg"
-          if (-not (Test-Path "$dir/$pkg.exe")) { throw "build produced no exe in $dir" }
+          # The folder and the zip keep the version; the exe inside does not (D3:
+          # the autostart registry value stores the full path to the exe, so a
+          # versioned name would strand it on every in-place update).
+          if (-not (Test-Path "$dir/reme-helper.exe")) { throw "build produced no exe in $dir" }
           Compress-Archive -Path "$dir/*" -DestinationPath "release/$pkg-windows-x64.zip"
           Get-FileHash "release/$pkg-windows-x64.zip" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $pkg-windows-x64.zip" } |
@@ -74,6 +96,6 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $pkg = "${{ steps.version.outputs.package }}"
-          $notes = "Windows package: unpack and run ``$pkg.exe``. See README.md for setup, CHANGELOG.md for what changed."
+          $notes = "Windows package: unpack and run ``reme-helper.exe``. See README.md for setup, CHANGELOG.md for what changed."
           gh release create $tag "release/$pkg-windows-x64.zip" "release/$pkg-windows-x64.zip.sha256" `
             --title "$pkg" --notes $notes

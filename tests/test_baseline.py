@@ -1,8 +1,8 @@
-"""测试共用基线：让测试脚本不依赖本机 config.json 的当前内容。
+r"""测试共用基线：让测试脚本不依赖本机 config.json 的当前内容。
 
-build.bat 会把源码目录的 config.json 打进新发布包，所以用户正常改一次设置之后，
-源码目录那份就不再是「干净的固定预设」了。而不少断言把固定预设当作基线——
-"回到基线"应当不可用、草稿与预设的折叠判定、公共参数与 PRESET_LLM /
+应用把配置放在**用户数据目录**（`%LOCALAPPDATA%\reme-helper\config.json`，见 `seed_config`），
+开发机上那份是会被改过的活配置；而导入 `main` 就会把它读进来。不少断言把出厂预设
+当作基线——"回到基线"应当不可用、草稿与预设的折叠判定、公共参数与 PRESET_LLM /
 PRESET_EMBEDDING / PRESET_PIPELINE 的比较——本机配置一旦带着改过的 llm 参数
 （例如 thinking_enable=true、reasoning_effort=max），构建就会挂在门禁上。
 
