@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.14"
+VERSION = "1.0.15"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -2879,8 +2879,10 @@ def notify(message: str) -> None:
     if TRAY_ICON:
         try:
             TRAY_ICON.notify(message, t(APP_NAME))
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 气泡发不出去不该影响动作本身，但必须留痕
+            # 以前这里是 `pass`：气泡失败完全无声。而 notify() 是所有托盘动作的反馈通道，
+            # 它坏掉的表现与"点了没反应"一模一样 —— 正是本次排查里最难分辨的那一类。
+            log(f"balloon failed: {type(exc).__name__}: {exc}")
 
 
 def run_action(function, refresh=True) -> None:
@@ -5706,6 +5708,25 @@ def ui_dialog(title: str, message: str, buttons: list[tuple[str, object]]) -> No
     ui_post(build)
 
 
+def warn_tray_registration_failed(error: int) -> None:
+    """托盘图标没能注册进通知区时，把这件事明确说出来。
+
+    这是「应用活着、用户却完全碰不到它」的那一类故障：进程正常、窗口正常、日志安静，
+    唯独通知区里没有它的图标 —— 点哪里都不会有反应。**不说出来，用户只能猜**，
+    而实测的代价是用户反复报告"点不动"、排查了三轮才靠新加的探针找到根因。
+    """
+    log(f"tray: registration FAILED, telling the user (GetLastError={error})")
+    ui_dialog(
+        t("托盘图标未能注册"),
+        t("系统拒绝了托盘图标的注册。程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。")
+        + "\n\n"
+        + t("常见原因是这条可执行文件路径的图标记录已经损坏（反复强制结束进程会留下幽灵图标，"
+            "之后该路径的注册会一直失败）。把程序换到一个新目录再运行，或者注销／重启一次，即可恢复。")
+        + f"\n\nGetLastError = {error}\n{LOG_PATH}",
+        [(t("好"), None)],
+    )
+
+
 def reme_version_text(_item=None) -> str:
     """ReMe（服务）版本行。只反映 ReMe **自己**的更新结论。"""
     version = reme_versions().get("reme-ai", "")
@@ -6281,6 +6302,7 @@ HELPER_UPDATE_BAT = r"""@echo off
 setlocal
 set "INSTALL={install}"
 set "STAGE={stage}"
+set "WORK={work}"
 set "BACKUP={backup}"
 set "LOG={log}"
 echo [{stamp}] start install=%INSTALL% backup=%BACKUP% >> "%LOG%"
@@ -6315,6 +6337,12 @@ goto cleanup
 :giveup
 echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
 :cleanup
+rem Delete the staging directory (the downloaded zip plus the extracted package).
+rem This script is the last thing that knows where it is, and it is about to delete
+rem itself - without this the whole package stays in %TEMP% forever (measured at
+rem ~50 MB per update). It sits in :cleanup, not on the success branch, so the
+rem "gave up waiting for the old process" path is covered too.
+if exist "%WORK%" rmdir /s /q "%WORK%"
 del "%POLL%" >nul 2>nul
 (goto) 2>nul & del "%~f0"
 """
@@ -6403,7 +6431,7 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     if not (stage / HELPER_EXE).is_file():
         return False, t("更新包里没有 ") + HELPER_EXE
     text = HELPER_UPDATE_BAT.format(
-        install=APP_DIR, stage=stage, backup=HELPER_UPDATE_BACKUP,
+        install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP,
         log=HELPER_UPDATE_LOG, exe=HELPER_EXE,
         limit=HELPER_UPDATE_WAIT, stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
     )
@@ -6420,6 +6448,29 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
         return False, t("启动更新程序失败：") + str(exc)
     log(f"update staged: {stage} -> {APP_DIR} (tag {latest['tag']}, bat {script})")
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
+
+
+def sweep_stale_update_dirs() -> None:
+    """清掉更新器遗留在 %TEMP% 里的暂存目录。
+
+    正常路径上更新器自己收尾（见 HELPER_UPDATE_BAT 的 :cleanup），但它可能在收尾前
+    被打断 —— 机器重启、进程被杀、bat 半路消失。那之后就没有任何东西知道那份**解压好的
+    整包**在哪了：实测每次更新约 50 MB，四轮下来在 %TEMP% 里积了 201 MB。
+
+    只动本应用自己命名的那一类（`<APP_ID>-update-*`），且只动**一小时前**的：正在进行的
+    更新，其暂存目录是刚建的，绝不能碰。
+    """
+    try:
+        cutoff = time.time() - 3600
+        for path in Path(tempfile.gettempdir()).glob(f"{APP_ID}-update-*"):
+            try:
+                if path.is_dir() and path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path, ignore_errors=True)
+                    log(f"removed stale update dir: {path}")
+            except OSError:
+                continue
+    except Exception as exc:  # noqa: BLE001 - 清扫失败不该拦住启动
+        log(f"stale update sweep failed: {exc}")
 
 
 def helper_upgrade_prompt(target: str = "") -> str:
@@ -6797,6 +6848,11 @@ def utf8_diag_streams() -> None:
             pass
 
 
+# NIM_ADD 的结果。注册失败时应用会陷入「活着但碰不到」的状态 —— 用户点哪里都没反应，
+# 而日志一片安静，所以必须主动告诉他（见 warn_tray_registration_failed）。
+TRAY_ADD_STATE: dict = {"result": None, "error": 0}
+
+
 def install_tray_trace() -> None:
     """把托盘的每一次通知写进日志。
 
@@ -6857,11 +6913,22 @@ def install_tray_trace() -> None:
 
         def traced_notify(code, data):
             result = original_notify(code, data)
+            # 必须**紧跟着**读 GetLastError：中间任何一次 Win32 调用（哪怕 log 的文件 I/O）
+            # 都会把它冲掉。
+            error = 0
+            if not result:
+                try:
+                    import ctypes as _ctypes
+                    error = int(_ctypes.windll.kernel32.GetLastError())
+                except Exception:  # noqa: BLE001
+                    error = -1
             if code == 0:                                   # NIM_ADD
                 state["added"] = bool(result)
+                TRAY_ADD_STATE.update(result=bool(result), error=error)
                 log(f"tray: Shell_NotifyIcon(NIM_ADD) -> {result}"
                     + ("" if result else
-                       "   <-- FAILED, no icon in the tray (real clicks cannot reach us)"))
+                       f"   <-- FAILED (GetLastError={error}), no icon in the tray:"
+                       " real clicks cannot reach us"))
             elif code == 2:                                 # NIM_DELETE
                 state["added"] = False
                 log(f"tray: Shell_NotifyIcon(NIM_DELETE) -> {result}")
@@ -6873,7 +6940,8 @@ def install_tray_trace() -> None:
                 import traceback
                 frames = traceback.extract_stack()[:-1][-3:]
                 where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(frames))
-                log(f"tray: Shell_NotifyIcon({codes.get(code, code)}) -> 0 FAILED from {where}")
+                log(f"tray: Shell_NotifyIcon({codes.get(code, code)}) -> 0 "
+                    f"(GetLastError={error}) FAILED from {where}")
             return result
 
         traced_notify._reme_traced = True
@@ -6935,6 +7003,7 @@ def main() -> int:
         warn_duplicate_instance()
         return 0
     sync_autostart_path()
+    sweep_stale_update_dirs()
     # 这两个是**快**的：本地健康探测与读配置。它们决定图标首帧和 setup() 里的
     # 「ReMe 启动后启动隧道」判断，所以留在同步路径上。
     refresh_service_state()
@@ -6954,6 +7023,9 @@ def main() -> int:
         # 这一行是「托盘图标真的注册进外壳了」的证据。启动路径上任何一处变慢，
         # 都能从它与上一行的时间差看出来（详见 monitor_loop 的说明）。
         log(f"tray: icon shown (elapsed {time.monotonic() - started:.2f}s)")
+        # 图标没注册进外壳 ⇒ 用户碰不到这个程序。不能只在日志里记一笔。
+        if TRAY_ADD_STATE.get("result") is False:
+            warn_tray_registration_failed(int(TRAY_ADD_STATE.get("error") or 0))
         if CFG.get("start_on_launch") and not service_is_healthy():
             run_action(start_service)
 

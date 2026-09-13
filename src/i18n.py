@@ -404,6 +404,16 @@ TEXT: list[tuple[str, str]] = [
      "and the app restarts."),
     ("替换完成后新版本会自己启动；点「立即重启」马上开始。",
      "The new version starts itself once the swap finishes; click \"Restart now\" to begin immediately."),
+    # ---- 托盘图标注册失败（见 main.warn_tray_registration_failed）----
+    ("托盘图标未能注册", "The tray icon could not be registered"),
+    ("系统拒绝了托盘图标的注册。程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。",
+     "The system refused to register the tray icon. The app is running, but it has no icon in the "
+     "notification area, so clicking anything will do nothing."),
+    ("常见原因是这条可执行文件路径的图标记录已经损坏（反复强制结束进程会留下幽灵图标，"
+     "之后该路径的注册会一直失败）。把程序换到一个新目录再运行，或者注销／重启一次，即可恢复。",
+     "Usually the icon record for this executable path has gone bad - force-killing the process "
+     "repeatedly leaves ghost icons behind, after which registration for that path keeps failing. "
+     "Move the app to a new directory and run it from there, or sign out / reboot once."),
     # ---- 助手自己的更新提示词（见 main.helper_upgrade_prompt）----
     ("复制 ReMe 助手更新步骤（交给 AI 执行）", "Copy ReMe Helper update steps (for an AI to run)"),
     ("（还没查过，请自行查 GitHub Releases 的最新 tag）",
