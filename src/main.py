@@ -6280,34 +6280,41 @@ def copy_helper_upgrade_prompt_from_tray() -> None:
 def smoke() -> int:
     output = DIAG_LOG_DIR / "smoke.log"
     output.parent.mkdir(parents=True, exist_ok=True)   # 发布包里没有 log/，必须自建
-    checks = []
+    # 具名检查，和 release_check 一致：失败时日志直接写出**哪一个**挂了。
+    # 以前是个裸的 True/False 列表，CI 上只留下 checks=[True, True, ...]，
+    # 定位失败项只能靠手数下标——第一次发版就是这么卡住的。
+    checks: list[tuple[str, bool]] = []
+
+    def check(name: str, value: object) -> None:
+        checks.append((name, bool(value)))
+
     try:
         cfg = load_config()
-        checks.append(cfg.get("mode") in MODE_NAMES)
-        checks.append(all(key in cfg.get("custom", {}) for key in FEATURES))
-        checks.append(all(key in cfg.get("llm", {}) for key in ("base_url", "model", "max_tokens", "thinking_enable", "reasoning_effort")))
-        checks.append(all(key in cfg.get("pipeline", {}) for key in ("scan_days", "max_units", "dream_cron")))
-        checks.append(all(key in cfg.get("embedding", {}) for key in ("base_url", "model", "dimensions", "probe_ok")))
-        checks.append(all(key in cfg.get("expose", {}) for key in ("custom", "jobs")))
-        checks.append(preset_features("minimal")["auto_dream"] is False and preset_features("full")["auto_dream"] is True)
-        checks.append(cron_echo("0 23 * * *").startswith("下次整理："))
-        checks.append(cron_echo("bad cron").startswith("cron 格式不正确"))
-        checks.append(bool(yaml.safe_load(official_default_path().read_text(encoding="utf-8"))))
+        check("mode known", cfg.get("mode") in MODE_NAMES)
+        check("custom keys", all(key in cfg.get("custom", {}) for key in FEATURES))
+        check("llm keys", all(key in cfg.get("llm", {}) for key in ("base_url", "model", "max_tokens", "thinking_enable", "reasoning_effort")))
+        check("pipeline keys", all(key in cfg.get("pipeline", {}) for key in ("scan_days", "max_units", "dream_cron")))
+        check("embedding keys", all(key in cfg.get("embedding", {}) for key in ("base_url", "model", "dimensions", "probe_ok")))
+        check("expose keys", all(key in cfg.get("expose", {}) for key in ("custom", "jobs")))
+        check("presets differ", preset_features("minimal")["auto_dream"] is False and preset_features("full")["auto_dream"] is True)
+        check("cron echo ok", cron_echo("0 23 * * *").startswith("下次整理："))
+        check("cron echo rejects", cron_echo("bad cron").startswith("cron 格式不正确"))
+        check("official default readable", bool(yaml.safe_load(official_default_path().read_text(encoding="utf-8"))))
         # 图标必须真的随包分发且找得到：否则窗口又会退回 Tk 的默认图标
-        checks.append(icon_path() is not None)
+        check("icon asset", icon_path() is not None)
         # 三种模式都要能从官方包推导出来：别人装了官方 ReMe 时 config/ 里一份都没有。
         # 全部写进临时目录，不去动用户正在用的那三份。
         with tempfile.TemporaryDirectory(prefix="reme-helper-modes-") as temp:
             for mode_name in MODE_ORDER:
                 path = generate_mode_config(mode_name, Path(temp) / f"{mode_name}.yaml")
                 made = yaml.safe_load(path.read_text(encoding="utf-8"))
-                checks.append(isinstance(made, dict) and bool(made))
+                check(f"{mode_name}: generated", isinstance(made, dict) and bool(made))
                 if mode_name == "full":
-                    checks.append(made.get("extends") == "default")
+                    check(f"{mode_name}: extends default", made.get("extends") == "default")
                 else:
-                    checks.append("extends" not in made)
-                    checks.append(set(made.get("jobs") or {}) == existing_job_names(mode_name))
-                checks.append(bool((made.get("service") or {}).get("mcp_path")))
+                    check(f"{mode_name}: standalone", "extends" not in made)
+                    check(f"{mode_name}: job set", set(made.get("jobs") or {}) == existing_job_names(mode_name))
+                check(f"{mode_name}: mcp path", bool((made.get("service") or {}).get("mcp_path")))
         with tempfile.TemporaryDirectory(prefix="reme-helper-smoke-") as temp:
             old_mode = CFG["mode"]
             old_custom = deep_copy(CFG["custom"])
@@ -6317,52 +6324,59 @@ def smoke() -> int:
             CFG["expose"]["custom"] = True
             generated = generate_custom_config(Path(temp) / "app-custom.yaml")
             parsed = yaml.safe_load(generated.read_text(encoding="utf-8"))
-            checks.append(parsed["workspace_dir"].endswith("/workspace"))
+            check("workspace dir", parsed["workspace_dir"].endswith("/workspace"))
             dream_cron = parsed["jobs"]["dream_cron"]
-            checks.append(dream_cron["cron"] == CFG["pipeline"]["dream_cron"])
-            checks.append(dream_cron["steps"][0]["scan_days"] == CFG["pipeline"]["scan_days"])
-            checks.append(dream_cron["steps"][0]["max_units"] == CFG["pipeline"]["max_units"])
+            check("dream cron", dream_cron["cron"] == CFG["pipeline"]["dream_cron"])
+            check("scan days", dream_cron["steps"][0]["scan_days"] == CFG["pipeline"]["scan_days"])
+            check("max units", dream_cron["steps"][0]["max_units"] == CFG["pipeline"]["max_units"])
             parameters = parsed["components"]["as_llm"]["default"]["parameters"]
-            checks.append(parameters["max_tokens"] == CFG["llm"]["max_tokens"])
-            checks.append(parameters["thinking_enable"] == CFG["llm"]["thinking_enable"])
+            check("max tokens", parameters["max_tokens"] == CFG["llm"]["max_tokens"])
+            check("thinking enable", parameters["thinking_enable"] == CFG["llm"]["thinking_enable"])
             # 白名单的不变量：每个名字都得**这份配置里真实存在**、且服务层加得进去。
             # 名字对不上时 base_service.add_jobs() 是 raise KeyError，ReMe 直接起不来；
             # 这条断言以前写成「等于 CFG 里存的那份」，等于把 bug 也一起断言进去了。
             allowed = parsed["service"]["jobs"]
-            checks.append(bool(allowed))
-            checks.append(all(name in parsed["jobs"] for name in allowed))
-            checks.append(all((parsed["jobs"].get(name) or {}).get("backend")
-                              not in ("background", "cron") for name in allowed))
-            checks.append(all(name in CFG["expose"]["jobs"] for name in allowed))
-            checks.append("health_check" in allowed and "status" in allowed)
+            check("allowlist non-empty", bool(allowed))
+            check("allowlist exists in jobs", all(name in parsed["jobs"] for name in allowed))
+            check("allowlist not background", all((parsed["jobs"].get(name) or {}).get("backend")
+                                                  not in ("background", "cron") for name in allowed))
+            check("allowlist exposed", all(name in CFG["expose"]["jobs"] for name in allowed))
+            check("health/status exposed", "health_check" in allowed and "status" in allowed)
             CFG["mode"] = old_mode
             CFG["custom"] = old_custom
             CFG["expose"] = old_expose
-        checks.append(reme_exe().is_file())
-        checks.append(reme_python().is_file())
-        checks.append(mode_config_path("minimal").is_file())
-        checks.append(mode_config_path("full").is_file())
+        check("reme exe", reme_exe().is_file())
+        check("reme venv python", reme_python().is_file())
+        # 这里**不**断言 mode_config_path(...) 存在。那三个文件是应用按需写进
+        # **用户自己的** ReMe 根目录的，官方 wheel 一份都不带（只有 default /
+        # beam / demo / lme）。断言它们存在，在开发机上（应用早就写过）为真，
+        # 在任何干净机器上必假——第一次发版的 CI 就是栽在这一条上。
+        # 真正的检查是上面那个临时目录块：三种模式都要能**只靠官方包**推出来。
         # 接入文档要真的随包分发：中英两份齐、正文完整、占位符已被现场值替换、
         # 附录 A 的捕获脚本已拼进去。少任何一项，用户点「阅读接入文档」时才报错，
         # 那时人已经在别的机器上了。
         doc_dir = doc_file_dir()
-        checks.append(doc_dir.is_dir())
+        check("doc dir", doc_dir.is_dir())
         for lang in ("zh", "en"):
-            checks.append((doc_dir / lang / INTEGRATION_DOC_NAME).is_file()
-                          and (doc_dir / lang / INTEGRATION_DOC_NAME).stat().st_size > 8000)
-            checks.append((doc_dir / lang / CONFIG_DOC_NAME).is_file())
-        checks.append((doc_dir / INTEGRATION_DOC_SCRIPT).is_file())
+            check(f"doc {lang} integration",
+                  (doc_dir / lang / INTEGRATION_DOC_NAME).is_file()
+                  and (doc_dir / lang / INTEGRATION_DOC_NAME).stat().st_size > 8000)
+            check(f"doc {lang} config", (doc_dir / lang / CONFIG_DOC_NAME).is_file())
+        check("doc capture script", (doc_dir / INTEGRATION_DOC_SCRIPT).is_file())
         doc_text = integration_doc_markdown()
-        checks.append(len(doc_text) > SETUP_GUIDE_MIN_CHARS)
-        checks.append("<REME_PORT>" not in doc_text and "<REME_WORKSPACE>" not in doc_text)
-        checks.append("codex exec" in doc_text and "mcp_servers.reme" in doc_text)
-        checks.append("capture.mjs" in doc_text)
-        ok = all(checks)
-        output.write_text(f"reme-helper smoke: {'PASS' if ok else 'FAIL'} checks={checks}\n", encoding="utf-8")
-        return 0 if ok else 1
-    except Exception as exc:
-        output.write_text(f"reme-helper smoke: FAIL {type(exc).__name__}: {exc}\n", encoding="utf-8")
-        return 1
+        check("doc text length", len(doc_text) > SETUP_GUIDE_MIN_CHARS)
+        check("doc placeholders filled", "<REME_PORT>" not in doc_text and "<REME_WORKSPACE>" not in doc_text)
+        check("doc has codex+mcp", "codex exec" in doc_text and "mcp_servers.reme" in doc_text)
+        check("doc has capture.mjs", "capture.mjs" in doc_text)
+        failed = [name for name, ok in checks if not ok]
+        detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
+    except Exception as exc:  # noqa: BLE001 - 通过日志文件上报
+        detail = f"FAIL {type(exc).__name__}: {exc}"
+    output.write_text(f"reme-helper smoke: {detail}\n", encoding="utf-8")
+    # 同时打到 stdout：CI 上这个日志文件会随 runner 一起消失，只写盘的失败
+    # 等于没人看得见。release_check 一直这么做，smoke 之前漏了。
+    print(f"reme-helper smoke: {detail}")
+    return 0 if detail == "PASS" else 1
 
 
 def release_check() -> int:
@@ -6612,6 +6626,18 @@ if __name__ == "__main__":
     except Exception:
         logging.exception("fatal application error")
         exit_code = 1
+    # Flush by hand, and do it before os._exit for a reason that is easy to miss:
+    # os._exit skips the interpreter's normal finalization, so it does not flush
+    # stdio. When stdout is a console that hardly matters - the buffer is line
+    # buffered and already empty. When stdout is a *pipe* - which is what CI and
+    # every build script give it - Python block-buffers and the whole thing dies
+    # with the process. That silently swallowed the diagnostics of --smoke,
+    # --release and --make-icon exactly where they were needed most.
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001 - flushing must never change the exit code
+        pass
     # The settings and guide windows own Tk interpreters created on their own threads.
     # CPython's normal finalization would delete them from the main thread and abort with
     # "Tcl_AsyncDelete: async handler deleted by the wrong thread", so exit directly:

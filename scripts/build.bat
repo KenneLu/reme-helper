@@ -269,20 +269,12 @@ set "REME_HELPER_CONFIG=%RELEASE_DIR%\config.json"
 
 echo [TEST] smoke test ...
 "%FROZEN_EXE%" --smoke
-if errorlevel 1 (
-  echo [ERROR] Smoke test failed. See %RELEASE_DIR%\log\smoke.log
-  if not defined NOPAUSE pause
-  exit /b 1
-)
+if errorlevel 1 goto :smoke_failed
 type "%RELEASE_DIR%\log\smoke.log"
 echo.
 echo [TEST] settings window build check ...
 "%FROZEN_EXE%" --ui-check
-if errorlevel 1 (
-  echo [ERROR] UI check failed. See %RELEASE_DIR%\log\ui-check.log
-  if not defined NOPAUSE pause
-  exit /b 1
-)
+if errorlevel 1 goto :ui_failed
 type "%RELEASE_DIR%\log\ui-check.log"
 echo.
 echo [TEST] packaged icon generation - PIL inside the frozen build ...
@@ -334,6 +326,25 @@ rem ---------------------------------------------------------------------------
 :release_failed
 echo [ERROR] --release check failed. See %RELEASE_DIR%\log\release.log
 if exist "%RELEASE_DIR%\log\release.log" type "%RELEASE_DIR%\log\release.log"
+if not defined NOPAUSE pause
+exit /b 1
+
+rem ---------------------------------------------------------------------------
+rem smoke_failed / ui_failed: same shape as release_failed, and for the same
+rem reason. The diagnostic log lives in %RELEASE_DIR%\log, which exists only on
+rem the machine that ran the build - on CI it is destroyed with the runner. A
+rem failure that says "see smoke.log" and then prints nothing is a failure
+rem nobody can act on: the first v1.0.7 release died on exactly that.
+rem ---------------------------------------------------------------------------
+:smoke_failed
+echo [ERROR] Smoke test failed. See %RELEASE_DIR%\log\smoke.log
+if exist "%RELEASE_DIR%\log\smoke.log" type "%RELEASE_DIR%\log\smoke.log"
+if not defined NOPAUSE pause
+exit /b 1
+
+:ui_failed
+echo [ERROR] UI check failed. See %RELEASE_DIR%\log\ui-check.log
+if exist "%RELEASE_DIR%\log\ui-check.log" type "%RELEASE_DIR%\log\ui-check.log"
 if not defined NOPAUSE pause
 exit /b 1
 
