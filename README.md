@@ -99,6 +99,12 @@ Field-by-field reference: [doc/en/configuration.md](doc/en/configuration.md). Me
 workspace — deleting reme-helper never deletes memories. Quitting stops the ReMe process and the SSH tunnels
 it started.
 
+## Troubleshooting
+
+- **The process is running but its tray icon has not appeared yet:** Windows Explorer can delay removing a stale icon. The helper retries in the background for about five minutes; if the first three retries fail, it also shows an explanatory dialog. Search for `tray: registration` in `%LOCALAPPDATA%\reme-helper\log\reme-helper.log`.
+- **Quit without the tray UI:** run `reme-helper.exe --quit`. It uses the same cleanup path as **Quit** in the tray menu.
+- **Roll back an update:** the previous build is in `%LOCALAPPDATA%\reme-helper\_backup`; quit the current instance before restoring it.
+
 ## Development
 
 ```bat

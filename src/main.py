@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.17"
+VERSION = "1.0.18"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -2337,6 +2337,7 @@ def console_widgets(include_aux: bool = True) -> list[dict]:
             except tk.TclError:
                 mapped = False
             item = {"class": cls, "text": "", "fg": "", "bg": "", "mapped": mapped,
+                    "console_root": widget is UI_HOST.get("win"),
                     "x": widget.winfo_rootx(), "y": widget.winfo_rooty(),
                     "w": widget.winfo_width(), "h": widget.winfo_height()}
             try:
@@ -6864,7 +6865,14 @@ def utf8_diag_streams() -> None:
 
 # NIM_ADD 的结果。注册失败时应用会陷入「活着但碰不到」的状态 —— 用户点哪里都没反应，
 # 而日志一片安静，所以必须主动告诉他（见 warn_tray_registration_failed）。
-TRAY_ADD_STATE: dict = {"result": None, "error": 0}
+TRAY_ADD_STATE: dict = {"result": None, "error": 0, "attempts": 0}
+
+# Explorer normally accepts the first NIM_ADD. After an old owner window disappears it can retain
+# a stale notification-area record for an unpredictable interval (measured elsewhere from seconds
+# to minutes), and pystray 0.19.5 makes exactly one attempt and discards the return value. Keep the
+# quick retries dense, then back off while Explorer finishes cleaning its private state.
+TRAY_RECOVERY_DELAYS = (0.5, 1.0, 2.0, 4.0, 8.0) + (15.0,) * 20
+TRAY_RECOVERY_WARN_AFTER = 3
 
 
 def install_unique_tray_uid() -> None:
@@ -6890,6 +6898,47 @@ def install_unique_tray_uid() -> None:
     八次运行，无一例外）。在拿到比 E_FAIL 更具体的原因之前，不再猜。
     """
     raise NotImplementedError("disproven - see the docstring")
+
+
+def recover_tray_registration(icon, delays=TRAY_RECOVERY_DELAYS,
+                              wait=None, warn=None) -> bool:
+    """Retry a failed initial NIM_ADD while Explorer clears stale tray state.
+
+    pystray already handles the native ``TaskbarCreated`` recovery message by calling ``_show``.
+    Calling that same backend operation here covers the other observable case: Explorer is alive,
+    but transiently refuses the initial registration with ``E_FAIL`` and sends no later broadcast.
+    The loop is finite, aborts with normal application shutdown, and never runs for a healthy icon.
+
+    ``wait`` and ``warn`` are seams for the focused test; production uses STOP_EVENT and the dialog.
+    """
+    if TRAY_ADD_STATE.get("result") is not False:
+        return bool(TRAY_ADD_STATE.get("result"))
+    wait = wait or STOP_EVENT.wait
+    warn = warn or warn_tray_registration_failed
+    warned = False
+    for retry_number, delay in enumerate(delays, start=1):
+        if wait(delay):
+            log("tray: registration recovery stopped during shutdown")
+            return False
+        if TRAY_ADD_STATE.get("result") is True:
+            return True
+        log(f"tray: registration retry {retry_number} after {delay:.1f}s")
+        try:
+            # Windows pystray's TaskbarCreated handler invokes this exact operation. It is private,
+            # but keeping it here avoids replacing pystray's window procedure or structure layout.
+            icon._show()
+        except Exception as exc:  # noqa: BLE001 - a later retry may still work
+            log(f"tray: registration retry {retry_number} raised {type(exc).__name__}: {exc}")
+        if TRAY_ADD_STATE.get("result") is True:
+            log(f"tray: registration recovered on retry {retry_number}")
+            return True
+        if not warned and retry_number >= TRAY_RECOVERY_WARN_AFTER:
+            warned = True
+            warn(int(TRAY_ADD_STATE.get("error") or 0))
+    if not warned:
+        warn(int(TRAY_ADD_STATE.get("error") or 0))
+    log(f"tray: registration recovery exhausted after {len(delays)} retries")
+    return False
 
 
 def install_tray_trace() -> None:
@@ -6962,12 +7011,23 @@ def install_tray_trace() -> None:
                 except Exception:  # noqa: BLE001
                     error = -1
             if code == 0:                                   # NIM_ADD
-                state["added"] = bool(result)
-                TRAY_ADD_STATE.update(result=bool(result), error=error)
-                log(f"tray: Shell_NotifyIcon(NIM_ADD) -> {result}"
-                    + ("" if result else
-                       f"   <-- FAILED (GetLastError={error}), no icon in the tray:"
-                       " real clicks cannot reach us"))
+                already_added = state["added"]
+                TRAY_ADD_STATE["attempts"] = int(TRAY_ADD_STATE.get("attempts") or 0) + 1
+                if result:
+                    state["added"] = True
+                    TRAY_ADD_STATE.update(result=True, error=0)
+                    log(f"tray: Shell_NotifyIcon(NIM_ADD) -> {result}")
+                elif already_added:
+                    # TaskbarCreated may arrive while the existing icon is still healthy. pystray
+                    # issues another NIM_ADD; Explorer rejects the duplicate, but the old icon was
+                    # not removed. Do not turn a healthy registration into a false alarm.
+                    log(f"tray: Shell_NotifyIcon(NIM_ADD) -> 0 "
+                        f"(GetLastError={error}); duplicate add refused, existing icon kept")
+                else:
+                    TRAY_ADD_STATE.update(result=False, error=error)
+                    log(f"tray: Shell_NotifyIcon(NIM_ADD) -> {result}"
+                        f"   <-- FAILED (GetLastError={error}), no icon in the tray:"
+                        " real clicks cannot reach us")
             elif code == 2:                                 # NIM_DELETE
                 state["added"] = False
                 log(f"tray: Shell_NotifyIcon(NIM_DELETE) -> {result}")
@@ -7062,9 +7122,10 @@ def main() -> int:
         # 这一行是「托盘图标真的注册进外壳了」的证据。启动路径上任何一处变慢，
         # 都能从它与上一行的时间差看出来（详见 monitor_loop 的说明）。
         log(f"tray: icon shown (elapsed {time.monotonic() - started:.2f}s)")
-        # 图标没注册进外壳 ⇒ 用户碰不到这个程序。不能只在日志里记一笔。
+        # 图标没注册进外壳 ⇒ 用户碰不到这个程序。Explorer 清理残留记录的时间不稳定，
+        # 后台有限重试；前三次仍失败才弹窗，避免一次几十毫秒的暂态就惊扰用户。
         if TRAY_ADD_STATE.get("result") is False:
-            warn_tray_registration_failed(int(TRAY_ADD_STATE.get("error") or 0))
+            threading.Thread(target=recover_tray_registration, args=(icon,), daemon=True).start()
         if CFG.get("start_on_launch") and not service_is_healthy():
             run_action(start_service)
 

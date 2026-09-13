@@ -70,6 +70,11 @@ def geometry(widgets: list[dict]) -> dict:
     偏移二十几像素），用绝对坐标会整片假失败。原点必须取 Toplevel 自己的位置——
     以前取所有控件的 min()，会被某个未映射控件的 (0,0) 吃掉，等于根本没归一化。
     """
+    # 只比较控制台本身。Tooltip、下拉弹层与隐藏 Tk 宿主也都是顶层窗口；它们由 UI
+    # 线程异步创建/销毁，曾让同一份布局在 3 次运行中出现 1 次额外 Toplevel。它们不属于
+    # 控制台布局，纳入数量或几何只会把调度时机测成产品回归。
+    widgets = [item for item in widgets
+               if item.get("console_root") or item["class"] not in ("Toplevel", "Tk")]
     if not widgets:
         return {}
     # 隐藏控件（例如「自定义允许列表」收起时的整块内容）没有布局可言，Tk 给它们的位置
@@ -104,7 +109,8 @@ def settled_count(timeout: float = 10.0, stable_rounds: int = 3) -> int:
     previous = None
     same = 0
     while time.time() < deadline:
-        current = len(main.console_widgets(include_aux=False))
+        current = len([item for item in main.console_widgets(include_aux=False)
+                       if item.get("console_root") or item["class"] not in ("Toplevel", "Tk")])
         if current == previous:
             same += 1
             if same >= stable_rounds:

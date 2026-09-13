@@ -86,6 +86,12 @@ _backup/       原地更新时留下的上一个版本
 逐字段的参考见 [doc/zh/configuration.md](doc/zh/configuration.md)。记忆数据仍在 ReMe 的 workspace——删除 reme-helper
 不会删除记忆。退出工具会停止由它启动的 ReMe 进程与 SSH 隧道。
 
+## 故障排查
+
+- **进程在运行，但托盘图标暂时没有出现**：Windows Explorer 偶尔会延迟清理旧图标。助手会在后台自动重试约 5 分钟；前三次重试仍失败时会显示说明对话框。日志位于 `%LOCALAPPDATA%\reme-helper\log\reme-helper.log`，可搜索 `tray: registration`。
+- **需要无界面退出**：运行 `reme-helper.exe --quit`。它与托盘菜单的“退出”走同一套清理路径。
+- **更新后需要回退**：上一版保存在 `%LOCALAPPDATA%\reme-helper\_backup`；退出当前实例后即可恢复。
+
 ## 开发
 
 ```bat

@@ -538,6 +538,46 @@ main.menu_is_open = _saved_probe
 main.TRAY_ICON = _saved_icon
 main.MENU_DIRTY["dirty"] = False
 
+# 18) Explorer 暂态拒绝 NIM_ADD 时要自愈；健康图标不做多余注册。
+class _RetryIcon:
+    def __init__(self, results):
+        self.results = iter(results)
+        self.calls = 0
+
+    def _show(self):
+        self.calls += 1
+        result = next(self.results)
+        main.TRAY_ADD_STATE.update(result=result, error=0 if result else -2147467259)
+
+
+_saved_add_state = dict(main.TRAY_ADD_STATE)
+_warnings = []
+try:
+    main.TRAY_ADD_STATE.update(result=False, error=-2147467259, attempts=1)
+    _retry_icon = _RetryIcon([False, True])
+    assert main.recover_tray_registration(
+        _retry_icon, delays=(0, 0), wait=lambda _delay: False,
+        warn=lambda error: _warnings.append(error)) is True
+    assert _retry_icon.calls == 2, _retry_icon.calls
+    assert not _warnings, _warnings
+
+    main.TRAY_ADD_STATE.update(result=True, error=0, attempts=1)
+    _healthy_icon = _RetryIcon([False])
+    assert main.recover_tray_registration(
+        _healthy_icon, delays=(0,), wait=lambda _delay: False,
+        warn=lambda error: _warnings.append(error)) is True
+    assert _healthy_icon.calls == 0, "健康图标不应重复 NIM_ADD"
+
+    main.TRAY_ADD_STATE.update(result=False, error=-2147467259, attempts=1)
+    _failed_icon = _RetryIcon([False, False, False])
+    assert main.recover_tray_registration(
+        _failed_icon, delays=(0, 0, 0), wait=lambda _delay: False,
+        warn=lambda error: _warnings.append(error)) is False
+    assert _warnings == [-2147467259], _warnings
+finally:
+    main.TRAY_ADD_STATE.clear()
+    main.TRAY_ADD_STATE.update(_saved_add_state)
+
 # ---------------------------------------------------------------------------
 # 隧道自动重连的语义（不需要真实 VM：把 ssh 换成一个必然失败的命令即可）
 #
