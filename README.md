@@ -4,27 +4,35 @@ English | [简体中文](README.zh-CN.md)
 
 Set up ReMe, connect your agents to it, and keep one memory across machines.
 
-**A Windows tray application for [ReMe](https://github.com/agentscope-ai/ReMe).** It selects and generates ReMe's
-configuration, runs the service, and connects agent clients — Codex on Windows, Codex inside a VM, and DeepSeek
-Harness — to a single ReMe instance with a single workspace.
+**A Windows tray application for [ReMe](https://github.com/agentscope-ai/ReMe).** It writes ReMe's
+configuration from a window instead of by hand, runs the service, and connects agent clients — Codex on
+Windows, Codex inside a VM, and DeepSeek Harness — to a single ReMe instance with a single workspace.
 
-## What it configures
+## Features
 
-ReMe's behaviour comes from YAML: which jobs run, on what schedule, against which model and embedding endpoint. This
-tool writes that configuration from a window instead of by hand.
+### Configuration
 
-- **Modes** — Basic, Full, or Custom. The mode is derived from the generated file's content, so it cannot disagree
-  with what is actually running.
-- **Job allowlist** — writes `service.jobs`, checked against the jobs that exist in your ReMe version (a name that
-  does not exist makes ReMe fail at startup).
-- **LLM and embedding** — endpoints, models, keys, token budget, reasoning effort, embedding dimensions, and the
-  consolidation schedule. Keys go to `.env`, everything else to the generated config.
-- **Connection tests** — a real request that verifies the model returns structured JSON (which `auto_memory` and
-  `auto_dream` require), and an embedding test that checks similar sentences score above unrelated ones.
-- **Service control** — start, stop, restart, and see state, from the tray.
-- **VM tunnels** — named SSH reverse-tunnel targets, each with its own VM-side port, so a VM reaches the same ReMe
-  instance. Tunnels that drop are reconnected; tunnels you stop stay stopped.
-- **Generated config is validated before it is written**, and a change that fails is rolled back.
+ReMe's behaviour comes from YAML: which jobs run, on what schedule, against which model and embedding
+endpoint. The app writes that configuration from a window, and validates it before saving — a change that
+fails is rolled back.
+
+- **Modes** — Basic, Full, or Custom. The mode is derived from the generated file's content, so it cannot
+  disagree with what is actually running.
+- **Job allowlist** — writes `service.jobs`, checked against the jobs that exist in your ReMe version (a name
+  that does not exist makes ReMe fail at startup).
+- **LLM and embedding** — endpoints, models, keys, token budget, reasoning effort, embedding dimensions, and
+  the consolidation schedule. Keys go to `.env`, everything else to the generated config.
+- **Connection tests** — a real request that verifies the model returns structured JSON (which `auto_memory`
+  and `auto_dream` require), and an embedding test that checks similar sentences score above unrelated ones.
+
+### Running it
+
+Start, stop and restart the ReMe service, and see whether it is healthy, from the tray.
+
+### VM tunnels
+
+Named SSH reverse-tunnel targets, each with its own VM-side port, so a VM reaches the same ReMe instance.
+Tunnels that drop are reconnected; tunnels you stop stay stopped.
 
 ## What it connects
 
@@ -34,33 +42,24 @@ tool writes that configuration from a window instead of by hand.
 | Codex (inside a VM) | Same, through the reverse tunnel, pointed at the tunnel port |
 | DeepSeek Harness | ReMe's official DSH plugin, plus an MCP client entry for write access |
 
-The app ships the step-by-step guide for all three — read it in a window, or copy it (with the Codex capture script
-appended) and hand the whole thing to an agent that can edit files on the machine.
+The app ships the step-by-step guide for all three — read it in a window, or copy it (with the Codex capture
+script appended) and hand the whole thing to an agent that can edit files on the machine.
 
-## Get started
+## Install
 
 1. Download `reme-helper-<version>-windows-x64.zip` from [Releases](../../releases) and unpack it anywhere.
-2. Run `reme-helper-<version>.exe`. It lives in the tray; double-click the icon for the console.
-3. If ReMe is not detected, click **Copy install prompt** and give it to an agent, then point the app at the ReMe
-   folder — or click **Scan** to find it.
+2. Run `reme-helper.exe`. It lives in the tray; double-click the icon for the console.
+3. If ReMe is not detected, click **Copy install prompt** and give it to an agent, then point the app at the
+   ReMe folder — or click **Scan** to find it.
 4. Fill in the LLM and embedding endpoints, click **Test**, then **Validate and save**.
 5. For agent clients, click **Read the setup guide** (or **Copy the setup guide**) and follow it.
 
+To update later, use **Check for ReMe Helper updates** in the tray menu. It replaces the app in place and
+keeps the previous build in `%LOCALAPPDATA%\reme-helper\_backup`.
+
 > [!IMPORTANT]
-> ReMe must be running for agents to use memory. The app manages that, but it does not install ReMe itself — that is
-> what the install prompt and **Scan** are for.
-
-## Skill installation
-
-Skills are read from one location. Installing a skill into `~/.agents/skills/<name>/` makes it available to Codex,
-DeepSeek Harness, and other agents that follow the same conventions — do not also copy it into `~/.codex/skills/`,
-which would load the same skill twice:
-
-```text
-~/.agents/skills/<name>/SKILL.md      canonical user-scope location
-```
-
-The app itself is not a skill and needs no installation beyond unpacking the zip.
+> ReMe must be running for agents to use memory. The app manages that, but it does not install ReMe itself —
+> that is what the install prompt and **Scan** are for.
 
 ## Modes
 
@@ -70,63 +69,50 @@ The app itself is not a skill and needs no installation beyond unpacking the zip
 | Full | `config/app-full.yaml` | ReMe's official defaults: Auto Memory, Auto Resource, Auto Dream, internal Chat. Needs LLM credentials. |
 | Custom | `config/app-custom.yaml` | You pick: auto memory, Claude Code entry, resource processing, dream, proactive, chat, embedding, FAISS, Studio, MCP. |
 
-Switching modes swaps the capability set only — addresses, models, keys, and tuning values are shared settings and
-are never cleared. Editing one capability while on a preset switches you to Custom and applies just that change.
+Switching modes swaps the capability set only — addresses, models, keys, and tuning values are shared settings
+and are never cleared. Editing one capability while on a preset switches you to Custom and applies just that
+change.
 
-## Repository layout
+## Skills
 
-```
-src/          application sources (main.py, i18n.py, guide.py)
-tests/        test suites - all of them gates in the build; conftest.py sets up src/
-scripts/      build.bat (the real build) and make_release_config.py
-doc/          documentation, by language: doc/zh/ and doc/en/ hold setup.md and
-              configuration.md; doc/capture.mjs is the Codex capture script.
-              The app reads this folder at runtime, so it ships inside the release.
-.github/      CI: tests on every push, release artifacts on a v* tag
-build.bat     thin wrapper -> scripts/build.bat
-release.bat   tag and push v<version> -> CI builds the release
+Skills are read from one location. Installing a skill into `~/.agents/skills/<name>/` makes it available to
+Codex, DeepSeek Harness, and other agents that follow the same conventions — do not also copy it into
+`~/.codex/skills/`, which would load the same skill twice:
+
+```text
+~/.agents/skills/<name>/SKILL.md      canonical user-scope location
 ```
 
-Runtime output stays out of the sources and out of a release:
+The app itself is not a skill and needs no installation beyond unpacking the zip.
 
-```
-doc's sibling log/         diagnostics written by a single run (smoke / ui-check / release /
-                           lang-audit) and log/tests/<suite>.log - all disposable
-.cache/                    PyInstaller staging, the on-demand build venv, the spec file
-release/reme-helper-<v>/   the built package (this is what a release zip contains)
-%LOCALAPPDATA%/reme-helper/log/reme-helper.log   the app's own log, rotated at 1 MB with 3
-                                                 backups - user data, never part of the package
+## Configuration and data
+
+Everything the app writes lives in `%LOCALAPPDATA%\reme-helper\`, never in the folder you unpacked:
+
+```text
+config.json    settings written by the window
+log/           the app's own log, rotated at 1 MB with 3 backups
+_backup/       the previous build, kept by an in-place update
 ```
 
-## Build from source
+Field-by-field reference: [doc/en/configuration.md](doc/en/configuration.md). Memory data stays in ReMe's
+workspace — deleting reme-helper never deletes memories. Quitting stops the ReMe process and the SSH tunnels
+it started.
+
+## Development
 
 ```bat
-build.bat                  :: tests, icon, package, verify - then start the new exe
-build.bat release          :: the same, plus the packaged --release gate
-build.bat norun            :: build without launching it
-build.bat clean --force    :: remove the build cache and built releases
-release.bat                :: tag v<version> and push; CI publishes the zip
+build.bat          :: tests, icon, package, verify - then start the new exe
+build.bat release  :: the same, plus the packaged --release gate
+build.bat norun    :: build without launching it
+release.bat        :: tag v<version> and push; CI publishes the zip
 ```
 
-The version lives in `src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git
-tag. The build refuses to run while any `reme-helper*.exe` is running (locked files, two trays fighting over one
-config), runs every test suite as a gate, and writes to `release/reme-helper-<version>/`. If PyInstaller is missing it
-creates an isolated venv under `.cache/venv` and installs `requirements.txt`, so a clean machine needs only Python.
-
-Every build verifies the frozen artifact before it counts as a release: `--smoke` (config shape, generated configs,
-bundled documentation), `--ui-check` (the settings window really builds), `--make-icon` (the tray icon still renders
-with numpy and the PIL codecs excluded), and with `release`, `--release` (frozen, clean template config, icon and menu
-construct, no other instance running).
-
-## Data boundaries
-
-The app's config lives next to the exe; its log lives in user data. Memory data stays in ReMe's workspace — deleting
-reme-helper never deletes memories. Quitting stops the ReMe process and SSH tunnels it started. A release ships a
-template config generated from factory defaults; `scripts/make_release_config.py` validates it against an allowlist, so
-a personal default added later fails the build instead of shipping.
+`src/` holds the application, `tests/` the suites (all of them gates in the build), `scripts/` the build and
+the release-config generator, and `doc/` the documentation the app reads at runtime. The version lives in
+`src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
+a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## License
 
 [MIT](LICENSE) © 2026 KenneLu
-
-Version history: [CHANGELOG.md](CHANGELOG.md) · configuration reference: [doc/en/configuration.md](doc/en/configuration.md)
