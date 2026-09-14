@@ -420,14 +420,17 @@ TEXT: list[tuple[str, str]] = [
      "The new version starts itself once the swap finishes; click \"Restart now\" to begin immediately."),
     # ---- 托盘图标注册失败（见 main.warn_tray_registration_failed）----
     ("托盘图标未能注册", "The tray icon could not be registered"),
-    ("系统拒绝了托盘图标的注册。程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。",
-     "The system refused to register the tray icon. The app is running, but it has no icon in the "
-     "notification area, so clicking anything will do nothing."),
-    ("常见原因是这条可执行文件路径的图标记录已经损坏（反复强制结束进程会留下幽灵图标，"
-     "之后该路径的注册会一直失败）。把程序换到一个新目录再运行，或者注销／重启一次，即可恢复。",
-     "Usually the icon record for this executable path has gone bad - force-killing the process "
-     "repeatedly leaves ghost icons behind, after which registration for that path keeps failing. "
-     "Move the app to a new directory and run it from there, or sign out / reboot once."),
+    ("程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。",
+     "The app is running, but it has no icon in the notification area, so clicking anything will "
+     "do nothing."),
+    ("原因是外壳（Explorer）暂时拒绝了这次注册，跟程序放在哪个目录无关；助手已经改用另一种身份继续重试。",
+     "The shell (Explorer) refused this registration for now; it is not about which folder the app "
+     "sits in, and the helper has switched to another identity and keeps retrying."),
+    ("如果图标始终不出现：在任务管理器里重启「Windows 资源管理器」（任务栏会闪一下），"
+     "然后重新启动本程序；或者注销／重启一次。每次尝试的结果都写在下面的日志里。",
+     "If the icon never appears: restart \"Windows Explorer\" in Task Manager (the taskbar will "
+     "flicker), then start this app again; or sign out / reboot. Every attempt is written to the "
+     "log below."),
     # ---- 助手自己的更新提示词（见 main.helper_upgrade_prompt）----
     ("复制 ReMe 助手更新步骤（交给 AI 执行）", "Copy ReMe Helper update steps (for an AI to run)"),
     ("（还没查过，请自行查 GitHub Releases 的最新 tag）",

@@ -793,9 +793,63 @@ try:
         _failed_icon, delays=(0, 0, 0), wait=lambda _delay: False,
         warn=lambda error: _warnings.append(error)) is False
     assert _warnings == [-2147467259], _warnings
+
+    # 连失败到阈值后必须换身份重试：外壳拒绝 uID 身份的那段时间里 GUID 身份能注册成功。
+    main.TRAY_IDENTITY["mode"] = "uid"
+    main.TRAY_ADD_STATE.update(result=False, error=-2147467259, attempts=1)
+    _switch_icon = _RetryIcon([False] * 6)
+    assert main.recover_tray_registration(
+        _switch_icon, delays=(0,) * 6, wait=lambda _delay: False,
+        warn=lambda error: None) is False
+    assert main.TRAY_IDENTITY["mode"] == "guid", main.TRAY_IDENTITY
+    assert _switch_icon.calls == 6, _switch_icon.calls
+    main.TRAY_IDENTITY["mode"] = "uid"
 finally:
     main.TRAY_ADD_STATE.clear()
     main.TRAY_ADD_STATE.update(_saved_add_state)
+
+# 19) 注册身份：pystray 传的 hID 被忽略（字段名是 uID），我们必须自己发非零 uID / GUID。
+try:
+    import pystray._win32 as _backend
+
+    _sent = []
+    _saved_notify = _backend.win32.Shell_NotifyIcon
+    _backend.win32.Shell_NotifyIcon = lambda code, data: (_sent.append((code, data)), True)[1]
+    try:
+        main.TRAY_IDENTITY["mode"] = "uid"
+        main.install_tray_identity()
+
+        class _FakeIcon:
+            _hwnd = 0x1234
+
+        _backend.Icon._message(_FakeIcon(), 0, 0x01 | 0x02, uCallbackMessage=1, hIcon=0, szTip="x")
+        assert _sent and _sent[-1][1].uID == main.TRAY_UID, _sent
+        assert _sent[-1][1].uFlags & _backend.win32.NIF_GUID == 0, _sent[-1][1].uFlags
+
+        main.TRAY_IDENTITY["mode"] = "guid"
+        _backend.Icon._message(_FakeIcon(), 0, 0x01 | 0x02, uCallbackMessage=1, hIcon=0, szTip="x")
+        assert _sent[-1][1].uFlags & _backend.win32.NIF_GUID, _sent[-1][1].uFlags
+        assert _sent[-1][1].guidItem.Data1 == 0x0F0A6D2C, hex(_sent[-1][1].guidItem.Data1)
+    finally:
+        main.TRAY_IDENTITY["mode"] = "uid"
+        _backend.win32.Shell_NotifyIcon = _saved_notify
+except ImportError:      # 非 win32 平台没有这个后端，跳过
+    pass
+
+# 20) 注册失败提示每次进程只弹一次
+_dialogs = []
+_saved_dialog = main.ui_dialog
+_saved_warned = dict(main.TRAY_WARNED)
+try:
+    main.ui_dialog = lambda title, text, buttons=None: _dialogs.append(title)
+    main.TRAY_WARNED["done"] = False
+    main.warn_tray_registration_failed(-2147467259)
+    main.warn_tray_registration_failed(-2147467259)
+    assert len(_dialogs) == 1, _dialogs
+finally:
+    main.ui_dialog = _saved_dialog
+    main.TRAY_WARNED.clear()
+    main.TRAY_WARNED.update(_saved_warned)
 
 # ---------------------------------------------------------------------------
 # 隧道自动重连的语义（不需要真实 VM：把 ssh 换成一个必然失败的命令即可）

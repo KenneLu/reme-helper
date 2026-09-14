@@ -5997,14 +5997,25 @@ def warn_tray_registration_failed(error: int) -> None:
     这是「应用活着、用户却完全碰不到它」的那一类故障：进程正常、窗口正常、日志安静，
     唯独通知区里没有它的图标 —— 点哪里都不会有反应。**不说出来，用户只能猜**，
     而实测的代价是用户反复报告"点不动"、排查了三轮才靠新加的探针找到根因。
+
+    文案按实测写：早期版本说「这条 exe 路径的图标记录已损坏，换个目录再跑」，那是基于被
+    证伪的假设（同一路径几分钟前刚注册成功，换目录也不是恢复的原因）；真正起作用的是
+    换窗口／换身份，以及外壳自己把记录清掉。重试循环已经在换身份继续试，所以这里只说明
+    现状、给两个真正有效的手工动作，并且每次进程只弹一次。
     """
     log(f"tray: registration FAILED, telling the user (GetLastError={error})")
+    if TRAY_WARNED["done"]:
+        return
+    TRAY_WARNED["done"] = True
     ui_dialog(
         t("托盘图标未能注册"),
-        t("系统拒绝了托盘图标的注册。程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。")
+        t("程序在运行，但通知区里没有它的图标 —— 点哪里都不会有反应。")
         + "\n\n"
-        + t("常见原因是这条可执行文件路径的图标记录已经损坏（反复强制结束进程会留下幽灵图标，"
-            "之后该路径的注册会一直失败）。把程序换到一个新目录再运行，或者注销／重启一次，即可恢复。")
+        + t("原因是外壳（Explorer）暂时拒绝了这次注册，跟程序放在哪个目录无关；助手已经改用"
+            "另一种身份继续重试。")
+        + "\n\n"
+        + t("如果图标始终不出现：在任务管理器里重启「Windows 资源管理器」（任务栏会闪一下），"
+            "然后重新启动本程序；或者注销／重启一次。每次尝试的结果都写在下面的日志里。")
         + f"\n\nGetLastError = {error}\n{LOG_PATH}",
         [(t("好"), None)],
     )
@@ -7337,6 +7348,74 @@ TRAY_ADD_STATE: dict = {"result": None, "error": 0, "attempts": 0}
 # quick retries dense, then back off while Explorer finishes cleaning its private state.
 TRAY_RECOVERY_DELAYS = (0.5, 1.0, 2.0, 4.0, 8.0) + (15.0,) * 20
 TRAY_RECOVERY_WARN_AFTER = 3
+# 重试到这个次数仍失败就换身份：从传统 uID 换成固定 GUID。
+# 依据是实测 A/B：外壳拒绝 uID 身份的那段时间里，同一秒、同一进程里 GUID 身份能注册成功。
+TRAY_IDENTITY_SWITCH_AFTER = 4
+TRAY_UID = 1
+TRAY_IDENTITY_GUID = "0f0a6d2c-6c1f-4d63-9a2e-1f0b8c34a7d1"
+# mode: "uid" = 传统身份（非零 uID）；"guid" = NIF_GUID 身份（反复被拒后切换）。
+TRAY_IDENTITY: dict = {"mode": "uid"}
+# 弹框每次进程只弹一次（重试循环本身也只 warn 一次，这里再兜一层）。
+TRAY_WARNED: dict = {"done": False}
+
+
+def tray_guid_struct(win32_module):
+    """把固定的 GUID 文本转成外壳要的那个内嵌结构体。"""
+    import uuid
+
+    raw = uuid.UUID(TRAY_IDENTITY_GUID).bytes_le
+    guid = win32_module.NOTIFYICONDATAW.GUID()
+    guid.Data1 = int.from_bytes(raw[0:4], "little")
+    guid.Data2 = int.from_bytes(raw[4:6], "little")
+    guid.Data3 = int.from_bytes(raw[6:8], "little")
+    for index, value in enumerate(raw[8:16]):
+        guid.Data4[index] = value
+    return guid
+
+
+def install_tray_identity() -> None:
+    """让托盘注册带上规范身份：非零 uID，或切换后的固定 GUID。
+
+    为什么必须自己发这条消息：pystray 的 win32 后端在 `_message` 里传 `hID=id(self)`，而
+    `NOTIFYICONDATAW` 的字段名是 `uID` —— ctypes 对未知关键字只当普通属性存下，于是这个
+    参数被**静默忽略**：实际发出去的 uID 一直是 0，也没有 GUID（实测字段表里根本没有 hID）。
+    按文档 uID 应当非零，否则就得用 NIF_GUID，这里把身份改成规范写法。
+
+    只改身份字段，其余参数（hWnd / hIcon / szTip / 回调消息）原样透传。**不要**顺手去「修好」
+    `uTimeoutOrVersion` 的字段名：它现在同样被忽略，等于从未调用 NIM_SETVERSION，回调仍是传统
+    语义（lParam 直接是鼠标消息），我们的点击处理依赖这一点；改成 V4 会让 `_on_notify` 收到的
+    参数含义变化，点击会失灵。
+    """
+    try:
+        import ctypes
+
+        import pystray._win32 as backend
+    except Exception as exc:  # noqa: BLE001 - 非 win32 后端就不装
+        log(f"tray identity: unavailable ({type(exc).__name__}: {exc})")
+        return
+    win32_module = backend.win32
+    current = backend.Icon._message
+    if getattr(current, "_reme_identity", False):
+        return
+
+    def message(self, code, flags, **kwargs):
+        kwargs.pop("hID", None)      # 现状里这个字段名是错的，显式丢掉，别再让它误导
+        if TRAY_IDENTITY["mode"] == "guid":
+            flags |= win32_module.NIF_GUID
+            kwargs.setdefault("guidItem", tray_guid_struct(win32_module))
+            uid = 0
+        else:
+            uid = int(TRAY_UID)
+        return win32_module.Shell_NotifyIcon(code, win32_module.NOTIFYICONDATAW(
+            cbSize=ctypes.sizeof(win32_module.NOTIFYICONDATAW),
+            hWnd=self._hwnd,
+            uID=uid,
+            uFlags=flags,
+            **kwargs))
+
+    message._reme_identity = True
+    backend.Icon._message = message
+    log(f"tray identity: installed (uid={TRAY_UID}, guid fallback {TRAY_IDENTITY_GUID})")
 
 
 def install_unique_tray_uid() -> None:
@@ -7386,6 +7465,9 @@ def recover_tray_registration(icon, delays=TRAY_RECOVERY_DELAYS,
             return False
         if TRAY_ADD_STATE.get("result") is True:
             return True
+        if retry_number >= TRAY_IDENTITY_SWITCH_AFTER and TRAY_IDENTITY["mode"] != "guid":
+            TRAY_IDENTITY["mode"] = "guid"
+            log("tray: switching to GUID identity after repeated refusals")
         log(f"tray: registration retry {retry_number} after {delay:.1f}s")
         try:
             # Windows pystray's TaskbarCreated handler invokes this exact operation. It is private,
@@ -7598,6 +7680,7 @@ def main() -> int:
             run_action(start_service)
 
     # install_unique_tray_uid() 已证伪，不再调用（见它的 docstring）
+    install_tray_identity()   # 身份参数：pystray 传的 hID 会被忽略，实际一直是 uID=0
     install_tray_trace()
     TRAY_ICON.run(setup=setup)
     # 正常情况走不到这里（run() 一直循环到退出）。真出现了，说明消息循环已经结束、
