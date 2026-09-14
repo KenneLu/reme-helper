@@ -2277,6 +2277,9 @@ def generate_custom_config(destination: Path | None = None) -> Path:
 STATE_LOCK = threading.RLock()
 ACTION_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
+SHUTDOWN_STARTED = threading.Event()
+SHUTDOWN_LOCK = threading.Lock()
+SHUTDOWN_FORCE_TIMEOUT = 30.0
 STATE = {"phase": "stopped", "healthy": False, "pid": None, "managed": False, "message": ""}
 SERVICE_PROCESS: subprocess.Popen | None = None
 SERVICE_LOG_HANDLE = None
@@ -2625,6 +2628,10 @@ def refresh_service_state() -> None:
 def wait_for_health(expected: bool, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        # A start operation may be racing with Exit. Stop waiting immediately so the start worker
+        # can release ACTION_LOCK and the shutdown worker can perform one final, ordered cleanup.
+        if expected and STOP_EVENT.is_set():
+            return False
         if probe_health(1.5) is expected:
             return True
         time.sleep(0.5)
@@ -2658,6 +2665,8 @@ def start_service(mode: str | None = None) -> tuple[bool, str]:
         refresh_service_state()
         return True, "ReMe已经运行"
     config = mode_config_path(selected)
+    if STOP_EVENT.is_set():
+        return False, "应用正在退出，已取消启动 ReMe"
     log_file = reme_root() / "logs" / f"reme-{time.strftime('%Y%m%d')}.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     SERVICE_LOG_HANDLE = log_file.open("a", encoding="utf-8")
@@ -2811,6 +2820,8 @@ def probe_tunnel(target: dict) -> bool:
 
 def start_tunnel(target: dict) -> tuple[bool, str]:
     key = target_key(target)
+    if STOP_EVENT.is_set():
+        return False, f"应用正在退出，已取消启动 {target['name']} 隧道"
     if not probe_health():
         return False, "ReMe尚未运行"
     # 进入这里就是「希望它连着」；随后调用的 stop_tunnel 会清掉这个标记，所以要在这里先立起来。
@@ -2834,6 +2845,9 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
         return False, f"SSH启动失败：{exc}"
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and process.poll() is None:
+        if STOP_EVENT.is_set():
+            stop_tunnel(target)
+            return False, f"应用正在退出，已取消启动 {target['name']} 隧道"
         if probe_tunnel(target):
             TUNNEL_STATE[key] = True
             refresh_tray_icon()
@@ -2945,18 +2959,29 @@ def notify(message: str) -> None:
 
 def run_action(function, refresh=True) -> None:
     def worker():
+        if SHUTDOWN_STARTED.is_set():
+            log("action ignored: shutdown already started")
+            return
         if not ACTION_LOCK.acquire(blocking=False):
             notify("正在执行另一项操作")
             return
         try:
+            if SHUTDOWN_STARTED.is_set():
+                log("action cancelled before execution: shutdown already started")
+                return
             ok, detail = function()
-            notify(("成功：" if ok else "失败：") + detail)
+            message = ("成功：" if ok else "失败：") + detail
+            if SHUTDOWN_STARTED.is_set():
+                log(f"action completed during shutdown; notification suppressed: {message}")
+            else:
+                notify(message)
         except Exception as exc:
             log(f"action failed: {exc}")
-            notify(f"操作失败：{exc}")
+            if not SHUTDOWN_STARTED.is_set():
+                notify(f"操作失败：{exc}")
         finally:
             ACTION_LOCK.release()
-            if refresh:
+            if refresh and not SHUTDOWN_STARTED.is_set():
                 refresh_service_state()
                 if TRAY_ICON:
                     refresh_tray_menu()
@@ -6313,9 +6338,45 @@ def begin_shutdown() -> None:
         stop_service()
 
 
-def shutdown_tray(icon) -> None:
-    """走完整退出路径（菜单项与 quit_watch_loop 共用）。"""
-    begin_shutdown()
+def claim_shutdown() -> bool:
+    """Let exactly one menu/request path own shutdown."""
+    with SHUTDOWN_LOCK:
+        if SHUTDOWN_STARTED.is_set():
+            return False
+        SHUTDOWN_STARTED.set()
+        return True
+
+
+def shutdown_tray(icon, *, claimed: bool = False) -> None:
+    """走完整退出路径（菜单项与 quit_watch_loop 共用）。
+
+    The final deadline is armed before cleanup and does not depend on Tk ever having been opened.
+    A tray-only process commonly has no Tk root; the old conditional timer gave that most common
+    path no escape if pystray's message loop did not consume its own WM_STOP.
+    """
+    if not claimed and not claim_shutdown():
+        return
+
+    def force_exit() -> None:
+        try:
+            log(f"shutdown: forcing process exit after {SHUTDOWN_FORCE_TIMEOUT:.0f}s deadline")
+        finally:
+            os._exit(0)
+
+    failsafe = threading.Timer(SHUTDOWN_FORCE_TIMEOUT, force_exit)
+    failsafe.daemon = True
+    failsafe.start()
+    log("shutdown: started; failsafe armed")
+
+    # Claiming shutdown prevents new run_action workers. STOP_EVENT asks a start already inside the
+    # lock to abandon its health/tunnel wait. Taking the same lock then gives cleanup a stable final
+    # view: anything the earlier action managed to create is present and can be stopped exactly once.
+    STOP_EVENT.set()
+    log("shutdown: waiting for active action")
+    with ACTION_LOCK:
+        log("shutdown: active action drained; cleanup starting")
+        begin_shutdown()
+    log("shutdown: tunnels and managed ReMe stopped")
 
     def finish() -> None:
         host = UI_HOST.get("root")
@@ -6328,13 +6389,23 @@ def shutdown_tray(icon) -> None:
 
     if UI_HOST.get("root") is not None:
         ui_post(finish)
-        threading.Timer(4.0, lambda: os._exit(0)).start()   # UI 线程没响应也要能退出
+        log("shutdown: UI finish queued")
+    log("shutdown: requesting tray message-loop stop")
     icon.stop()
 
 
 def quit_app(icon, _item) -> None:
-    """托盘菜单的「退出」。"""
-    shutdown_tray(icon)
+    """托盘菜单的「退出」：立即归还 pystray 回调线程，清理在后台执行。
+
+    pystray wraps every menu callback in a final ``update_menu()``. Running ``icon.stop()`` inside
+    that same callback can leave WM_STOP waiting behind the callback/menu teardown. Returning first
+    lets its Win32 message loop unwind and consume the stop posted by the worker.
+    """
+    if not claim_shutdown():
+        return
+    STOP_EVENT.set()
+    notify("正在安全退出：正在停止 VM 隧道和由助手启动的 ReMe…")
+    threading.Thread(target=shutdown_tray, args=(icon,), kwargs={"claimed": True}, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------

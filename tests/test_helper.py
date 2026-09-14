@@ -561,6 +561,126 @@ main.menu_is_open = _saved_probe
 main.TRAY_ICON = _saved_icon
 main.MENU_DIRTY["dirty"] = False
 
+# 18) 托盘“退出”不能在 pystray 的菜单回调线程内同步清理；无 Tk 根窗口也必须有兜底。
+_saved_shutdown = main.shutdown_tray
+_shutdown_called = main.threading.Event()
+_shutdown_args = []
+main.SHUTDOWN_STARTED.clear()
+
+
+def _record_shutdown(icon, *, claimed=False):
+    _shutdown_args.append((icon, claimed))
+    _shutdown_called.set()
+
+
+main.shutdown_tray = _record_shutdown
+_quit_icon = object()
+_quit_started = main.time.monotonic()
+main.quit_app(_quit_icon, None)
+assert main.time.monotonic() - _quit_started < 0.1, "托盘退出回调必须立即返回"
+assert _shutdown_called.wait(1.0), "托盘退出应把清理交给后台线程"
+assert _shutdown_args == [(_quit_icon, True)], _shutdown_args
+main.shutdown_tray = _saved_shutdown
+main.STOP_EVENT.clear()
+
+
+class _FakeTimer:
+    started = False
+    daemon = False
+
+    def __init__(self, interval, callback):
+        self.interval = interval
+        self.callback = callback
+
+    def start(self):
+        self.started = True
+
+
+class _StoppingIcon:
+    stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+_saved_timer = main.threading.Timer
+_saved_begin_shutdown = main.begin_shutdown
+_saved_ui_root = main.UI_HOST.get("root")
+_timer_box = {}
+
+
+def _fake_timer(interval, callback):
+    timer = _FakeTimer(interval, callback)
+    _timer_box["timer"] = timer
+    return timer
+
+
+try:
+    main.threading.Timer = _fake_timer
+    main.begin_shutdown = lambda: None
+    main.UI_HOST["root"] = None
+    _stopping_icon = _StoppingIcon()
+    main.shutdown_tray(_stopping_icon, claimed=True)
+    assert _timer_box["timer"].started is True, "没有 Tk 根窗口也必须启动退出兜底"
+    assert _timer_box["timer"].interval == main.SHUTDOWN_FORCE_TIMEOUT
+    assert _timer_box["timer"].daemon is True
+    assert _stopping_icon.stopped is True
+finally:
+    main.threading.Timer = _saved_timer
+    main.begin_shutdown = _saved_begin_shutdown
+    main.UI_HOST["root"] = _saved_ui_root
+    main.SHUTDOWN_STARTED.clear()
+    main.STOP_EVENT.clear()
+
+# 已经在执行的启动动作可以晚于退出请求返回，但它的迟到结果不能再弹“启动成功”。
+_saved_notify = main.notify
+_notifications = []
+_action_entered = main.threading.Event()
+_action_release = main.threading.Event()
+
+
+def _slow_start_action():
+    _action_entered.set()
+    _action_release.wait(1.0)
+    return True, "ReMe 已启动（测试）"
+
+
+try:
+    main.notify = lambda message: _notifications.append(message)
+    main.SHUTDOWN_STARTED.clear()
+    main.STOP_EVENT.clear()
+    main.run_action(_slow_start_action, refresh=False)
+    assert _action_entered.wait(1.0), "测试启动动作没有进入执行"
+    assert main.claim_shutdown() is True
+    main.STOP_EVENT.set()
+    _action_release.set()
+    deadline = main.time.monotonic() + 1.0
+    while main.ACTION_LOCK.locked() and main.time.monotonic() < deadline:
+        main.time.sleep(0.01)
+    assert not main.ACTION_LOCK.locked(), "退出前应等待活动动作释放锁"
+    assert not _notifications, f"退出期间不应发送迟到的动作通知：{_notifications}"
+    called = []
+    main.run_action(lambda: called.append(True) or (True, "不应执行"), refresh=False)
+    main.time.sleep(0.05)
+    assert not called, "退出开始后不应接受新的动作"
+finally:
+    main.notify = _saved_notify
+    main.SHUTDOWN_STARTED.clear()
+    main.STOP_EVENT.clear()
+
+# 退出取消信号要让启动健康等待立刻返回，不能继续等满原来的 35 秒。
+_saved_probe_for_wait = main.probe_health
+try:
+    main.STOP_EVENT.set()
+    main.probe_health = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("退出后不应继续健康探测"))
+    started_at = main.time.monotonic()
+    assert main.wait_for_health(True, 35) is False
+    assert main.time.monotonic() - started_at < 0.1
+finally:
+    main.probe_health = _saved_probe_for_wait
+    main.STOP_EVENT.clear()
+
 # 18) Explorer 暂态拒绝 NIM_ADD 时要自愈；健康图标不做多余注册。
 class _RetryIcon:
     def __init__(self, results):
