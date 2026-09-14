@@ -422,23 +422,46 @@ for needle in ('reme-ai[core]', "service.backend=http", "2333", r"D:\X\ReMe", "h
 with _tempfile.TemporaryDirectory() as temp:
     log_dir = main.Path(temp)
     (log_dir / "reme-20260101.log").write_text(
-        "2026-01-01 23:00:01 | INFO | dream.py:50 | [dream_extract_step] start date=2026-01-01 scan_days=2\n"
-        "2026-01-01 23:00:02 | INFO | dream.py:76 | [dream_extract_step] scan summary existing=6 indexed=6 "
+        "2026-01-01 23:00:01 | INFO | extract.py:49 | execute | [DreamExtractStep] start date=2026-01-01 "
+        "dates=2025-12-31,2026-01-01 scan_days=2 max_units=5 hint=False\n"
+        "2026-01-01 23:00:02 | INFO | extract.py:76 | execute | [DreamExtractStep] scan summary existing=6 indexed=6 "
         "changed=2 unchanged=4 deleted=0\n"
-        "2026-01-01 23:00:20 | INFO | integrate.py:88 | [dream_integrate_step] Integrated 3 unit(s); skipped 1 unit(s)\n",
+        "2026-01-01 23:00:20 | INFO | integrate.py:239 | _finish | [DreamIntegrateStep] "
+        "finish success=True integrated=3 failed=0\n"
+        "2026-01-01 23:00:21 | INFO | finish.py:55 | execute | [DreamFinishStep] "
+        "finish success=True checkpointed=2 failed_units=0 errors=0\n",
         encoding="utf-8",
     )
     original_log_dir = main.reme_log_dir
     main.reme_log_dir = lambda: log_dir
     ok, detail = main.last_dream_summary()
     assert ok, detail
-    assert "写入 3 个节点" in detail and "6 个文件" in detail and "跳过 1" in detail, detail
+    assert "2026-01-01 23:00:21" in detail, detail
+    assert "写入 3 个节点" in detail and "扫描 6 个文件" in detail and "2 个有变化" in detail, detail
     (log_dir / "reme-20260102.log").write_text(
-        "2026-01-02 23:00:01 | INFO | dream.py:103 | [dream_extract_step] skip no changed input dates=2026-01-02\n",
+        "2026-01-02 23:00:01 | INFO | extract.py:49 | execute | [DreamExtractStep] start date=2026-01-02 "
+        "dates=2026-01-01,2026-01-02 scan_days=2 max_units=5 hint=False\n"
+        "2026-01-02 23:00:02 | INFO | extract.py:103 | execute | [DreamExtractStep] "
+        "skip no changed input dates=2026-01-01,2026-01-02\n"
+        "2026-01-02 23:00:03 | INFO | finish.py:55 | execute | [DreamFinishStep] "
+        "finish success=True checkpointed=0 failed_units=0 errors=0\n",
         encoding="utf-8",
     )
     ok, detail = main.last_dream_summary()
     assert ok and "跳过" in detail and "2026-01-02" in detail, detail
+    (log_dir / "reme-20260103.log").write_text(
+        "2026-01-03 23:00:01 | INFO | extract.py:49 | execute | [DreamExtractStep] start date=2026-01-03 "
+        "dates=2026-01-02,2026-01-03 scan_days=2 max_units=5 hint=False\n"
+        "2026-01-03 23:00:02 | INFO | extract.py:76 | execute | [DreamExtractStep] scan summary existing=4 indexed=3 "
+        "changed=1 unchanged=3 deleted=0\n"
+        "2026-01-03 23:00:20 | INFO | integrate.py:239 | _finish | [DreamIntegrateStep] "
+        "finish success=False integrated=2 failed=1\n"
+        "2026-01-03 23:00:21 | INFO | finish.py:55 | execute | [DreamFinishStep] "
+        "finish success=False checkpointed=0 failed_units=1 errors=1\n",
+        encoding="utf-8",
+    )
+    ok, detail = main.last_dream_summary()
+    assert ok is False and "整理失败" in detail and "已整合 2" in detail and "失败 1" in detail, detail
     main.reme_log_dir = lambda: log_dir / "missing"
     ok, detail = main.last_dream_summary()
     assert ok is False and "日志" in detail, detail

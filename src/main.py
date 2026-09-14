@@ -1188,12 +1188,79 @@ DREAM_SCAN_RE = re.compile(
     r"scan summary existing=(?P<existing>\d+) indexed=(?P<indexed>\d+) changed=(?P<changed>\d+)"
     r" unchanged=(?P<unchanged>\d+) deleted=(?P<deleted>\d+)"
 )
-DREAM_INTEGRATE_RE = re.compile(r"Integrated (?P<units>\d+) unit\(s\); skipped (?P<skipped>\d+)")
+DREAM_START_RE = re.compile(r"\[DreamExtractStep\].*\bstart date=", re.IGNORECASE)
+DREAM_INTEGRATE_RE = re.compile(
+    r"\[DreamIntegrateStep\].*\bfinish success=(?P<success>True|False) "
+    r"integrated=(?P<units>\d+) failed=(?P<failed>\d+)",
+    re.IGNORECASE,
+)
+DREAM_FINISH_RE = re.compile(
+    r"\[DreamFinishStep\].*\bfinish success=(?P<success>True|False) "
+    r"checkpointed=(?P<checkpointed>\d+) failed_units=(?P<failed>\d+) errors=(?P<errors>\d+)",
+    re.IGNORECASE,
+)
 DREAM_SKIP_MARK = "skip no changed input"
 LOG_TIME_RE = re.compile(r"^(?P<when>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
 
 
-def last_dream_summary(max_files: int = 4, tail_lines: int = 20000) -> tuple[bool, str]:
+def dream_runs_from_log(lines: list[str]) -> list[dict]:
+    """Parse completed Auto Dream runs from one ReMe log file.
+
+    ReMe returns ``Integrated N unit(s)`` as the job answer, but its logger emits
+    ``[DreamIntegrateStep] finish success=... integrated=N failed=M``. The old parser
+    confused those two channels and therefore never recognised a real successful run.
+    """
+    runs: list[dict] = []
+    current: dict | None = None
+
+    def ensure_run(line: str) -> dict:
+        nonlocal current
+        if current is None:
+            match = LOG_TIME_RE.match(line)
+            current = {
+                "when": match.group("when") if match else "",
+                "skip": False,
+                "units": 0,
+                "failed": 0,
+                "checkpointed": 0,
+                "errors": 0,
+                "changed": None,
+                "existing": None,
+            }
+        return current
+
+    for line in lines:
+        if DREAM_START_RE.search(line):
+            current = None
+            ensure_run(line)
+        scan = DREAM_SCAN_RE.search(line)
+        if scan:
+            run = ensure_run(line)
+            run["changed"] = int(scan.group("changed"))
+            run["existing"] = int(scan.group("existing"))
+        if DREAM_SKIP_MARK in line:
+            ensure_run(line)["skip"] = True
+        integrated = DREAM_INTEGRATE_RE.search(line)
+        if integrated:
+            run = ensure_run(line)
+            run["units"] = int(integrated.group("units"))
+            run["failed"] = int(integrated.group("failed"))
+        finished = DREAM_FINISH_RE.search(line)
+        if finished:
+            run = ensure_run(line)
+            match = LOG_TIME_RE.match(line)
+            if match:
+                run["when"] = match.group("when")
+            run["success"] = finished.group("success").lower() == "true"
+            run["checkpointed"] = int(finished.group("checkpointed"))
+            run["failed"] = max(run["failed"], int(finished.group("failed")))
+            run["errors"] = int(finished.group("errors"))
+            runs.append(run)
+            current = None
+    return runs
+
+
+def last_dream_summary(max_files: int = 32, tail_lines: int = 20000) -> tuple[bool, str]:
     """Summarise the most recent dream run from ReMe's logs (read-only, no service call)."""
     log_dir = reme_log_dir()
     if not log_dir.is_dir():
@@ -1204,41 +1271,28 @@ def last_dream_summary(max_files: int = 4, tail_lines: int = 20000) -> tuple[boo
         return False, "读取日志失败"
     if not files:
         return False, "还没有日志"
-    lines: list[str] = []
+    runs: list[dict] = []
     for path in files[-max_files:]:
         try:
-            lines.extend(path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail_lines:])
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail_lines:]
+            runs.extend(dream_runs_from_log(lines))
         except OSError:
             continue
-    state = {"kind": "", "when": "", "units": 0, "skipped": 0, "changed": None, "existing": None}
-    for line in reversed(lines):
-        if not state["kind"]:
-            if DREAM_SKIP_MARK in line:
-                state["kind"], state["when"] = "skip", (LOG_TIME_RE.match(line).group("when") if LOG_TIME_RE.match(line) else "")
-            else:
-                integrated = DREAM_INTEGRATE_RE.search(line)
-                if integrated:
-                    state["kind"] = "integrated"
-                    state["units"] = int(integrated.group("units"))
-                    state["skipped"] = int(integrated.group("skipped"))
-                    state["when"] = LOG_TIME_RE.match(line).group("when") if LOG_TIME_RE.match(line) else ""
-            continue
-        scan = DREAM_SCAN_RE.search(line)
-        if scan:
-            state["changed"] = int(scan.group("changed"))
-            state["existing"] = int(scan.group("existing"))
-            break
-    if not state["kind"]:
+    if not runs:
         return False, "还没有整理记录"
+    state = max(runs, key=lambda item: str(item.get("when") or ""))
     when = state["when"] or "（时间未知）"
-    if state["kind"] == "skip":
+    if state["skip"]:
         return True, f"上次整理：{when} · 判定无新内容，直接跳过（未消耗 token）"
+    if not state["success"]:
+        return False, (f"上次整理失败：{when} · 已整合 {state['units']} 个单元，"
+                       f"失败 {state['failed']} 个单元，错误 {state['errors']} 项")
     detail = f"上次整理：{when} · 写入 {state['units']} 个节点"
     if state["changed"] is not None:
         detail += f"（扫描 {state['existing']} 个文件、其中 {state['changed']} 个有变化"
-        detail += f"，跳过 {state['skipped']} 个单元）" if state["skipped"] else "）"
-    elif state["skipped"]:
-        detail += f"（跳过 {state['skipped']} 个单元）"
+        detail += f"，失败 {state['failed']} 个单元）" if state["failed"] else "）"
+    elif state["failed"]:
+        detail += f"（失败 {state['failed']} 个单元）"
     return True, detail
 
 

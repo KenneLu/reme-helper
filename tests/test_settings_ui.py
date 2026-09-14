@@ -50,6 +50,10 @@ def patch_dialogs():
     # 让“是否有 Key”只取决于输入框，测试才能确定性地覆盖“未填 Key”的分支
     main.read_env_values = lambda: {}
     main.save_config = lambda *a, **k: None   # 测试不写用户的 config.json
+    main.last_dream_summary = lambda: (
+        True,
+        "上次整理：2026-01-01 23:00:21 · 写入 3 个节点（扫描 6 个文件、其中 2 个有变化）",
+    )
 
 
 def check(name, condition, detail=""):
@@ -297,13 +301,17 @@ def build_steps(api):
 
     @step
     def dream_history_and_run_gating():
-        check("整理记录：显示一行状态（无记录也会说明）", bool(api["dream_history"]()), api["dream_history"]())
+        history = api["dream_history"]()
+        check("整理记录：显示真实解析结果", "写入 3 个节点" in history and "扫描 6 个文件" in history,
+              history)
         api["begin_dream"]()
         check("整理期间：按钮禁用", api["ui_state"]()["dream_button"] == "disabled", api["ui_state"]()["dream_button"])
         check("整理期间：按钮文字变为整理中", "整理中" in api["dream_button_text"](), api["dream_button_text"]())
         api["finish_dream"](True, "auto_dream 完成（1s）：No changed dream input")
         check("整理结束：按钮文字复位", "整理中" not in api["dream_button_text"](), api["dream_button_text"]())
-        check("整理结束：仍显示整理记录", bool(api["dream_history"]()), api["dream_history"]())
+        history = api["dream_history"]()
+        check("整理结束：仍显示真实解析结果", "写入 3 个节点" in history and "扫描 6 个文件" in history,
+              history)
 
     @step
     def uninstalled_guidance():
