@@ -169,8 +169,7 @@ if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-life
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
 echo [BUILD] icon ...
-rem the window icon and the tray icon share one drawing routine, regenerate it
-rem every build so the frozen exe can never ship a stale icon
+rem Generate separate state/tray and small-frame-optimised taskbar assets.
 "%PY%" src\main.py --make-icon
 if errorlevel 1 (
   echo [ERROR] icon generation failed.
@@ -186,8 +185,9 @@ rem about 34MB (package was ~70.7MB, becomes ~34.5MB). stdlib test/debug modules
 rem dropped as well.
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
   --name %APPNAME% ^
-  --icon "%CD%\reme-helper.ico" ^
+  --icon "%CD%\reme-helper-taskbar.ico" ^
   --add-data "%CD%\reme-helper.ico;." ^
+  --add-data "%CD%\reme-helper-taskbar.ico;." ^
   --add-data "%CD%\doc;doc" ^
   --exclude-module numpy ^
   --exclude-module numpy.core ^
@@ -261,6 +261,11 @@ if not exist "%RELEASE_DIR%\doc\zh\setup.md" (
 )
 if not exist "%RELEASE_DIR%\doc\capture.mjs" (
   echo [ERROR] capture script missing from the release.
+  if not defined NOPAUSE pause
+  exit /b 1
+)
+if not exist "%RELEASE_DIR%\_internal\reme-helper-taskbar.ico" (
+  echo [ERROR] taskbar icon asset missing from the release.
   if not defined NOPAUSE pause
   exit /b 1
 )

@@ -32,7 +32,9 @@ Start, stop and restart the ReMe service, and see whether it is healthy, from th
 ### VM tunnels
 
 Named SSH reverse-tunnel targets, each with its own VM-side port, so a VM reaches the same ReMe instance.
-Tunnels that drop are reconnected; tunnels you stop stay stopped.
+Tunnels that drop are reconnected; tunnels you stop stay stopped. Choose a status refresh interval from 20
+seconds to one hour in the tray (five minutes by default). Connect/disconnect transitions generate events,
+and the yellow status dot means at least one tunnel is online.
 
 ## What it connects
 
@@ -56,6 +58,8 @@ script appended) and hand the whole thing to an agent that can edit files on the
 
 To update later, use **Check for ReMe Helper updates** in the tray menu. It replaces the app in place and
 keeps the previous build in `%LOCALAPPDATA%\reme-helper\_backup`.
+The app also checks in the background on every startup and only notifies when a newer release exists; it
+never installs one automatically.
 
 > [!IMPORTANT]
 > ReMe must be running for agents to use memory. The app manages that, but it does not install ReMe itself —

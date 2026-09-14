@@ -174,9 +174,15 @@ def main_run() -> int:
         light_geom = settled_geometry()
         light_count = settled_count()
         engine_light = main.ui_call(lambda: main.ttk.Style().theme_use())
+        fonts_light = main.ui_call(lambda: {
+            name: str(main.ttk.Style().lookup(name, "font"))
+            for name in ("TButton", "TCheckbutton", "TRadiobutton", "TEntry", "TCombobox", "Treeview")
+        })
         bad_light = invisible(light)
         check("浅色：没有看不清的文字", not bad_light, "; ".join(bad_light[:4]))
         check("浅色：用的是统一引擎", engine_light == main.TTK_ENGINE, engine_light)
+        check("浅色：交互控件显式使用微软雅黑 UI 字体",
+              all("Microsoft YaHei UI" in value for value in fonts_light.values()), str(fonts_light))
 
         # 真实路径切到深色（托盘线程 → PENDING_THEME → 窗口自己落地）
         import threading
@@ -187,10 +193,17 @@ def main_run() -> int:
         dark_geom = settled_geometry()
         dark_count = settled_count()
         engine_dark = main.ui_call(lambda: main.ttk.Style().theme_use())
+        fonts_dark = main.ui_call(lambda: {
+            name: str(main.ttk.Style().lookup(name, "font"))
+            for name in ("TButton", "TCheckbutton", "TRadiobutton", "TEntry", "TCombobox", "Treeview")
+        })
         bad_dark = invisible(dark)
         check("深色：没有看不清的文字", not bad_dark, "; ".join(bad_dark[:4]))
         check("深色：用的是同一个引擎（不会整页位移）", engine_dark == engine_light,
               f"{engine_light} -> {engine_dark}")
+        check("深色：交互控件不回退到 Tk 默认中文字体",
+              fonts_dark == fonts_light and all("Microsoft YaHei UI" in value for value in fonts_dark.values()),
+              f"light={fonts_light} dark={fonts_dark}")
         check("切主题后控件数量不变", dark_count == light_count,
               f"{light_count} -> {dark_count}")
 

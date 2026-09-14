@@ -48,7 +48,7 @@ BLANK_PATHS = (
 # empty list.
 ALLOWED_VALUES: dict[tuple[str, ...], set[Any]] = {
     ("mode",): {"custom", "minimal", "full"},
-    ("probe_interval_sec",): {20},
+    ("probe_interval_sec",): {300},
     ("ui_lang",): {"zh", "en"},
     ("theme",): {"light", "dark"},
     ("llm", "max_tokens"): {65536},

@@ -105,6 +105,23 @@ try:
         finally:
             main.CFG["reme_root"] = saved_root
 
+        # 状态轮询只接受菜单提供的六档；新装默认 5 分钟，非法旧值也回到 5 分钟。
+        saved_config_path = main.CONFIG_PATH
+        try:
+            probe_config = Path(temp) / "probe-config.json"
+            main.CONFIG_PATH = probe_config
+            probe_config.write_text("{}", encoding="utf-8")
+            assert main.load_config()["probe_interval_sec"] == 300
+            probe_config.write_text('{"probe_interval_sec": 7}', encoding="utf-8")
+            assert main.load_config()["probe_interval_sec"] == 300
+            probe_config.write_text('{"probe_interval_sec": 20}', encoding="utf-8")
+            assert main.load_config()["probe_interval_sec"] == 300, "旧版硬编码20秒应迁移到新默认5分钟"
+            probe_config.write_text(
+                '{"probe_interval_sec": 20, "probe_interval_user_set": true}', encoding="utf-8")
+            assert main.load_config()["probe_interval_sec"] == 20, "用户主动选择的20秒必须保留"
+        finally:
+            main.CONFIG_PATH = saved_config_path
+
     target = main.CFG["targets"][0]
     command = main.ssh_command(target)
     mapping = f"127.0.0.1:{target['remote_port']}:127.0.0.1:2333"
@@ -507,6 +524,7 @@ _menu_walk(main.build_menu())
 assert any("控制台" in text for text in menu_texts), menu_texts
 assert any("打开 workspace" in text for text in menu_texts), menu_texts
 assert any("打开指引" in text for text in menu_texts), menu_texts
+assert any("状态刷新间隔" in text for text in menu_texts), menu_texts
 # 「打开…」已经收敛：本地配置文件不再各占一个菜单项
 for gone in ("打开ReMe目录", "打开官方default配置", "打开当前配置", "打开日志目录", "打开 .env（凭据）"):
     assert not any(gone in text for text in menu_texts), (gone, menu_texts)
@@ -525,6 +543,64 @@ assert any(str(main.reme_root()) == path for path in guide_paths), guide_paths
 assert not any("图形配置" in text for text in menu_texts), menu_texts
 assert "控制台" in main.mode_text()
 assert "图形配置" not in main.mode_text()
+
+# 状态刷新菜单六档与 opencodex-helper 一致；保存后唤醒监控，让新间隔立即生效。
+assert main.PROBE_INTERVAL_CHOICES == (
+    (20, "20 秒"), (60, "1 分钟"), (300, "5 分钟"),
+    (600, "10 分钟"), (1800, "30 分钟"), (3600, "1 小时"),
+)
+_saved_save_config = main.save_config
+_saved_notify_interval = main.notify
+_saved_interval = main.CFG.get("probe_interval_sec")
+_saved_interval_mark = main.CFG.get("probe_interval_user_set")
+_interval_messages = []
+try:
+    main.save_config = lambda: None
+    main.notify = lambda message: _interval_messages.append(message)
+    main.MONITOR_WAKE_EVENT.clear()
+    main.set_probe_interval(300)
+    assert main.CFG["probe_interval_sec"] == 300
+    assert main.CFG["probe_interval_user_set"] is True
+    assert main.MONITOR_WAKE_EVENT.is_set()
+    assert _interval_messages == ["状态刷新间隔已设为 5 分钟"], _interval_messages
+finally:
+    main.save_config = _saved_save_config
+    main.notify = _saved_notify_interval
+    main.CFG["probe_interval_sec"] = _saved_interval
+    main.CFG["probe_interval_user_set"] = _saved_interval_mark
+    main.MONITOR_WAKE_EVENT.clear()
+
+# 任务栏与托盘的16px小图都至少占14x14有效像素；任务栏另带20/40px原生帧。
+_tray_16 = main.make_icon(True, False, 16)
+_taskbar_16 = main.make_taskbar_icon(16)
+_tray_box = _tray_16.getbbox()
+_taskbar_box = _taskbar_16.getbbox()
+assert _tray_box and _taskbar_box
+assert (_tray_box[2] - _tray_box[0]) >= 14, _tray_box
+assert (_taskbar_box[2] - _taskbar_box[0]) >= 14, _taskbar_box
+assert 20 in main.TASKBAR_ICON_SIZES and 40 in main.TASKBAR_ICON_SIZES
+
+# 交互启动后检查一次更新：发现新版才通知；已是最新与网络失败只写日志。
+_saved_latest_release = main.helper_latest_release
+_saved_update_notify = main.notify
+_saved_update_state = dict(main.HELPER_UPDATE_STATE)
+_update_messages = []
+try:
+    main.STOP_EVENT.clear()
+    main.SHUTDOWN_STARTED.clear()
+    main.notify = lambda message: _update_messages.append(message)
+    main.helper_latest_release = lambda: {"tag": "v99.0.0", "zip": "x", "sha256": ""}
+    main.startup_helper_update_check()
+    assert len(_update_messages) == 1 and "v99.0.0" in _update_messages[0], _update_messages
+    _update_messages.clear()
+    main.helper_latest_release = lambda: {"tag": f"v{main.VERSION}", "zip": "x", "sha256": ""}
+    main.startup_helper_update_check()
+    assert not _update_messages, "已是最新时不应每次启动都弹通知"
+finally:
+    main.helper_latest_release = _saved_latest_release
+    main.notify = _saved_update_notify
+    main.HELPER_UPDATE_STATE.clear()
+    main.HELPER_UPDATE_STATE.update(_saved_update_state)
 
 # 16) 标题随语言切换（弹窗标题早就翻了，窗口标题/托盘提示以前没有）
 _lang = main.CFG.get("ui_lang")
@@ -740,6 +816,8 @@ _saved_tunnel_probe = main.probe_tunnel
 _saved_command = main.ssh_command
 _saved_tray_icon = main.TRAY_ICON
 _saved_make_icon = main.make_icon
+_saved_tunnel_notify = main.notify
+_tunnel_events = []
 
 
 class _TunnelIcon:
@@ -750,6 +828,7 @@ class _TunnelIcon:
 _tunnel_icon = _TunnelIcon()
 main.TRAY_ICON = _tunnel_icon
 main.make_icon = lambda healthy, tunnels: (healthy, tunnels)
+main.notify = lambda message: _tunnel_events.append(message)
 main.STATE["healthy"] = True
 
 main.CFG["targets"] = [_fake_target]
@@ -780,6 +859,7 @@ main.TUNNEL_STATE[_fake_key] = True
 main.stop_tunnel(_fake_target)
 assert main.TUNNEL_WANTED[_fake_key] is False, "手动停止必须清掉期望标记"
 assert _tunnel_icon.icon == (True, False), "主动停止返回前应立即移除托盘黄色点"
+assert _tunnel_events[-1] == "T 隧道已断开", _tunnel_events
 main.TUNNEL_STATE.clear()
 main.refresh_tunnels()
 assert main.TUNNEL_STATE[_fake_key] is False, "刚停掉的隧道不应被自动重连"
@@ -791,6 +871,7 @@ _tunnel_icon.icon = None
 ok, _detail = main.start_tunnel(_fake_target)
 assert ok is True
 assert _tunnel_icon.icon == (True, True), "主动启动成功后应立即显示托盘黄色点"
+assert _tunnel_events[-1] == "T 隧道已连接", _tunnel_events
 
 # 5. 期望连着的隧道掉线后会被重新尝试（尝试失败也无妨，关键是真去试了）
 main.probe_tunnel = _saved_tunnel_probe
@@ -825,6 +906,7 @@ main.probe_tunnel = _saved_tunnel_probe
 main.ssh_command = _saved_command
 main.TRAY_ICON = _saved_tray_icon
 main.make_icon = _saved_make_icon
+main.notify = _saved_tunnel_notify
 main.TUNNEL_PROCS.clear()
 main.TUNNEL_STATE.clear()
 main.TUNNEL_WANTED.clear()

@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.0.18"
+VERSION = "1.0.19"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -73,6 +73,10 @@ QUIT_REQUEST_PATH = LOCAL_DATA_DIR / "quit.request"
 # exe 与窗口共用的图标：由 --make-icon 用托盘那套画法生成，构建时喂给 PyInstaller。
 ICON_PATH = RUN_DIR / f"{APP_ID}.ico"
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+# The tray image is stateful and rendered by pystray. Windows taskbar/titlebar icons have a
+# different job and much less room, so use a second asset whose small frames fill more pixels.
+TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
+TASKBAR_ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -90,6 +94,15 @@ CRON_PRESETS = (
 )
 SCAN_DAY_CHOICES = (1, 2, 3, 7)
 MAX_UNIT_CHOICES = (3, 5, 10)
+PROBE_INTERVAL_CHOICES = (
+    (20, "20 秒"),
+    (60, "1 分钟"),
+    (300, "5 分钟"),
+    (600, "10 分钟"),
+    (1800, "30 分钟"),
+    (3600, "1 小时"),
+)
+PROBE_INTERVAL_VALUES = {seconds for seconds, _label in PROBE_INTERVAL_CHOICES}
 # reasoning_effort 的档位（值发给模型，标签给人看）。
 # 合法集合不是照抄某个客户端，而是由「ReMe 实际用的 agentscope 模型类」决定：
 # openai 收 none/minimal/low/medium/high/xhigh，deepseek 只收 high/max，
@@ -343,7 +356,8 @@ DEFAULT_CONFIG = {
     "start_on_launch": False,
     "autostart": False,
     "start_tunnels_with_reme": False,
-    "probe_interval_sec": 20,
+    "probe_interval_sec": 300,
+    "probe_interval_user_set": False,
     "custom": {
         "auto_memory": True,
         "auto_memory_cc": False,
@@ -1080,9 +1094,17 @@ def load_config() -> dict:
     if cfg.get("mode") not in MODE_NAMES:
         cfg["mode"] = "minimal"
     try:
-        cfg["probe_interval_sec"] = max(5, int(cfg.get("probe_interval_sec", 20)))
+        probe_interval = int(cfg.get("probe_interval_sec", 300))
     except (TypeError, ValueError):
-        cfg["probe_interval_sec"] = 20
+        probe_interval = 300
+    # Before the menu existed, every config inherited the hard-coded 20-second default. Treat that
+    # unmarked legacy value as the new five-minute default; once the user chooses any menu item the
+    # marker preserves even an explicit 20-second choice across restarts.
+    user_set_interval = bool(raw.get("probe_interval_user_set", False))
+    if not user_set_interval and probe_interval == 20:
+        probe_interval = 300
+    cfg["probe_interval_sec"] = probe_interval if probe_interval in PROBE_INTERVAL_VALUES else 300
+    cfg["probe_interval_user_set"] = user_set_interval
     for target in cfg["targets"]:
         target.setdefault("name", target.get("host") or "VM")
         target.setdefault("user", "")
@@ -2277,6 +2299,7 @@ def generate_custom_config(destination: Path | None = None) -> Path:
 STATE_LOCK = threading.RLock()
 ACTION_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
+MONITOR_WAKE_EVENT = threading.Event()
 SHUTDOWN_STARTED = threading.Event()
 SHUTDOWN_LOCK = threading.Lock()
 SHUTDOWN_FORCE_TIMEOUT = 30.0
@@ -2818,6 +2841,20 @@ def probe_tunnel(target: dict) -> bool:
         return False
 
 
+def set_tunnel_state(target: dict, connected: bool, *, announce: bool = True) -> None:
+    """Publish one tunnel state transition to every user-visible status channel."""
+    key = target_key(target)
+    previous = bool(TUNNEL_STATE.get(key, False))
+    connected = bool(connected)
+    TUNNEL_STATE[key] = connected
+    if previous == connected:
+        return
+    refresh_tray_icon()
+    if announce and not SHUTDOWN_STARTED.is_set() and not STOP_EVENT.is_set():
+        status = "已连接" if connected else "已断开"
+        notify(f"{target.get('name') or target.get('host') or 'VM'} 隧道{status}")
+
+
 def start_tunnel(target: dict) -> tuple[bool, str]:
     key = target_key(target)
     if STOP_EVENT.is_set():
@@ -2827,8 +2864,7 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
     # 进入这里就是「希望它连着」；随后调用的 stop_tunnel 会清掉这个标记，所以要在这里先立起来。
     TUNNEL_WANTED[key] = True
     if probe_tunnel(target):
-        TUNNEL_STATE[key] = True
-        refresh_tray_icon()
+        set_tunnel_state(target, True)
         return True, f"{target['name']}隧道已经连接"
     stop_tunnel(target)
     TUNNEL_WANTED[key] = True
@@ -2849,8 +2885,7 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
             stop_tunnel(target)
             return False, f"应用正在退出，已取消启动 {target['name']} 隧道"
         if probe_tunnel(target):
-            TUNNEL_STATE[key] = True
-            refresh_tray_icon()
+            set_tunnel_state(target, True)
             log(f"tunnel started target={key} pid={process.pid}")
             return True, f"{target['name']}隧道已连接"
         time.sleep(1)
@@ -2878,8 +2913,7 @@ def stop_tunnel(target: dict) -> None:
                 terminate_process_tree(proc.pid)
         except (psutil.Error, OSError):
             continue
-    TUNNEL_STATE[key] = False
-    refresh_tray_icon()
+    set_tunnel_state(target, False)
 
 
 def start_all_tunnels() -> tuple[bool, str]:
@@ -2916,12 +2950,12 @@ def refresh_tunnels() -> None:
         key = target_key(target)
         process = TUNNEL_PROCS.get(key)
         if process and process.poll() is None:
-            TUNNEL_STATE[key] = True
+            set_tunnel_state(target, True)
             continue
         if process:
             TUNNEL_PROCS.pop(key, None)
         was_up = TUNNEL_STATE.get(key, False)
-        TUNNEL_STATE[key] = False
+        set_tunnel_state(target, False)
         if not target.get("enabled", True):
             continue
         if not TUNNEL_WANTED.get(key, False) and not was_up:
@@ -2957,7 +2991,7 @@ def notify(message: str) -> None:
             log(f"balloon failed: {type(exc).__name__}: {exc}")
 
 
-def run_action(function, refresh=True) -> None:
+def run_action(function, refresh=True, notify_result=True) -> None:
     def worker():
         if SHUTDOWN_STARTED.is_set():
             log("action ignored: shutdown already started")
@@ -2973,8 +3007,10 @@ def run_action(function, refresh=True) -> None:
             message = ("成功：" if ok else "失败：") + detail
             if SHUTDOWN_STARTED.is_set():
                 log(f"action completed during shutdown; notification suppressed: {message}")
-            else:
+            elif notify_result:
                 notify(message)
+            else:
+                log(message)
         except Exception as exc:
             log(f"action failed: {exc}")
             if not SHUTDOWN_STARTED.is_set():
@@ -3398,6 +3434,36 @@ def toggle_tunnels_on_start(_icon, _item) -> None:
         refresh_tray_menu()
 
 
+def set_probe_interval(seconds: int) -> None:
+    """Persist and immediately apply the shared ReMe/tunnel status refresh interval."""
+    seconds = int(seconds)
+    if seconds not in PROBE_INTERVAL_VALUES:
+        raise ValueError("状态刷新间隔不受支持")
+    CFG["probe_interval_sec"] = seconds
+    CFG["probe_interval_user_set"] = True
+    save_config()
+    MONITOR_WAKE_EVENT.set()
+    label = next(label for value, label in PROBE_INTERVAL_CHOICES if value == seconds)
+    notify(f"状态刷新间隔已设为 {label}")
+
+
+def build_probe_interval_menu() -> pystray.Menu:
+    def action(value: int):
+        return lambda _icon, _item: set_probe_interval(value)
+
+    def checked(value: int):
+        return lambda _item: int(CFG.get("probe_interval_sec", 300)) == value
+
+    return pystray.Menu(*(
+        pystray.MenuItem(
+            menu_text(label),
+            action(seconds),
+            checked=checked(seconds),
+        )
+        for seconds, label in PROBE_INTERVAL_CHOICES
+    ))
+
+
 def scan_local_keys() -> list[str]:
     ssh_dir = Path.home() / ".ssh"
     names = ("id_ed25519", "id_rsa", "id_ecdsa", "id_ed25519_opencodex_helper")
@@ -3519,7 +3585,7 @@ def toggle_target(target: dict):
         target["enabled"] = not target.get("enabled", True)
         save_config()
         if target["enabled"] and service_is_healthy():
-            run_action(lambda: start_tunnel(target))
+            run_action(lambda: start_tunnel(target), notify_result=False)
         else:
             stop_tunnel(target)
             if TRAY_ICON:
@@ -3654,46 +3720,49 @@ def _configure_styles(style) -> None:
     """把当前调色板铺到所有用到的 ttk 样式上（每次切主题都要重配：setTheme 会重置样式）。"""
     bg, panel, text_color = THEME["bg"], THEME["panel"], THEME["text"]
     border, field_bg, field_fg = THEME["border"], THEME["field_bg"], THEME["field_fg"]
-    style.configure(".", background=bg, foreground=text_color, fieldbackground=field_bg,
+    # Do not let TkDefaultFont choose a per-widget CJK fallback. On this Windows/Tk build the
+    # fallback is visibly softer on dark backgrounds, most obviously on Chinese TButton text.
+    # One explicit UI font covers every ttk button, radio, check, entry and auxiliary dialog.
+    style.configure(".", font=FONT_UI, background=bg, foreground=text_color, fieldbackground=field_bg,
                     bordercolor=border, lightcolor=border, darkcolor=border,
                     troughcolor=bg, focuscolor=THEME["sel_bg"],
                     selectbackground=THEME["sel_bg"], selectforeground=text_color)
     style.configure("TFrame", background=bg)
     style.configure("TLabel", background=bg, foreground=text_color)
-    style.configure("TButton", background=panel, foreground=text_color, bordercolor=border,
+    style.configure("TButton", font=FONT_UI, background=panel, foreground=text_color, bordercolor=border,
                     lightcolor=panel, darkcolor=panel, focuscolor=THEME["sel_bg"], padding=(8, 4))
     style.map("TButton",
               background=[("pressed", THEME["sel_bg"]), ("active", THEME["sel_bg"]), ("disabled", bg)],
               foreground=[("disabled", THEME["disabled"])])
     for name_ in ("TCheckbutton", "TRadiobutton"):
-        style.configure(name_, background=bg, foreground=text_color, focuscolor=bg,
+        style.configure(name_, font=FONT_UI, background=bg, foreground=text_color, focuscolor=bg,
                         indicatorcolor=THEME["ok"], indicatormargin=(1, 1, 6, 1))
         style.map(name_,
                   background=[("active", bg)],
                   indicatorcolor=[("selected", THEME["ok"]), ("!selected", field_bg),
                                   ("disabled", THEME["disabled"])],
                   foreground=[("disabled", THEME["disabled"])])
-    style.configure("TEntry", fieldbackground=field_bg, foreground=field_fg, insertcolor=text_color,
+    style.configure("TEntry", font=FONT_UI, fieldbackground=field_bg, foreground=field_fg, insertcolor=text_color,
                     bordercolor=border, lightcolor=border, darkcolor=border)
     style.map("TEntry", fieldbackground=[("disabled", bg)], foreground=[("disabled", THEME["disabled"])])
-    style.configure("TCombobox", fieldbackground=field_bg, background=panel, foreground=field_fg,
+    style.configure("TCombobox", font=FONT_UI, fieldbackground=field_bg, background=panel, foreground=field_fg,
                     arrowcolor=text_color, bordercolor=border, lightcolor=border, darkcolor=border)
     style.map("TCombobox", fieldbackground=[("readonly", field_bg), ("disabled", bg)],
               foreground=[("readonly", field_fg), ("disabled", THEME["disabled"])],
               arrowcolor=[("disabled", THEME["disabled"])])
     style.configure("TSeparator", background=border)
-    style.configure("Treeview", background=panel, fieldbackground=panel, foreground=text_color,
+    style.configure("Treeview", font=FONT_UI, background=panel, fieldbackground=panel, foreground=text_color,
                     bordercolor=border, lightcolor=panel, darkcolor=panel)
     style.map("Treeview", background=[("selected", THEME["sel_bg"])],
               foreground=[("selected", text_color)])
-    style.configure("Treeview.Heading", background=bg, foreground=text_color, bordercolor=border,
+    style.configure("Treeview.Heading", font=FONT_BOLD, background=bg, foreground=text_color, bordercolor=border,
                     lightcolor=bg, darkcolor=bg)
     style.map("Treeview.Heading", background=[("active", THEME["sel_bg"])])
     style.configure("Vertical.TScrollbar", background=panel, troughcolor=bg, bordercolor=border,
                     arrowcolor=text_color, lightcolor=panel, darkcolor=panel)
     style.map("Vertical.TScrollbar", background=[("active", THEME["sel_bg"])])
     # 思考强度那一排「分段按钮」：自己建的样式，必须每次都重配，否则切主题会退化成黑块
-    style.configure("Segmented.Toolbutton", anchor="center", padding=(10, 4),
+    style.configure("Segmented.Toolbutton", font=FONT_UI, anchor="center", padding=(10, 4),
                     background=panel, foreground=text_color, bordercolor=border,
                     lightcolor=panel, darkcolor=panel, focuscolor=THEME["sel_bg"])
     style.map("Segmented.Toolbutton",
@@ -3784,7 +3853,8 @@ def restyle_widgets(widget, remap: dict | None = None) -> None:
                              selectbackground=THEME["sel_bg"], selectforeground=THEME["text"])
         elif cls in ("Button", "Checkbutton", "Radiobutton", "Entry"):
             widget.configure(background=keep(widget.cget("background"), THEME["bg"]),
-                             foreground=keep(widget.cget("foreground"), THEME["text"]))
+                             foreground=keep(widget.cget("foreground"), THEME["text"]),
+                             font=FONT_UI)
     except tk.TclError:
         pass
     for child in widget.winfo_children():
@@ -6079,8 +6149,8 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("打开ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("VM目标"), build_targets_menu()),
-        pystray.MenuItem(menu_text("启动全部VM隧道"), lambda _icon, _item: run_action(start_all_tunnels), enabled=lambda _item: service_is_healthy()),
-        pystray.MenuItem(menu_text("停止全部VM隧道"), lambda _icon, _item: run_action(stop_all_tunnels)),
+        pystray.MenuItem(menu_text("启动全部VM隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
+        pystray.MenuItem(menu_text("停止全部VM隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
         pystray.MenuItem(menu_text("ReMe启动后启动隧道"), toggle_tunnels_on_start, checked=lambda _item: bool(CFG.get("start_tunnels_with_reme"))),
         pystray.Menu.SEPARATOR,
         # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
@@ -6092,6 +6162,7 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("English / 中文"), toggle_language),
         pystray.MenuItem(menu_text("启动工具时启动ReMe"), toggle_start_on_launch, checked=lambda _item: bool(CFG.get("start_on_launch"))),
         pystray.MenuItem(menu_text("开机自启"), toggle_autostart, checked=lambda _item: autostart_enabled()),
+        pystray.MenuItem(menu_text("状态刷新间隔"), build_probe_interval_menu()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("未检测到 ReMe —— 复制安装提示词"),
                          lambda _icon, _item: copy_prompt_from_tray(),
@@ -6116,7 +6187,7 @@ def icon_font(size: int):
 
 
 def make_icon(running: bool = True, tunnels: bool = False, size: int = 64) -> Image.Image:
-    """托盘与 exe 共用的图标：圆底 + 「R」。
+    """状态托盘图标：圆底 + 「R」+ 可选隧道点。
 
     坐标全部按比例算——同一个函数既要喂 16px 的 .ico 帧，也要喂 64px 的托盘图标；
     写死像素的话小尺寸会糊成一团。
@@ -6124,11 +6195,13 @@ def make_icon(running: bool = True, tunnels: bool = False, size: int = 64) -> Im
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     color = "#26a269" if running else "#6c757d"
-    margin = max(1, round(size * 0.10))
-    ring = max(1, round(size * 0.045))
+    # Notification-area icons end up around 16–20 physical pixels. The old 10% margin reduced the
+    # 16px drawing to a 12x12 island and made both the ring and R look soft after shell scaling.
+    margin = max(1, round(size * 0.035))
+    ring = max(1, round(size * 0.04))
     draw.ellipse((margin, margin, size - margin - 1, size - margin - 1),
                  fill=color, outline="#f6f5f4", width=ring)
-    font = icon_font(max(7, round(size * 0.58)))
+    font = icon_font(max(9, round(size * 0.67)))
     left, top, right, bottom = draw.textbbox((0, 0), "R", font=font)
     draw.text(((size - (right - left)) / 2 - left, (size - (bottom - top)) / 2 - top),
               "R", font=font, fill="white")
@@ -6136,6 +6209,21 @@ def make_icon(running: bool = True, tunnels: bool = False, size: int = 64) -> Im
         dot = max(4, round(size * 0.26))
         draw.ellipse((size - dot - 1, size - dot - 1, size - 1, size - 1),
                      fill="#f5c211", outline="#ffffff", width=max(1, round(size * 0.03)))
+    return image
+
+
+def make_taskbar_icon(size: int = 64) -> Image.Image:
+    """Taskbar/titlebar asset with small-size geometry that fills the available pixels."""
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    margin = max(1, round(size * 0.035))
+    ring = max(1, round(size * 0.04))
+    draw.ellipse((margin, margin, size - margin - 1, size - margin - 1),
+                 fill="#26a269", outline="#ffffff", width=ring)
+    font = icon_font(max(9, round(size * 0.67)))
+    left, top, right, bottom = draw.textbbox((0, 0), "R", font=font)
+    draw.text(((size - (right - left)) / 2 - left, (size - (bottom - top)) / 2 - top),
+              "R", font=font, fill="white")
     return image
 
 
@@ -6156,8 +6244,8 @@ def refresh_tray_icon() -> None:
         log(f"tray icon refresh failed: {type(exc).__name__}: {exc}")
 
 
-def write_app_icon() -> Path:
-    """生成 exe 用的多尺寸 .ico。
+def write_app_icon() -> tuple[Path, Path]:
+    """Generate separate multi-size brand/tray and taskbar/window ICO assets.
 
     每一帧单独按目标尺寸渲染，不靠缩放：256px 缩到 16px 的话那个「R」会糊。
     """
@@ -6165,7 +6253,11 @@ def write_app_icon() -> Path:
     frames[-1].save(ICON_PATH, format="ICO",
                     sizes=[(size, size) for size in ICON_SIZES],
                     append_images=frames[:-1])
-    return ICON_PATH
+    taskbar_frames = [make_taskbar_icon(size) for size in TASKBAR_ICON_SIZES]
+    taskbar_frames[-1].save(TASKBAR_ICON_PATH, format="ICO",
+                            sizes=[(size, size) for size in TASKBAR_ICON_SIZES],
+                            append_images=taskbar_frames[:-1])
+    return ICON_PATH, TASKBAR_ICON_PATH
 
 
 def icon_path() -> Path | None:
@@ -6174,10 +6266,10 @@ def icon_path() -> Path | None:
     PyInstaller 6 的 onedir 会把 ``--add-data`` 放进 ``_internal\\``，不在 exe 旁边；
     源码运行时就在脚本目录。三处都找一遍，找不到就返回 None——窗口图标不是必需品。
     """
-    candidates = [ICON_PATH, APP_DIR / "_internal" / ICON_PATH.name]
+    candidates = [TASKBAR_ICON_PATH, APP_DIR / "_internal" / TASKBAR_ICON_PATH.name]
     bundle = getattr(sys, "_MEIPASS", "")
     if bundle:
-        candidates.append(Path(bundle) / ICON_PATH.name)
+        candidates.append(Path(bundle) / TASKBAR_ICON_PATH.name)
     for path in candidates:
         try:
             if path.is_file():
@@ -6211,7 +6303,6 @@ def monitor_loop() -> None:
     完全无法操作，用户看到的往往还是上一次被杀掉的实例留下的幽灵图标，点了毫无反应。
     现在图标先立起来，真实状态由这里的第一轮在后台补上。
     """
-    interval = CFG.get("probe_interval_sec", 20)
     last_signature = None
     last_icon = None
     while True:
@@ -6233,15 +6324,19 @@ def monitor_loop() -> None:
             if signature != last_signature:
                 last_signature = signature
                 refresh_tray_menu()
-        # 等待放在最后：第一轮必须立刻探测（见上面的说明）
-        if STOP_EVENT.wait(interval):
+        # 等待放在最后：第一轮必须立刻探测。菜单改间隔时唤醒一次，让新值马上生效；
+        # 稳态 20 秒也只是一次 localhost HTTP + 进程状态检查，不会反复建立 SSH。
+        interval = int(CFG.get("probe_interval_sec", 300))
+        MONITOR_WAKE_EVENT.wait(interval)
+        MONITOR_WAKE_EVENT.clear()
+        if STOP_EVENT.is_set():
             return
 
 
 def quit_watch_loop() -> None:
     """`--quit` 的接收端：轮询请求文件，发现就删掉它并走退出路径。
 
-    为什么**单开一个循环**：monitor_loop 的节拍是 `probe_interval_sec`（默认 20 s），
+    为什么**单开一个循环**：monitor_loop 的节拍是 `probe_interval_sec`（可配置，默认 300 s / 5 分钟），
     满足不了「`--quit` 后 2 秒内退出」的判据；这里用 1.0 s，且不碰探测节拍。
     """
     while not STOP_EVENT.wait(1.0):
@@ -6372,6 +6467,7 @@ def shutdown_tray(icon, *, claimed: bool = False) -> None:
     # lock to abandon its health/tunnel wait. Taking the same lock then gives cleanup a stable final
     # view: anything the earlier action managed to create is present and can be stopped exactly once.
     STOP_EVENT.set()
+    MONITOR_WAKE_EVENT.set()
     log("shutdown: waiting for active action")
     with ACTION_LOCK:
         log("shutdown: active action drained; cleanup starting")
@@ -6554,6 +6650,16 @@ def check_helper_update() -> tuple[bool, str]:
     if newer:
         return True, t("有新版本，点「下载并更新」会自动替换并重启") + f"（{latest['tag']}）"
     return True, t("已是最新版本") + f"（{VERSION}）"
+
+
+def startup_helper_update_check() -> None:
+    """Check once after every interactive startup without blocking or opening a dialog."""
+    if STOP_EVENT.is_set() or SHUTDOWN_STARTED.is_set():
+        return
+    ok, detail = check_helper_update()
+    log(f"startup update check: ok={ok} detail={detail}")
+    if ok and HELPER_UPDATE_STATE.get("newer") and not STOP_EVENT.is_set():
+        notify(detail)
 
 
 def download_and_apply_helper_update() -> tuple[bool, str]:
@@ -7205,8 +7311,9 @@ def main() -> int:
     utf8_diag_streams()
     if "--make-icon" in sys.argv:
         try:
-            path = write_app_icon()
-            print(f"icon written: {path} ({', '.join(str(s) for s in ICON_SIZES)})")
+            tray_path, taskbar_path = write_app_icon()
+            print(f"icons written: tray={tray_path} ({', '.join(str(s) for s in ICON_SIZES)}); "
+                  f"taskbar={taskbar_path} ({', '.join(str(s) for s in TASKBAR_ICON_SIZES)})")
             return 0
         except Exception as exc:  # noqa: BLE001
             print(f"icon failed: {type(exc).__name__}: {exc}")
@@ -7271,6 +7378,7 @@ def main() -> int:
         # 后台有限重试；前三次仍失败才弹窗，避免一次几十毫秒的暂态就惊扰用户。
         if TRAY_ADD_STATE.get("result") is False:
             threading.Thread(target=recover_tray_registration, args=(icon,), daemon=True).start()
+        threading.Thread(target=startup_helper_update_check, daemon=True).start()
         if CFG.get("start_on_launch") and not service_is_healthy():
             run_action(start_service)
 
