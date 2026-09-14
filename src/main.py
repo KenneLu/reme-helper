@@ -3858,7 +3858,12 @@ def _configure_styles(style, palette_name: str = "") -> None:
                     lightcolor=panel, darkcolor=panel, focuscolor=THEME["sel_bg"], padding=(8, 4))
     style.map("TButton",
               background=[("pressed", THEME["sel_bg"]), ("active", THEME["sel_bg"]), ("disabled", bg)],
-              foreground=[("disabled", THEME["disabled"])])
+              foreground=[("disabled", THEME["disabled"])],
+              # Tk 的 alt 主题在禁用态默认给标签设 embossed=1：文字会被再画一遍浅色阴影，
+              # 笔画加粗、边缘起毛，深色底上就是用户说的「底部三个按钮糊」。关掉后禁用态
+              # 只剩颜色差异，字形与启用态一致（实测 style.lookup('TButton','embossed',
+              # ('disabled',)) 由 '1' 变 '0'）。
+              embossed=[("disabled", 0)])
     for name_ in ("TCheckbutton", "TRadiobutton"):
         style.configure(name_, font=FONT_UI, background=bg, foreground=text_color, focuscolor=bg,
                         indicatorcolor=THEME["ok"], indicatormargin=(1, 1, 6, 1))
@@ -3866,7 +3871,8 @@ def _configure_styles(style, palette_name: str = "") -> None:
                   background=[("active", bg)],
                   indicatorcolor=[("selected", THEME["ok"]), ("!selected", field_bg),
                                   ("disabled", THEME["disabled"])],
-                  foreground=[("disabled", THEME["disabled"])])
+                  foreground=[("disabled", THEME["disabled"])],
+                  embossed=[("disabled", 0)])
     style.configure("TEntry", font=FONT_UI, fieldbackground=field_bg, foreground=field_fg, insertcolor=text_color,
                     bordercolor=border, lightcolor=border, darkcolor=border)
     style.map("TEntry", fieldbackground=[("disabled", bg)], foreground=[("disabled", THEME["disabled"])])

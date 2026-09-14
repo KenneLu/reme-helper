@@ -14,6 +14,7 @@
 - **深色下禁用文字不再发糊**，也就是用户看到的「右下两个按钮好了、左下角【回到基线】还糊」：深色里 ClearType 的彩色边纹与浅色一样多，而禁用文字笔画细、核心亮不起来就看不清；另外两个按钮在有未保存改动时是启用态、文字亮，所以显得清楚。深色 `disabled` 由 `#aab3c2` 提到 `#c9d2e0`，勾选框与单选的禁用态一并受益。
 - **指示框描边单独给一档颜色**（新增调色板键 `indicator_edge`：浅色 `#98a1ae`、深色 `#b9c3d1`）。以前描边取 `border`，深色下几乎与背景同色——就是用户说的「边缘没有变灰白色，对比不强烈」。
 - 这一轮的两个复现工具留在仓库外：`codex-probe/ui_capture_probe.py`（`PrintWindow` 抓自己窗口，不碰桌面）和 `codex-probe/console_theme_capture.py`（在真实控制台里连切三次主题逐次抓图）。前者也用来做「带 ↺ 与不带 ↺」的对照，证明那个符号不影响中文字形。
+- **禁用按钮文字发糊的真正原因：Tk 在禁用态给标签加了 `embossed=1`**。`alt` 主题的映射里写着 `TButton -embossed {disabled 1}`，也就是禁用文字会被**再画一遍浅色阴影**，笔画加粗、边缘起毛；启用态没有这层，所以同一行里启用按钮清楚、禁用的三个按钮糊。抓图实测：关掉后禁用态字形与启用态完全一致，只剩颜色淡一点。修法是在 `_configure_styles()` 的 map 里显式 `embossed=[("disabled", 0)]`（`TButton`、`TCheckbutton`、`TRadiobutton` 都加），并已验证 `style.lookup("TButton", "embossed", ("disabled",))` 由 `'1'` 变 `'0'`。上一版的深色 `disabled` 提亮保留：颜色淡归淡，笔画不该糊。
 
 ## v1.0.19
 
