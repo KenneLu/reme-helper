@@ -616,7 +616,21 @@ _saved_targets = main.CFG["targets"]
 _saved_tunnels_on = main.CFG.get("start_tunnels_with_reme")
 _saved_up = main.service_up
 _saved_probe = main.probe_health
+_saved_tunnel_probe = main.probe_tunnel
 _saved_command = main.ssh_command
+_saved_tray_icon = main.TRAY_ICON
+_saved_make_icon = main.make_icon
+
+
+class _TunnelIcon:
+    visible = True
+    icon = None
+
+
+_tunnel_icon = _TunnelIcon()
+main.TRAY_ICON = _tunnel_icon
+main.make_icon = lambda healthy, tunnels: (healthy, tunnels)
+main.STATE["healthy"] = True
 
 main.CFG["targets"] = [_fake_target]
 main.ssh_command = lambda target, remote=None: ["cmd", "/c", "exit", "1"]   # 起不来，但会被尝试
@@ -642,13 +656,24 @@ assert main.TUNNEL_WANTED[_fake_key] is False, main.TUNNEL_WANTED
 main.TUNNEL_WANTED[_fake_key] = True
 main.TUNNEL_PROCS.clear()
 main.TUNNEL_STATE.clear()
+main.TUNNEL_STATE[_fake_key] = True
 main.stop_tunnel(_fake_target)
 assert main.TUNNEL_WANTED[_fake_key] is False, "手动停止必须清掉期望标记"
+assert _tunnel_icon.icon == (True, False), "主动停止返回前应立即移除托盘黄色点"
 main.TUNNEL_STATE.clear()
 main.refresh_tunnels()
 assert main.TUNNEL_STATE[_fake_key] is False, "刚停掉的隧道不应被自动重连"
 
-# 4. 期望连着的隧道掉线后会被重新尝试（尝试失败也无妨，关键是真去试了）
+# 4. 主动启动发现隧道已经可用时，应在返回前立即显示黄色点
+main.probe_tunnel = lambda _target: True
+main.TUNNEL_STATE.clear()
+_tunnel_icon.icon = None
+ok, _detail = main.start_tunnel(_fake_target)
+assert ok is True
+assert _tunnel_icon.icon == (True, True), "主动启动成功后应立即显示托盘黄色点"
+
+# 5. 期望连着的隧道掉线后会被重新尝试（尝试失败也无妨，关键是真去试了）
+main.probe_tunnel = _saved_tunnel_probe
 main.TUNNEL_WANTED[_fake_key] = True
 started = []
 
@@ -664,7 +689,7 @@ main.TUNNEL_STATE.clear()
 main.refresh_tunnels()
 assert started, "期望连着的隧道掉线后应当被重新拉起"
 
-# 5. 从未要求连接的目标不应被无谓地重试
+# 6. 从未要求连接的目标不应被无谓地重试
 main.TUNNEL_WANTED.clear()
 started.clear()
 main.TUNNEL_PROCS.clear()
@@ -676,7 +701,10 @@ main.CFG["targets"] = _saved_targets
 main.CFG["start_tunnels_with_reme"] = _saved_tunnels_on
 main.service_up = _saved_up
 main.probe_health = _saved_probe
+main.probe_tunnel = _saved_tunnel_probe
 main.ssh_command = _saved_command
+main.TRAY_ICON = _saved_tray_icon
+main.make_icon = _saved_make_icon
 main.TUNNEL_PROCS.clear()
 main.TUNNEL_STATE.clear()
 main.TUNNEL_WANTED.clear()

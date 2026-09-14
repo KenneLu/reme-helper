@@ -2817,6 +2817,7 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
     TUNNEL_WANTED[key] = True
     if probe_tunnel(target):
         TUNNEL_STATE[key] = True
+        refresh_tray_icon()
         return True, f"{target['name']}隧道已经连接"
     stop_tunnel(target)
     TUNNEL_WANTED[key] = True
@@ -2835,6 +2836,7 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
     while time.monotonic() < deadline and process.poll() is None:
         if probe_tunnel(target):
             TUNNEL_STATE[key] = True
+            refresh_tray_icon()
             log(f"tunnel started target={key} pid={process.pid}")
             return True, f"{target['name']}隧道已连接"
         time.sleep(1)
@@ -2863,6 +2865,7 @@ def stop_tunnel(target: dict) -> None:
         except (psutil.Error, OSError):
             continue
     TUNNEL_STATE[key] = False
+    refresh_tray_icon()
 
 
 def start_all_tunnels() -> tuple[bool, str]:
@@ -6109,6 +6112,23 @@ def make_icon(running: bool = True, tunnels: bool = False, size: int = 64) -> Im
         draw.ellipse((size - dot - 1, size - dot - 1, size - 1, size - 1),
                      fill="#f5c211", outline="#ffffff", width=max(1, round(size * 0.03)))
     return image
+
+
+def refresh_tray_icon() -> None:
+    """Apply current ReMe/tunnel state immediately instead of waiting for the monitor tick.
+
+    User actions already update ``TUNNEL_STATE`` before their completion balloon is shown. Without
+    this call the menu text changes at once but the yellow tunnel dot can remain for one complete
+    probe interval (normally 20 seconds), making two status channels contradict each other.
+    """
+    icon = TRAY_ICON
+    if icon is None or STOP_EVENT.is_set():
+        return
+    try:
+        if icon.visible:
+            icon.icon = make_icon(bool(STATE.get("healthy")), any(TUNNEL_STATE.values()))
+    except Exception as exc:  # noqa: BLE001 - status paint failure must not break the action
+        log(f"tray icon refresh failed: {type(exc).__name__}: {exc}")
 
 
 def write_app_icon() -> Path:
