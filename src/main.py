@@ -3707,14 +3707,18 @@ PALETTES = {
         "bg": "#f4f5f7", "panel": "#ffffff", "text": "#111827", "text2": "#374151",
         "muted": "#6b7280", "disabled": "#4b5563", "link": "#0969da",
         "ok": "#0a7d28", "warn": "#b26a00", "err": "#b3261e",
+        "indicator_edge": "#98a1ae",
         "field_bg": "#ffffff", "field_fg": "#111827", "tip_bg": "#ffffe0", "tip_fg": "#111827",
         "toast_bg": "#1f2937", "toast_fg": "#f9fafb", "sel_bg": "#cfe3ff", "border": "#d0d4da",
         "code_bg": "#f3f3f3", "table_bg": "#fafafa",
     },
     "dark": {
         "bg": "#1b1f27", "panel": "#222833", "text": "#e8eaed", "text2": "#c7ccd6",
-        "muted": "#98a2b3", "disabled": "#aab3c2", "link": "#6cb6ff",
+        # disabled 由 #aab3c2 提到 #c9d2e0：深色底下 ClearType 的彩色边纹其实和浅色一样多，
+        # 灰字笔画细、核心亮不起来，看上去就是「糊」。按钮禁用态尤其明显（回到基线的文字）。
+        "muted": "#98a2b3", "disabled": "#c9d2e0", "link": "#6cb6ff",
         "ok": "#4ade80", "warn": "#fbbf24", "err": "#f87171",
+        "indicator_edge": "#b9c3d1",
         "field_bg": "#2a313d", "field_fg": "#e8eaed", "tip_bg": "#2f3744", "tip_fg": "#e8eaed",
         "toast_bg": "#3b4354", "toast_fg": "#f3f4f6", "sel_bg": "#33507a", "border": "#3a4250",
         "code_bg": "#2a313d", "table_bg": "#242b36",
@@ -3741,6 +3745,8 @@ PALETTE_BEFORE: dict = dict(PALETTES["light"])
 INDICATOR_PIXELS = 13
 INDICATOR_IMAGES: dict = {}
 INDICATOR_ELEMENTS: set = set()
+# 每个样式名最初（还没被我们改过）的 layout：切主题时都从它重建，避免越改越走样。
+INDICATOR_BASE_LAYOUT: dict = {}
 
 
 def _relabel_layout(nodes, old: str, new: str) -> list:
@@ -3768,7 +3774,9 @@ def draw_indicator(kind: str, state: str, theme: dict, pixels: int = INDICATOR_P
     draw = ImageDraw.Draw(image)
     disabled = state.startswith("disabled")
     selected = state.endswith("selected")
-    edge = theme["disabled"] if disabled else theme["border"]
+    # 指示框的描边单独给一档颜色：它要压在深色底/浅色底上都看得见，
+    # 直接用 border 在深色下几乎与背景同色（用户反馈「对比不强烈」）。
+    edge = theme["disabled"] if disabled else theme.get("indicator_edge", theme["border"])
     fill = theme["bg"] if disabled else theme["field_bg"]
     mark = theme["disabled"] if disabled else theme["ok"]
     stroke = max(ratio, round(box * 0.10))
@@ -3800,21 +3808,27 @@ def indicator_image_name(interpreter, kind: str, state: str, palette_name: str) 
     path = directory / f"{kind}-{state}-{palette_name}.png"
     draw_indicator(kind, state, THEME).save(path)
     try:
-        interpreter.call("image", "delete", name)   # 切回同一主题时重建，先清掉旧的
+        interpreter.call("image", "create", "photo", name, "-file", str(path))
     except tk.TclError:
+        # 已经建过就保持同一个 Tk 图像：删掉再建会让 ttk 元素里那份引用失效，
+        # 元素随后会画出上一个主题的图（浅色底下看到黑点就是这么来的）。
         pass
-    interpreter.call("image", "create", "photo", name, "-file", str(path))
     return name
 
 
 def install_indicator_images(style, palette_name: str) -> None:
     """把复选/单选指示框换成上面的自制图。
 
-    element_create 一旦失败就保持 Tk 原样，绝不能因为图标把设置窗口弄坏。
+    两处坑都踩过，留在这里免得再走一遍：
+      1. layout 必须**从最初的树重建**。第一版是拿当前 layout 去找 "Checkbutton.indicator"
+         再改名，可第一次改完树里就没有这个名字了；第二次切主题找不到节点、原样写回时，
+         换过去的主题仍然画着上一个主题的图——浅色下那团黑点就是这么来的。
+      2. element_create 一旦失败就保持 Tk 原样，绝不能因为图标把设置窗口弄坏。
     """
     interpreter = style.master.tk
     for kind, style_name, element in (("check", "TCheckbutton", "Checkbutton.indicator"),
                                       ("radio", "TRadiobutton", "Radiobutton.indicator")):
+        base_layout = INDICATOR_BASE_LAYOUT.setdefault(style_name, style.layout(style_name))
         element_name = f"ReMe.{kind}.{palette_name}"
         images = {state: indicator_image_name(interpreter, kind, state, palette_name)
                   for state in ("normal", "selected", "disabled", "disabled-selected")}
@@ -3824,7 +3838,7 @@ def install_indicator_images(style, palette_name: str) -> None:
                                  (("disabled",), images["disabled"]),
                                  (["disabled", "selected"], images["disabled-selected"]))
             INDICATOR_ELEMENTS.add(element_name)
-        style.layout(style_name, _relabel_layout(style.layout(style_name), element, element_name))
+        style.layout(style_name, _relabel_layout(base_layout, element, element_name))
 
 
 def _configure_styles(style, palette_name: str = "") -> None:
