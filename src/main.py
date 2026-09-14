@@ -3714,9 +3714,7 @@ PALETTES = {
     },
     "dark": {
         "bg": "#1b1f27", "panel": "#222833", "text": "#e8eaed", "text2": "#c7ccd6",
-        # disabled 由 #aab3c2 提到 #c9d2e0：深色底下 ClearType 的彩色边纹其实和浅色一样多，
-        # 灰字笔画细、核心亮不起来，看上去就是「糊」。按钮禁用态尤其明显（回到基线的文字）。
-        "muted": "#98a2b3", "disabled": "#c9d2e0", "link": "#6cb6ff",
+        "muted": "#98a2b3", "disabled": "#aab3c2", "link": "#6cb6ff",
         "ok": "#4ade80", "warn": "#fbbf24", "err": "#f87171",
         "indicator_edge": "#b9c3d1",
         "field_bg": "#2a313d", "field_fg": "#e8eaed", "tip_bg": "#2f3744", "tip_fg": "#e8eaed",
@@ -3845,9 +3843,10 @@ def _configure_styles(style, palette_name: str = "") -> None:
     """把当前调色板铺到所有用到的 ttk 样式上（每次切主题都要重配：setTheme 会重置样式）。"""
     bg, panel, text_color = THEME["bg"], THEME["panel"], THEME["text"]
     border, field_bg, field_fg = THEME["border"], THEME["field_bg"], THEME["field_fg"]
-    # Do not let TkDefaultFont choose a per-widget CJK fallback. On this Windows/Tk build the
-    # fallback is visibly softer on dark backgrounds, most obviously on Chinese TButton text.
-    # One explicit UI font covers every ttk button, radio, check, entry and auxiliary dialog.
+    # 这里**不是**「防中文字体回退」：实测这台机器上 Tk 的默认字体本来就是 Microsoft YaHei UI，
+    # 只是 9pt。显式写出来的作用是让 ttk 交互控件用跟界面里那批 FONT_UI 标签同一档字号（10pt），
+    # 不再出现「按钮 9pt、说明文字 10pt」这种混排。（禁用态文字之所以糊，是 Tk 给禁用标签加了
+    # embossed 效果，已单独关掉，跟字体无关。）
     style.configure(".", font=FONT_UI, background=bg, foreground=text_color, fieldbackground=field_bg,
                     bordercolor=border, lightcolor=border, darkcolor=border,
                     troughcolor=bg, focuscolor=THEME["sel_bg"],
@@ -3986,10 +3985,6 @@ def restyle_widgets(widget, remap: dict | None = None) -> None:
         elif cls == "Listbox":
             widget.configure(background=THEME["panel"], foreground=THEME["text"],
                              selectbackground=THEME["sel_bg"], selectforeground=THEME["text"])
-        elif cls in ("Button", "Checkbutton", "Radiobutton", "Entry"):
-            widget.configure(background=keep(widget.cget("background"), THEME["bg"]),
-                             foreground=keep(widget.cget("foreground"), THEME["text"]),
-                             font=FONT_UI)
     except tk.TclError:
         pass
     for child in widget.winfo_children():

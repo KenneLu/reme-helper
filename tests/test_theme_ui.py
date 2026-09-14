@@ -181,7 +181,9 @@ def main_run() -> int:
         bad_light = invisible(light)
         check("浅色：没有看不清的文字", not bad_light, "; ".join(bad_light[:4]))
         check("浅色：用的是统一引擎", engine_light == main.TTK_ENGINE, engine_light)
-        check("浅色：交互控件显式使用微软雅黑 UI 字体",
+        # 注意措辞：这不是「防中文回退」——这台机器上 Tk 默认字体本来就是 Microsoft YaHei UI，
+        # 显式指定的意义是让交互控件跟界面里的 FONT_UI 标签同字号（10pt），不做 9pt 混排。
+        check("浅色：交互控件字体显式对齐 FONT_UI（微软雅黑 UI 10pt）",
               all("Microsoft YaHei UI" in value for value in fonts_light.values()), str(fonts_light))
 
         # 真实路径切到深色（托盘线程 → PENDING_THEME → 窗口自己落地）
@@ -201,7 +203,7 @@ def main_run() -> int:
         check("深色：没有看不清的文字", not bad_dark, "; ".join(bad_dark[:4]))
         check("深色：用的是同一个引擎（不会整页位移）", engine_dark == engine_light,
               f"{engine_light} -> {engine_dark}")
-        check("深色：交互控件不回退到 Tk 默认中文字体",
+        check("深色：交互控件字体与浅色完全一致（不是 Tk 默认的 9pt）",
               fonts_dark == fonts_light and all("Microsoft YaHei UI" in value for value in fonts_dark.values()),
               f"light={fonts_light} dark={fonts_dark}")
         check("切主题后控件数量不变", dark_count == light_count,
