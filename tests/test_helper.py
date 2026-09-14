@@ -827,7 +827,9 @@ class _TunnelIcon:
 
 _tunnel_icon = _TunnelIcon()
 main.TRAY_ICON = _tunnel_icon
-main.make_icon = lambda healthy, tunnels: (healthy, tunnels)
+# 托盘图现在统一走 tray_icon_image(running=, tunnels=, size=)：它内部再调 make_icon，
+# 所以替身要接受同样的关键字参数。
+main.make_icon = lambda running=True, tunnels=False, size=64: (running, tunnels)
 main.notify = lambda message: _tunnel_events.append(message)
 main.STATE["healthy"] = True
 
@@ -873,7 +875,19 @@ assert ok is True
 assert _tunnel_icon.icon == (True, True), "主动启动成功后应立即显示托盘黄色点"
 assert _tunnel_events[-1] == "T 隧道已连接", _tunnel_events
 
-# 5. 期望连着的隧道掉线后会被重新尝试（尝试失败也无妨，关键是真去试了）
+# 5. 句柄丢失但转发仍在：不许先报「已断开」再报「已连接」，也不许重复拉起 ssh
+#    （以前 refresh_tunnels 先无条件写 False，于是每个轮询周期都成对刷两条气泡）
+main.probe_tunnel = lambda _target: True
+main.TUNNEL_PROCS.clear()
+main.TUNNEL_WANTED[_fake_key] = True
+main.TUNNEL_STATE[_fake_key] = True
+_tunnel_events.clear()
+main.refresh_tunnels()
+assert main.TUNNEL_STATE[_fake_key] is True, "句柄为空但探测通过时应保持已连接"
+assert _tunnel_events == [], f"隧道状态没变就不该发通知：{_tunnel_events}"
+assert not main.TUNNEL_PROCS, "探测通过时不该新建 ssh 转发进程"
+
+# 6. 期望连着的隧道掉线后会被重新尝试（尝试失败也无妨，关键是真去试了）
 main.probe_tunnel = _saved_tunnel_probe
 main.TUNNEL_WANTED[_fake_key] = True
 started = []
@@ -890,7 +904,7 @@ main.TUNNEL_STATE.clear()
 main.refresh_tunnels()
 assert started, "期望连着的隧道掉线后应当被重新拉起"
 
-# 6. 从未要求连接的目标不应被无谓地重试
+# 7. 从未要求连接的目标不应被无谓地重试
 main.TUNNEL_WANTED.clear()
 started.clear()
 main.TUNNEL_PROCS.clear()

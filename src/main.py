@@ -76,7 +76,13 @@ ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 # The tray image is stateful and rendered by pystray. Windows taskbar/titlebar icons have a
 # different job and much less room, so use a second asset whose small frames fill more pixels.
 TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
-TASKBAR_ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+# 帧尺寸按「外壳真实索要的像素」铺开：100%/125%/150%/175%/200% 缩放下的标题栏 16/20/24/
+# 28/32、任务栏 24/30/36/42/48、Alt-Tab 32/40/48/56/64。少一档，LoadImage 就会拿邻近
+# 尺寸缩放，缩过的边缘在深色任务栏上看着就是「糊」。
+TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
+# pystray 把 PIL 图写成单帧 .ico 后交给 LoadImage(LR_DEFAULTSIZE)，外壳固定取 32×32；
+# 所以托盘图按 32×DPI 渲染，避免 64→32→16 的两次重采样。
+TRAY_HICON_PIXELS = 32
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -2311,6 +2317,9 @@ AUX_WINDOWS: list = []   # 非控制台的辅助窗口（路径指引 / 说明�
 GUIDE_WINDOW: dict = {"win": None}   # 「路径与入口」窗口：语言一变就整体重建
 TUNNEL_PROCS: dict[str, subprocess.Popen] = {}
 TUNNEL_STATE: dict[str, bool] = {}
+# 窗口图标句柄与 DPI 缓存：句柄交给窗口后不能再释放，引用留着防止被回收。
+WINDOW_ICON_HANDLES: list = []
+WINDOW_DPI: dict = {"value": 0}
 # 用户希望这条隧道是连着的（连过一次就为 True；手动停止置 False）。
 # 健康检查据此决定要不要把掉线的隧道接回来，而不是无脑重启用户刚停掉的隧道。
 TUNNEL_WANTED: dict[str, bool] = {}
@@ -2945,6 +2954,11 @@ def refresh_tunnels() -> None:
 
     现在用 TUNNEL_WANTED 记住「这条隧道应该是连着的」：首次（由 seed_tunnels_wanted
     按配置播种）或掉线之后，只要 ReMe 健康就接回去。用户手动停过的隧道不会被自动拉起。
+
+    **手上没有 ssh 句柄不等于隧道断了**：句柄只记录本进程自己拉起的进程，复用上一轮运行
+    留下的转发（或本进程重启后仍在的 ssh）时它是空的。以前这里先无条件写 False，于是每一轮
+    都先报「隧道已断开」、再在 start_tunnel 里探测成功报「隧道已连接」，两个气泡成对刷屏。
+    现在改成先探测再改状态：真的断了才写 False，活着就只是把状态确认一遍。
     """
     for target in CFG.get("targets", []):
         key = target_key(target)
@@ -2954,18 +2968,26 @@ def refresh_tunnels() -> None:
             continue
         if process:
             TUNNEL_PROCS.pop(key, None)
-        was_up = TUNNEL_STATE.get(key, False)
-        set_tunnel_state(target, False)
         if not target.get("enabled", True):
+            set_tunnel_state(target, False)
             continue
-        if not TUNNEL_WANTED.get(key, False) and not was_up:
+        wanted = bool(TUNNEL_WANTED.get(key, False))
+        was_up = bool(TUNNEL_STATE.get(key, False))
+        if not wanted and not was_up:
+            set_tunnel_state(target, False)
             continue
         if not service_up():
+            # ReMe 不在，转发过去也没有意义；等 ReMe 回来再按 TUNNEL_WANTED 接回。
+            set_tunnel_state(target, False)
             continue
-        # 它此前是连着的（或用户要求它连着）：这轮把它接回去
+        # 它此前是连着的（或用户要求它连着）：交给 start_tunnel 先探测再决定。
+        # 探测通过时它只把状态确认一遍（同一状态不弹气泡），真的断了才会 stop + 重建；
+        # 因此「稳定连着」的隧道不会再出现每轮一次的「已断开 → 已连接」。
         TUNNEL_WANTED[key] = True
+        connected_before = bool(TUNNEL_STATE.get(key, False))
         ok, detail = start_tunnel(target)
-        log(f"tunnel auto-reconnect target={key} ok={ok} detail={detail}")
+        if not ok or bool(TUNNEL_STATE.get(key, False)) != connected_before:
+            log(f"tunnel auto-reconnect target={key} ok={ok} detail={detail}")
 
 
 def seed_tunnels_wanted() -> None:
@@ -3039,7 +3061,7 @@ def choose_from_list(parent, title: str, options: list[str], prompt: str) -> str
     """Small modal picker used when a scan finds several candidates."""
     chosen: dict[str, str | None] = {"value": None}
     master = parent if parent is not None else ui_parent()
-    dialog = tk.Toplevel(master)
+    dialog = toplevel(master)
     dialog.title(f"{t(APP_NAME)} · {title}")
     attach_dialog(master, dialog)
     dialog.grab_set()
@@ -3151,7 +3173,7 @@ def show_doc_viewer(build_markdown=None, title_suffix: str = " · 控制台说�
         host = UI_HOST.get("root")
         if host is None:
             return
-        root = tk.Toplevel(host)
+        root = toplevel(host)
         AUX_WINDOWS.append(root)   # 留住引用，避免被 GC 掉
         root.title(app_title() + t(title_suffix))
         markdown = (build_markdown or _console_guide_markdown)()
@@ -3293,7 +3315,7 @@ def _open_path_guide() -> None:
         return
     apply_theme()
     items = path_guide_items()
-    win = tk.Toplevel(host)
+    win = toplevel(host)
     AUX_WINDOWS.append(win)
     GUIDE_WINDOW["win"] = win
     win.bind("<Destroy>", lambda event: (GUIDE_WINDOW.update({"win": None})
@@ -3498,7 +3520,7 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
         "name": "Ubuntu24.04", "user": "ubuntu", "host": "192.168.1.100",
         "port": 22, "remote_port": 22333, "key": "", "enabled": True,
     })
-    window = tk.Toplevel(parent)
+    window = toplevel(parent)
     window.title("编辑VM目标" if target else "添加VM目标")
     window.geometry("520x350")
     attach_dialog(parent, window)
@@ -3552,7 +3574,7 @@ def choose_target_dialog(title: str) -> dict | None:
     parent = ui_parent()
     if parent is None:
         return None
-    root = tk.Toplevel(parent)
+    root = toplevel(parent)
     root.title(title)
     root.geometry("460x300")
     box = tk.Listbox(root)
@@ -3714,9 +3736,98 @@ COLOR_KEYS = ("bg", "panel", "text", "text2", "muted", "disabled", "link", "ok",
               "field_bg", "field_fg", "tip_bg", "tip_fg", "toast_bg", "toast_fg", "sel_bg", "border",
               "code_bg", "table_bg")
 PALETTE_BEFORE: dict = dict(PALETTES["light"])
+# 勾选/单选指示框：Tk 原图在深色底上是没有抗锯齿的灰白细线，换成自制图。
+# 13px 是 alt 引擎在 100% 缩放下的指示框边长，取同值才不会挪动布局。
+INDICATOR_PIXELS = 13
+INDICATOR_IMAGES: dict = {}
+INDICATOR_ELEMENTS: set = set()
 
 
-def _configure_styles(style) -> None:
+def _relabel_layout(nodes, old: str, new: str) -> list:
+    """把 ttk layout 树里的旧元素名换成新元素名，其余结构原样保留。"""
+    result = []
+    for name, options in nodes:
+        options = dict(options)
+        children = options.get("children")
+        if children:
+            options["children"] = _relabel_layout(children, old, new)
+        result.append((new if name == old else name, options))
+    return result
+
+
+def draw_indicator(kind: str, state: str, theme: dict, pixels: int = INDICATOR_PIXELS) -> Image.Image:
+    """画一枚指示图。kind ∈ {check, radio}，state ∈ {normal, selected, disabled, disabled-selected}。
+
+    Tk 自带的指示框是 C 代码逐像素画的：13px 的圆和方块没有抗锯齿，深色底上那圈浅灰
+    细线放大看就是一团糊。这里改成自己画：尺寸取一样的 13px（布局不动），边缘用 4 倍
+    超采样缩放得到，所以深浅两色下边缘都是干净的。
+    """
+    ratio = 4
+    box = pixels * ratio
+    image = Image.new("RGBA", (box, box), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    disabled = state.startswith("disabled")
+    selected = state.endswith("selected")
+    edge = theme["disabled"] if disabled else theme["border"]
+    fill = theme["bg"] if disabled else theme["field_bg"]
+    mark = theme["disabled"] if disabled else theme["ok"]
+    stroke = max(ratio, round(box * 0.10))
+    margin = round(box * 0.06)
+    area = (margin, margin, box - margin - 1, box - margin - 1)
+    if kind == "check":
+        draw.rectangle(area, fill=fill, outline=edge, width=stroke)
+        if selected:
+            draw.line([(box * 0.26, box * 0.53), (box * 0.44, box * 0.70), (box * 0.75, box * 0.30)],
+                      fill=mark, width=max(ratio * 2, round(box * 0.15)), joint="curve")
+    else:
+        draw.ellipse(area, fill=fill, outline=edge, width=stroke)
+        if selected:
+            inside = round(box * 0.32)
+            draw.ellipse((inside, inside, box - inside - 1, box - inside - 1), fill=mark)
+    return image.resize((pixels, pixels), Image.LANCZOS)
+
+
+def indicator_image_name(interpreter, kind: str, state: str, palette_name: str) -> str:
+    """按需生成 PNG 并在 Tcl 里建一枚命名 photo image，返回它的名字。
+
+    这里刻意**不**返回 tkinter.PhotoImage：Python 包装对象在解释器退出时会由主线程回收，
+    而它调的是 Tcl 的 image delete——Tcl 解释器归 UI 线程所有，跨线程调用会把进程挂死
+    （实测设置窗口用例就是卡在这里不退）。只留在 Tcl 里，解释器销毁时随 UI 线程一起收。
+    """
+    name = f"reme_indicator_{kind}_{state}_{palette_name}"
+    directory = LOCAL_DATA_DIR / "ui-icons"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{kind}-{state}-{palette_name}.png"
+    draw_indicator(kind, state, THEME).save(path)
+    try:
+        interpreter.call("image", "delete", name)   # 切回同一主题时重建，先清掉旧的
+    except tk.TclError:
+        pass
+    interpreter.call("image", "create", "photo", name, "-file", str(path))
+    return name
+
+
+def install_indicator_images(style, palette_name: str) -> None:
+    """把复选/单选指示框换成上面的自制图。
+
+    element_create 一旦失败就保持 Tk 原样，绝不能因为图标把设置窗口弄坏。
+    """
+    interpreter = style.master.tk
+    for kind, style_name, element in (("check", "TCheckbutton", "Checkbutton.indicator"),
+                                      ("radio", "TRadiobutton", "Radiobutton.indicator")):
+        element_name = f"ReMe.{kind}.{palette_name}"
+        images = {state: indicator_image_name(interpreter, kind, state, palette_name)
+                  for state in ("normal", "selected", "disabled", "disabled-selected")}
+        if element_name not in INDICATOR_ELEMENTS:
+            style.element_create(element_name, "image", images["normal"],
+                                 (("selected",), images["selected"]),
+                                 (("disabled",), images["disabled"]),
+                                 (["disabled", "selected"], images["disabled-selected"]))
+            INDICATOR_ELEMENTS.add(element_name)
+        style.layout(style_name, _relabel_layout(style.layout(style_name), element, element_name))
+
+
+def _configure_styles(style, palette_name: str = "") -> None:
     """把当前调色板铺到所有用到的 ttk 样式上（每次切主题都要重配：setTheme 会重置样式）。"""
     bg, panel, text_color = THEME["bg"], THEME["panel"], THEME["text"]
     border, field_bg, field_fg = THEME["border"], THEME["field_bg"], THEME["field_fg"]
@@ -3769,6 +3880,10 @@ def _configure_styles(style) -> None:
               background=[("selected", THEME["sel_bg"]), ("active", THEME["sel_bg"]),
                           ("disabled", bg)],
               foreground=[("selected", text_color), ("disabled", THEME["disabled"])])
+    try:
+        install_indicator_images(style, palette_name or theme_name())
+    except Exception as exc:  # noqa: BLE001 - 指示图失败就退回 Tk 原图
+        log(f"indicator images failed: {type(exc).__name__}: {exc}")
 
 
 def apply_theme(name: str | None = None) -> None:
@@ -3790,7 +3905,7 @@ def apply_theme(name: str | None = None) -> None:
             style.theme_use(TTK_ENGINE)
         except tk.TclError:  # 万一该 Tk 构建没有 alt，就沿用当前引擎，至少颜色是对的
             log(f"theme_use({TTK_ENGINE}) failed, keeping {style.theme_use()}")
-        _configure_styles(style)
+        _configure_styles(style, theme_name() if name is None else name)
     except tk.TclError as exc:  # noqa: BLE001 - theming must never break the app
         log(f"apply_theme failed: {exc}")
 
@@ -4158,7 +4273,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
 
     def ui():
         global SETTINGS_ROOT
-        root = tk.Toplevel(host)
+        root = toplevel(host)
         UI_HOST["win"] = root
         SETTINGS_ROOT = root
         apply_theme()
@@ -5835,7 +5950,7 @@ def ui_dialog(title: str, message: str, buttons: list[tuple[str, object]]) -> No
     """
     def build() -> None:
         parent = ui_parent()
-        dialog = tk.Toplevel(parent)
+        dialog = toplevel(parent)
         dialog.title(f"{t(APP_NAME)} · {title}")
         attach_dialog(parent, dialog)
         dialog.resizable(False, False)
@@ -6239,9 +6354,20 @@ def refresh_tray_icon() -> None:
         return
     try:
         if icon.visible:
-            icon.icon = make_icon(bool(STATE.get("healthy")), any(TUNNEL_STATE.values()))
+            icon.icon = tray_icon_image(running=bool(STATE.get("healthy")),
+                                        tunnels=any(TUNNEL_STATE.values()))
     except Exception as exc:  # noqa: BLE001 - status paint failure must not break the action
         log(f"tray icon refresh failed: {type(exc).__name__}: {exc}")
+
+
+def tray_icon_image(*, running: bool, tunnels: bool) -> Image.Image:
+    """画托盘那枚 HICON 的源图，尺寸就取外壳真正会用的那一档。
+
+    pystray 的 win32 后端把 PIL 图存成单帧 .ico，再 `LoadImage(..., LR_DEFAULTSIZE)` 取成
+    32×32 的 HICON；喂它 64×64 等于让 Windows 连缩两次（64→32→16），圆环和字母先糊一层。
+    """
+    pixels = max(16, round(TRAY_HICON_PIXELS * window_dpi() / 96))
+    return make_icon(running, tunnels, pixels)
 
 
 def write_app_icon() -> tuple[Path, Path]:
@@ -6279,15 +6405,87 @@ def icon_path() -> Path | None:
     return None
 
 
+def window_dpi() -> int:
+    """系统 DPI（96 的倍数判断缩放）。取不到就按 100% 处理。"""
+    if WINDOW_DPI["value"]:
+        return WINDOW_DPI["value"]
+    dpi = 96
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            hdc = user32.GetDC(0)
+            try:
+                dpi = int(gdi32.GetDeviceCaps(hdc, 88)) or 96   # LOGPIXELSX
+            finally:
+                user32.ReleaseDC(0, hdc)
+        except Exception as exc:  # noqa: BLE001 - 探测失败只影响图标清晰度
+            log(f"dpi probe failed: {exc}")
+    WINDOW_DPI["value"] = dpi
+    return dpi
+
+
+def window_icon_pixels() -> tuple[int, int]:
+    """(小图标, 大图标) 的像素边长，分别给 ICON_SMALL 与 ICON_BIG。
+
+    Windows 不为 ICON_SMALL2 单独留位置：WM_SETICON(wParam=2) 会被忽略，读回的就是
+    ICON_SMALL（实测 SMALL=16/SMALL2=16，SMALL=24/SMALL2=24）。可任务栏按钮在 100%
+    缩放下是按 24px 画的，标题栏按 16px。只给 16 就一定会被放大成 24——这正是「任务栏
+    图标发虚」的来源。所以小图标按任务栏那一档给足，标题栏宁可轻微缩小也不放大。
+    """
+    scale = window_dpi() / 96
+    return max(24, round(24 * scale)), max(32, round(32 * scale))
+
+
 def apply_window_icon(root) -> None:
-    """给窗口装上同一个图标。取不到文件就算了——源码运行或非 Windows 都可能没有。"""
+    """给窗口装上图标：类图标兜底，再按 DPI 逐档设准尺寸。
+
+    只说 `iconbitmap` 是不够的。它写的是窗口**类**图标，Tk 只会给出 16 与 32 两枚；
+    任务栏按钮要 24，拿不到就抓 16 放大——这正是「任务栏图标发虚」的来源。这里再按
+    ICON_SMALL / ICON_SMALL2 / ICON_BIG 各送一枚正好那么大（或更大）的图标，外壳就不必
+    自己缩放。取不到文件或非 Windows 时静默跳过：图标永远不该挡住启动。
+    """
+    path = icon_path()
+    if path is None:
+        return
     try:
-        path = icon_path()
-        if path is not None:
-            # default= 会让此后新建的 Toplevel 也用这个图标，所以只需在根窗口设一次
-            root.iconbitmap(default=str(path))
+        root.iconbitmap(default=str(path))
     except Exception as exc:  # noqa: BLE001 - 图标失败绝不能影响启动
         log(f"window icon failed: {exc}")
+        return
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = int(root.wm_frame(), 16)
+        if not hwnd:
+            return
+        small, big = window_icon_pixels()
+        for flag, pixels in ((0, small), (1, big)):
+            handle = user32.LoadImageW(None, str(path), 1, pixels, pixels, 0x00000010)
+            if not handle:
+                log(f"window icon {pixels}px not loaded")
+                continue
+            WINDOW_ICON_HANDLES.append(handle)   # 句柄由窗口接管，但引用得留着
+            user32.SendMessageW(hwnd, 0x0080, flag, handle)   # WM_SETICON
+        log(f"window icon sized for {window_dpi()} dpi: small={small} big={big}")
+    except Exception as exc:  # noqa: BLE001 - 同上，退化成类图标也能用
+        log(f"window icon sizing failed: {exc}")
+
+
+def toplevel(master) -> tk.Toplevel:
+    """新建 Toplevel 并立刻按 DPI 装好图标。
+
+    任务栏按钮属于每个 Toplevel 自己；只给隐藏的根窗口设图标，这些窗口仍然回落到
+    16px 的类图标上，任务栏依旧发虚。
+    """
+    window = tk.Toplevel(master)
+    apply_window_icon(window)
+    return window
 
 
 def monitor_loop() -> None:
@@ -6319,7 +6517,7 @@ def monitor_loop() -> None:
             # 的比对结果被吃掉，真正生效的那次就永远不来了。
             if icon_state != last_icon and TRAY_ICON.visible:
                 last_icon = icon_state
-                TRAY_ICON.icon = make_icon(*icon_state)
+                TRAY_ICON.icon = tray_icon_image(running=icon_state[0], tunnels=icon_state[1])
             signature = tray_signature()
             if signature != last_signature:
                 last_signature = signature
@@ -7362,7 +7560,9 @@ def main() -> int:
     # 托盘图标必须先立起来。refresh_tunnels() 已移进 monitor_loop 的第一轮（立即执行）：
     # 它要给每台 VM 起 ssh 并等探测结果，VM 不在线时实测 ≥20 秒。挡在这里的后果是
     # 启动后 20 多秒内**没有任何托盘图标**（详见 monitor_loop 的说明）。
-    TRAY_ICON = pystray.Icon(APP_ID, make_icon(STATE["healthy"], any(TUNNEL_STATE.values())),
+    TRAY_ICON = pystray.Icon(APP_ID,
+                             tray_icon_image(running=bool(STATE["healthy"]),
+                                             tunnels=any(TUNNEL_STATE.values())),
                              t(APP_NAME), build_menu())
     log(f"tray: icon created (elapsed {time.monotonic() - started:.2f}s)")
     threading.Thread(target=monitor_loop, daemon=True).start()
