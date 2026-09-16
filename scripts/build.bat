@@ -264,6 +264,11 @@ if not exist "%RELEASE_DIR%\doc\capture.mjs" (
   if not defined NOPAUSE pause
   exit /b 1
 )
+if not exist "%RELEASE_DIR%\doc\capture_cc.mjs" (
+  echo [ERROR] Claude Code capture script missing from the release.
+  if not defined NOPAUSE pause
+  exit /b 1
+)
 if not exist "%RELEASE_DIR%\_internal\reme-helper-taskbar.ico" (
   echo [ERROR] taskbar icon asset missing from the release.
   if not defined NOPAUSE pause

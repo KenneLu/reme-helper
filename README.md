@@ -5,8 +5,9 @@ English | [简体中文](README.zh-CN.md)
 Set up ReMe, connect your agents to it, and keep one memory across machines.
 
 **A Windows tray application for [ReMe](https://github.com/agentscope-ai/ReMe).** It writes ReMe's
-configuration from a window instead of by hand, runs the service, and connects agent clients — Codex on
-Windows, Codex inside a VM, and DeepSeek Harness — to a single ReMe instance with a single workspace.
+configuration from a window instead of by hand, runs the service, and connects agent clients — Codex and
+Claude Code on Windows, Codex and Claude Code inside a VM, and DeepSeek Harness — to a single ReMe
+instance with a single workspace.
 
 ## Features
 
@@ -41,11 +42,15 @@ and the yellow status dot means at least one tunnel is online.
 | Client | How it reaches ReMe |
 |---|---|
 | Codex (Windows) | MCP server entry + a lifecycle hook that records conversations automatically |
-| Codex (inside a VM) | Same, through the reverse tunnel, pointed at the tunnel port |
+| Claude Code (Windows) | MCP entry + skill; recording via the official Stop hook (one async patch needed on Windows) or the same capture script |
+| Codex (inside a VM) | the same script as Windows, through the reverse tunnel, pointed at the tunnel port |
+| Claude Code (inside a VM) | the official path cannot read a remote transcript, so a capture script reads it locally and submits the delta |
 | DeepSeek Harness | ReMe's official DSH plugin, plus an MCP client entry for write access |
 
-The app ships the step-by-step guide for all three — read it in a window, or copy it (with the Codex capture
-script appended) and hand the whole thing to an agent that can edit files on the machine.
+The app ships the step-by-step guide for all of them, both capture scripts included: read it in a window, or
+copy it and hand the whole thing to an agent that can edit files on the machine. That agent **probes which
+clients are installed and whether a second machine exists first**, reports which ends apply, and only then
+wires up and verifies each one you confirm.
 
 ## Install
 

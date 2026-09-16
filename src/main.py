@@ -3090,11 +3090,16 @@ def choose_from_list(parent, title: str, options: list[str], prompt: str) -> str
 
 
 SERVICE_PORT_TEXT = "2333"
-# 随包文档的布局：doc/<lang>/setup.md + doc/<lang>/configuration.md，脚本共用一份 doc/capture.mjs。
+# 随包文档的布局：doc/<lang>/setup.md + doc/<lang>/configuration.md，脚本共用 doc/ 下的两份 .mjs。
 # 只有一个 doc/ 目录——仓库里再放一个 docs/ 只会让人分不清「哪份是要发的、哪份是给人看的」。
 INTEGRATION_DOC_NAME = "setup.md"
 CONFIG_DOC_NAME = "configuration.md"
-INTEGRATION_DOC_SCRIPT = "capture.mjs"
+# 脚本正文只在 doc/ 里存一份，复制时才按占位符拼进正文，避免两处内容漂移。
+# 占位符是 ASCII，放在正文里（正文本身中英两份），因此这里不需要任何文案，也就不会与语言版本脱节。
+INTEGRATION_DOC_SCRIPTS: tuple[tuple[str, str], ...] = (
+    ("<!--APPENDIX A-->", "capture.mjs"),
+    ("<!--APPENDIX B-->", "capture_cc.mjs"),
+)
 SETUP_GUIDE_MIN_CHARS = 20000
 
 
@@ -3110,10 +3115,11 @@ def doc_file_dir() -> Path:
 
 
 def integration_doc_markdown() -> str:
-    """接入文档正文：按界面语言取 ``doc/<lang>/setup.md``，并把附录 A 的捕获脚本拼在末尾。
+    """接入文档正文：按界面语言取 ``doc/<lang>/setup.md``，并把附录脚本按占位符拼进去。
 
-    端口与 workspace 现场替换成当前配置的值；脚本在文件系统里只保留一份
-    （``doc/capture.mjs``），复制时才拼接，避免两处内容漂移。
+    端口与 workspace 现场替换成当前配置的值；脚本在文件系统里各保留一份
+    （``doc/capture.mjs``、``doc/capture_cc.mjs``），复制时才拼接，避免两处内容漂移。
+    占位符若没被替换（脚本缺失），也要把它清掉：正文里留一个 HTML 注释对读者毫无意义。
     """
     directory = doc_file_dir()
     lang = "en" if ui_lang() == "en" else "zh"
@@ -3127,9 +3133,14 @@ def integration_doc_markdown() -> str:
     body = path.read_text(encoding="utf-8")
     body = body.replace("<REME_PORT>", SERVICE_PORT_TEXT).replace(
         "<REME_WORKSPACE>", str(reme_root() / "workspace"))
-    script = directory / INTEGRATION_DOC_SCRIPT
-    if script.exists():
-        body += "\n```javascript\n" + script.read_text(encoding="utf-8").rstrip() + "\n```\n"
+    for marker, name in INTEGRATION_DOC_SCRIPTS:
+        script = directory / name
+        if script.exists():
+            block = "```javascript\n" + script.read_text(encoding="utf-8").rstrip() + "\n```"
+        else:
+            # 缺脚本时给一句可读的说明，但绝不留下占位符。
+            block = f"_(missing from doc/: {name})_"
+        body = body.replace(marker, block)
     return body
 
 
@@ -3142,7 +3153,7 @@ def copy_integration_doc() -> None:
     """把接入文档（含附录 A 脚本）放进剪贴板，提示粘贴给 AI。"""
     doc = integration_doc_markdown()
     if copy_to_clipboard(doc):
-        toast("接入文档已复制：粘贴给 AI，让它照着把 Codex 与 DSH 接到 ReMe")
+        toast("接入文档已复制：粘贴给 AI，让它先探测本机客户端，再接到 ReMe")
     else:
         notify(t("复制失败"))
 
@@ -3295,7 +3306,7 @@ def path_guide_items() -> list[dict]:
          "path": root / "logs", "action": lambda: open_path(root / "logs")},
         {"name": "控制台说明", "desc": "内置的接入与排障说明（在窗口里打开，不依赖 ReMe 目录）",
          "path": "（内置文档）", "action": show_doc_viewer},
-        {"name": "接入 Agent 文档", "desc": "怎么把 Codex、DSH 这些客户端接到 ReMe 上（可阅读，也可复制给 AI 照着做）",
+        {"name": "接入 Agent 文档", "desc": "怎么把 Codex、Claude Code、DSH 接到 ReMe 上（可阅读，也可复制给 AI，由它探测后逐端接上）",
          "path": "（内置文档）", "action": show_integration_doc},
     ]
 
@@ -4565,8 +4576,8 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         copy_doc_button.pack(side="left", padx=(6, 0))
         Tooltip(copy_prompt_button, "复制一段可直接发给 DSH / Codex 的安装指令，让它替你把 ReMe 装好并启动。")
         Tooltip(open_docs_button, "在浏览器打开 ReMe 官方仓库。")
-        Tooltip(read_doc_button, "先看这篇：怎么把 Codex、DSH 接到 ReMe 上。想交给 AI 去做，再用右边的「复制接入文档」。")
-        Tooltip(copy_doc_button, "复制整篇接入文档（含 Codex 捕获脚本），粘贴给 AI，它就能照着把 Codex 与 DSH 接到 ReMe。")
+        Tooltip(read_doc_button, "先看这篇：怎么把 Codex、Claude Code、DSH 接到 ReMe 上。想交给 AI 去做，再用右边的「复制接入文档」。")
+        Tooltip(copy_doc_button, "复制整篇接入文档（含两份捕获脚本），粘贴给 AI，它会先探测本机装了哪些客户端，再照着接上 ReMe。")
 
         mode_box = ttk.Frame(gen)
         mode_box.grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
@@ -7104,8 +7115,8 @@ def smoke() -> int:
         # 在任何干净机器上必假——第一次发版的 CI 就是栽在这一条上。
         # 真正的检查是上面那个临时目录块：三种模式都要能**只靠官方包**推出来。
         # 接入文档要真的随包分发：中英两份齐、正文完整、占位符已被现场值替换、
-        # 附录 A 的捕获脚本已拼进去。少任何一项，用户点「阅读接入文档」时才报错，
-        # 那时人已经在别的机器上了。
+        # 附录脚本已按占位符拼进去、没有留下未替换的占位符。少任何一项，
+        # 用户点「阅读接入文档」时才报错，那时人已经在别的机器上了。
         doc_dir = doc_file_dir()
         check("doc dir", doc_dir.is_dir())
         for lang in ("zh", "en"):
@@ -7113,12 +7124,16 @@ def smoke() -> int:
                   (doc_dir / lang / INTEGRATION_DOC_NAME).is_file()
                   and (doc_dir / lang / INTEGRATION_DOC_NAME).stat().st_size > 8000)
             check(f"doc {lang} config", (doc_dir / lang / CONFIG_DOC_NAME).is_file())
-        check("doc capture script", (doc_dir / INTEGRATION_DOC_SCRIPT).is_file())
+        for _, name in INTEGRATION_DOC_SCRIPTS:
+            check(f"doc script {name}", (doc_dir / name).is_file())
         doc_text = integration_doc_markdown()
         check("doc text length", len(doc_text) > SETUP_GUIDE_MIN_CHARS)
-        check("doc placeholders filled", "<REME_PORT>" not in doc_text and "<REME_WORKSPACE>" not in doc_text)
+        check("doc placeholders filled",
+              "<REME_PORT>" not in doc_text and "<REME_WORKSPACE>" not in doc_text)
+        check("doc appendix markers replaced", all(m not in doc_text for m, _ in INTEGRATION_DOC_SCRIPTS))
         check("doc has codex+mcp", "codex exec" in doc_text and "mcp_servers.reme" in doc_text)
         check("doc has capture.mjs", "capture.mjs" in doc_text)
+        check("doc has capture_cc.mjs", "capture_cc.mjs" in doc_text)
         failed = [name for name, ok in checks if not ok]
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报

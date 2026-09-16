@@ -1,11 +1,12 @@
-# 把 Codex 与 DSH 接到 ReMe（接入 Agent 文档）
+# 把 Agent 接到 ReMe（给 AI 的接入规格）
 
 > **怎么用这份文档**：在 reme-helper 里点「复制接入文档」，把复制到的**全文粘贴给一个能读写本机文件的 AI Agent**，
-> 它就能按本文完成接入。也可以在 reme-helper 里点「阅读接入文档」先看一遍。
+> 它会**先探测本机环境、报告"哪几端适用"**，你确认后再逐端接入、逐端验收。也可以在 reme-helper 里点「阅读接入文档」先看一遍。
+> 你只装了 Codex 就只做 Codex；没有第二台 Linux 机器就不做跨机那两端 —— **不要为了凑齐清单去装东西**。
 > 文中 `<...>` 是占位符，执行前替换成本机真实值（见下方变量表；ReMe 端口与 workspace 在复制时已自动填好）。
+> 标着**不变量**的句子是踩坑换来的，照做；其余实现细节可以因地制宜，但不要另起一套方案。
 
 本文只讲「把客户端接入 ReMe」这一件事，与具体 skill 或第三方工具无关。
-所有步骤都在真实机器上跑通过；请按本文实现，不要自行设计替代方案。
 
 ---
 
@@ -13,75 +14,228 @@
 
 | 占位符 | 含义 | 取值来源 |
 |---|---|---|
-| `<REME_PORT>` | ReMe HTTP 服务端口 | reme-helper 配置，默认 `2333` |
-| `<REME_WORKSPACE>` | ReMe 记忆目录（含 `daily/ digest/ session/`） | reme-helper 里的 ReMe 目录下 `workspace` |
-| `<DSH_HOME>` | DSH 主目录 | Windows 默认 `%USERPROFILE%\.dsh` |
-| `<DSH_PROFILE>` | 要接入的 profile | Web 界面用 `web` |
-| `<CODEX_HOME>` | Codex 主目录 | Windows 默认 `%USERPROFILE%\.codex` |
-| `<SRC_DIR>` | 临时源码目录 | 自选 |
-| `<REMOTE_PORT>` | 虚拟机侧隧道端口 | reme-helper 的 VM 目标设置，例如 `22333` |
-| `<VM_HOST>` `<VM_USER>` | 虚拟机地址与用户名 | 你的环境 |
-| `<VM_CODEX_HOME>` | 虚拟机里的 Codex 主目录 | 例如 `/home/<VM_USER>/.codex` |
+| `<REME_PORT>` | ReMe 在本机的 HTTP 服务端口 | reme-helper 配置，默认 `2333` |
+| `<REME_WORKSPACE>` | ReMe 记忆目录（含 `daily/ digest/ session/`） | reme-helper 里 ReMe 目录下的 `workspace` |
+| `<CODEX_HOME>` | Codex 主目录 | Windows 默认 `%USERPROFILE%\.codex`，Linux 默认 `~/.codex` |
+| `<CLAUDE_HOME>` | Claude Code 主目录 | Windows 默认 `%USERPROFILE%\.claude`，Linux 默认 `~/.claude` |
+| `<DSH_HOME>` `<DSH_PROFILE>` | DSH 主目录与 profile（装了 DSH 才用） | Windows 默认 `%USERPROFILE%\.dsh`，Web 界面用 `web` |
+| `<SRC_DIR>` | 临时源码目录（DSH 源码构建用） | 自选 |
+| `<VM_HOST>` `<VM_USER>` | 第二台 Linux 机器的地址与用户名（没有就跳过） | 你的环境 |
+| `<REMOTE_PORT>` | Linux 机器侧的隧道端口 | reme-helper 的 VM 目标设置，例如 `22333` |
 
-**前置条件**：ReMe 已由 reme-helper 启动（完整模式 + LLM + embedding），
-`POST http://127.0.0.1:<REME_PORT>/health_check` 返回 `healthy: true`。
-ReMe **只监听回环地址**且不使用 API Key —— 这决定了「跨机器必须走隧道」以及「所有客户端指向同一个 workspace」。
+**前置条件按你要的能力定，不必全部满足**：
+
+| 想要的能力 | 需要的前提 |
+|---|---|
+| 记忆召回（关键词、文件级检索） | ReMe 在跑即可，**不需要任何模型** |
+| 语义召回（近义、改写、中英混搜） | 额外需要 embedding；不配则退化成关键词检索，会漏 |
+| 每轮自动记录 | **需要 LLM** —— 提炼记忆是模型干的活；没配 LLM 时不要接自动记录 |
+| 记忆整理（daily→digest） | 需要 LLM，且只由 reme-helper 启动的那一份 ReMe 做 |
+
+无论哪一档，都先用 `POST http://127.0.0.1:<REME_PORT>/health_check` 确认 `healthy: true`。
+ReMe **只监听回环地址、不使用 API Key** —— 这两点决定了「跨机器必须走隧道」，也决定了「所有客户端指向同一个 workspace」。
 
 ---
 
-## 1. 做完之后你会得到什么
+## 1. 第一步：探测，不要先动手
 
-| # | 能力 | 实现方 |
+先把下面几件事查清，**输出一张表给用户确认**，再开始改任何文件：
+
+1. ReMe 在跑吗？健康检查通过吗？端口与 workspace 各是什么？
+2. 本机装了哪些宿主、各自在哪：Codex、Claude Code、DSH（可能一个都没装）。
+3. 有没有第二台 Linux 机器？reme-helper 里是否配了 VM 目标？在那台机器上 `ss -ltn` 能看到隧道端口在监听吗？
+
+输出格式：
+
+| 端 | 是否适用 | 将采用的通路（见 §3） | 需要用户人工做的动作 |
+|---|---|---|---|
+
+**只有用户确认后**才继续往下做。适用与否由探测结果决定，不由本文的清单决定。
+
+---
+
+## 2. 要做到什么（各端一致）
+
+每一端都要有两个能力：
+
+- **召回**：会话里能检索长期记忆 —— 走 MCP。
+- **自动记录**：每轮对话结束，把**新增**内容交回 ReMe，无需人工干预。
+
+**不变量**（每一端都必须这样，不要自创）：
+
+1. **记录走 REST，不走 MCP**：`POST <端点>/auto_memory`，一个请求、无握手；MCP 只服务于召回。
+2. **消息形状固定**：`{ id, name, role, content:[{type:"text",text}], created_at }`，其中 `name` 必须等于 `role`；
+   `session_id` 在工具 schema 里没标必填，但**运行时必需**（不填报 `Error: session_id is required`）。
+3. **钩子只做锚点**：解析路径 → 拉起分离进程 → 立刻返回。提交由分离进程完成。
+   会话结束时未完成的钩子会被取消，钩子里直接提交等于丢记录。
+4. **幂等靠确定性 id**：id 由「会话短哈希 + 序号」生成，重发同一批由服务端按 id 去重 —— 这是"失败可安全重试"的基础。
+5. **记忆整理全局只留一份**：只由 reme-helper 启动的那个 ReMe 做；客户端不要另开定时整理，也不要手动调用 `auto_dream`。
+6. **端点写"本侧实际监听的那个口"**：同机写本机端口，跨机写隧道端口。写错的表现是 `fetch failed` / `Connection refused`。
+7. **成功的凭据是产物，不是日志**：日志里的 `ok` 只说明这次调用返回了，对不存在的会话也会 `ok`。真凭据见 §6。
+
+---
+
+## 3. 决策表：每一端走哪条通路
+
+| 端 | 与 ReMe 同机 | 与 ReMe 跨机 |
 |---|---|---|
-| 1 | DSH 对话**每 5 轮自动**写入 ReMe，新会话自动注入记忆使用指引 | ReMe 官方 DSH 插件 |
-| 2 | DSH 会话内可按需检索长期记忆 | 同上（只读工具 `reme_search`） |
-| 3 | DSH 会话内可**读写**记忆（新建/修改记忆节点） | DSH 自带官方 MCP 客户端 + ReMe MCP |
-| 4 | Codex（Windows 与虚拟机内的 VSCode 扩展）可检索与写入记忆 | ReMe MCP + Codex 的 MCP 客户端 |
-| 5 | Codex **每轮结束自动**把新增对话交给 ReMe | Codex 官方 lifecycle hook + 本文附录 A 的捕获脚本 |
-| 6 | 记忆整理（daily→digest）只由 reme-helper 启动的那一份 ReMe 执行 | 配置（关掉客户端侧调度） |
+| **Codex** | 捕获桥（见 §4） | **同一套捕获桥**，只换端点 |
+| **Claude Code** | 官方插件 | **必须换成捕获桥** |
+| **DSH**（装了才做） | 官方插件 | 官方插件，只换端点 |
+
+判断依据，必须知道，否则会做错：
+
+- **官方 Claude Code 方案隐含"Claude Code 与 ReMe 同机"**：它的钩子只把 `session_id` 交给 ReMe，由 ReMe 去读自己磁盘上的
+  对话文件（`~/.claude/projects/*/<session_id>.jsonl`）。跨机时读不到，返回"无消息"，而钩子日志仍然显示正常 —— **完全静默**。
+- **官方 Claude Code 方案只在 Linux/macOS 上真正异步**：它靠 `fork()` 脱离进程；Windows 没有 `fork`，会**退化成同步执行**，
+  而钩子超时只有 30 秒，记录会被砍掉。所以 **Windows 上也不能直接用官方版**：
+  - 想与 VM 统一语义、只维护一套实现 → 同样走捕获桥（附录 B）。
+  - 想少写代码、接受与 Codex 侧两套实现 → 用打过"真正异步"补丁的官方插件（用 `pythonw.exe` + `DETACHED_PROCESS`
+    重新拉起自己后立即返回，钩子命令写 `pythonw` 的绝对路径，不依赖 PATH）。
+- **Codex 官方没有自动记录**：官方只给 skill / MCP（文档原话是"自动捕获需要显式接入宿主生命周期"）。
+  捕获桥是我们补的那一层胶水；机制本身（宿主生命周期钩子）是 Codex 官方功能，不是 hack。
 
 ---
 
-## 2. 官方能力对照（先读，理解本方案为何这样设计）
+## 4. 通用捕获桥（唯一需要写代码的地方）
 
-| Agent | ReMe 官方接入方式 | 官方自带「自动记录对话」 |
-|---|---|---|
-| DeepSeek Harness | 官方插件 `@agentscope-ai/reme-dsh-plugin` | ✅ 有，零自写代码 |
-| Claude Code | MCP + skill + **Stop hook**（ReMe 仓库自带 `integrations/claude_code/reme/hooks/`） | ✅ 有 |
-| OpenClaw / Hermes / QwenPaw | 官方插件 / provider / Python API | ✅ 有 |
-| **Codex（含虚拟机内的 VSCode 扩展）** | **仅一个 skill** | ❌ **没有** |
+一句话：**客户端本地读对话文件 → 算出新增 → 内联成 ReMe 能吃的消息 → REST 提交；失败入队，下一轮重试。**
 
-**结论**：Codex 是目前唯一「官方给了 skill、但没给自动捕获」的宿主。ReMe 文档原话是
-*「自动捕获需要显式接入宿主生命周期」*。所以 Codex 的自动记录需要一段宿主侧 hook，
-**它与 ReMe 官方给 Claude Code 发布的 hook 是同一套设计**（见 §3.4），不是自定义方案；
-Codex 的 lifecycle hooks 是 Codex 官方功能（`features.hooks`，默认开启）。
+五个要素，缺一个就会静默出错：
 
-**唯一需要绕过的上游问题**：ReMe 的 DSH 插件在包管理源上的旧组合包 `@agentscope-ai/reme@0.1.2`
-与 DSH 0.1.2 线不兼容 —— 它 import 了 `@deepseek-ai/dsh-settings` 运行时并未导出的 `settingsNamespace`
-（上游打包不一致）；而新的专用包尚未发布到包管理源。因此按官方推荐的源码构建路径安装（§3.2）。
+1. **本地读**：读宿主自己写的对话文件（Codex 的 rollout、Claude Code 的 transcript），不要让服务端去读。
+2. **水位线**：按"对话文件绝对路径"记已提交条数，只发新增，**只取最前面的 N 条**（oldest-first），未发的留给下一轮；
+   只有提交成功才推进，且只推进实际发出的条数。写回前重新读盘取 `max` —— **水位线只增不减**，
+   否则手工提交与钩子 worker 并发时两者各读旧值、各写回，后写者胜，水位线被打回，已入库内容被反复重发。
+3. **确定性 id**：`<前缀>-<会话短哈希>-<序号>`，序号是这条消息在水位线中的位置。重发天然幂等。
+4. **钩子分离 + 文件锁**：钩子毫秒返回；实际提交由分离进程做；**锁要覆盖所有提交入口**
+   （钩子 worker、单会话手动提交、全量回补），否则两条路径必然抢写。陈旧锁按时间回收。
+5. **失败入队**：提交失败就把任务写回队列文件，下一轮重试 —— 隧道断了、ReMe 重启了，连上之后自动补。
+
+**消息渲染规则**（各端共用，照这个来）：
+
+| 输入 | 处理 |
+|---|---|
+| 用户/助手文本 | 保留；多块用换行连接 |
+| 工具调用 | `[tool <名称>(<入参，截断 200 字符>)]` |
+| 工具结果 | `[tool_result <摘要，截断 200 字符>]` |
+| 模型内部推理（thinking） | 丢弃 |
+| 子代理/内部线程（如 `isSidechain`、Codex 的内部 thread） | 丢弃 |
+| 整条只含宿主注入的样板（`<system-reminder>`、`<local-command-*>`、`<environment_context>` 之类） | 丢弃 |
+| 时间戳 | 取原始行的时间戳写进 `created_at` |
+
+**移植到某个宿主只需改四处**：对话文件目录、文件匹配规则、解析器、噪音前缀。
+这四处之外的基础设施（端点解析、水位线、锁、队列、分离进程、REST 提交）各端共用：
+
+| 端 | 对话文件位置 | 匹配规则 | 额外过滤 |
+|---|---|---|---|
+| Codex | `<CODEX_HOME>/sessions/<年>/<月>/<日>/rollout-*.jsonl` | 文件名以 `rollout-` 开头；会话 id 取 `session_meta` 行 | 内部子线程、审批/环境样板 |
+| Claude Code | `<CLAUDE_HOME>/projects/<项目目录>/<会话id>.jsonl` | 每行一条 JSON；会话 id 即文件名 | `isSidechain`、注入模板、thinking |
+
+**端点解析优先级**（各端一致）：环境变量 `REME_URL` > **宿主自己那份配置** > 默认本机端口。
+Codex 侧读捕获脚本目录下的 `config.json`；Claude Code 侧读插件自带的 `.mcp.json`（去掉 `/mcp` 后缀）。
+**注意**：Claude Code 侧必须优先读插件 `.mcp.json`，不要读注册在客户端里的 MCP 配置 —— 两者可能不一致，
+踩过的现象是钩子死连默认端口而 `curl` 隧道端口却是好的。
 
 ---
 
-## 3. Windows 端
+## 5. 分端接线清单
 
-### 3.1 Codex：先接记忆工具（MCP）
+| 端 | 钩子挂在哪 | 端点写在哪 | 需要人工做什么 |
+|---|---|---|---|
+| Codex（同机） | `<CODEX_HOME>/hooks.json` 的 `Stop` | `<CODEX_HOME>/reme-bridge/config.json` | 在 Codex 里执行一次 `/hooks` **审核并信任**（未信任会被静默跳过） |
+| Codex（跨机） | 同上（**同一份文件**：`command` 用 `$HOME` 供 Linux，`commandWindows` 用绝对路径供 Windows） | 同上，值改成 `http://127.0.0.1:<REMOTE_PORT>` | 同上，在那台机器的 Codex 里再做一次 |
+| Claude Code（跨机） | `<CLAUDE_HOME>/settings.json` 的 `Stop`，指向捕获桥脚本 | 插件自带 `.mcp.json`（**改写成隧道端口**）+ `~/.claude.json` 的 `reme` MCP 注册，**两处必须一致** | 无（用户级 settings 里的钩子直接生效） |
+| Claude Code（同机，走官方） | 同上，指向官方钩子（Windows 需打异步补丁，见 §3） | 插件 `.mcp.json` = 本机端口 | 无 |
+| DSH | 官方插件自管（无需钩子） | 插件配置里的 `endpoint` | 重启 DSH Web 并强刷浏览器 |
 
-在 `<CODEX_HOME>\config.toml` 追加：
+召回用的 MCP 注册：
 
 ```toml
+# <CODEX_HOME>/config.toml
 [mcp_servers.reme]
-url = "http://127.0.0.1:<REME_PORT>/mcp"
+url = "http://127.0.0.1:<REME_PORT>/mcp"   # 跨机那台改成隧道端口
 ```
 
-重启 Codex 后验证：`codex mcp list` 显示 `reme … enabled`。
-让 Codex 用 `reme` 的 `search` 工具检索一个已知记忆节点（例如问它「用 reme 的记忆检索 xxx 并列出文件路径」），
-能看到 `mcp_tool_call server=reme tool=search` 及其返回即成功。
+Claude Code 侧写 `~/.claude.json` 的 `mcpServers.reme`：`{ "type": "http", "url": "http://127.0.0.1:<端口>/mcp" }`。
 
-**注意**：Codex 的 MCP 工具调用受 approval 管控。`approval_policy = "never"` 会**直接拒绝**
-（报 `MCP tool call requires approval, but approval policy is never`）。交互式会话会弹批准；
-自动化运行加 `--approve-for-me`。
+其余固定动作：
 
-### 3.2 DSH：安装官方插件（源码构建）
+- **不要既让 agent 手动调用记忆记录、又让钩子捕获**，否则同一段对话会被写两遍。在 `<CODEX_HOME>/AGENTS.md` 写明：
+  **不要手动调用 `auto_memory` / `auto_dream`**。
+- **不要新增任何客户端侧定时任务**：`crontab -l`、`systemctl --user list-timers`、Windows 计划任务里都不应有 ReMe 相关项。
+- 跨机那台机器上，若 `notify` 指向另一台机器的路径（例如 Windows 的 `C:\...`），在 Linux 上永不生效且 `doctor` 不报错 —— 删掉或换成本机命令。
+- Codex 的 MCP 工具调用受 approval 管控：`approval_policy = "never"` 会**直接拒绝**（报 `MCP tool call requires approval`）。
+  交互式会话会弹批准；自动化运行加 `--approve-for-me`。
+
+---
+
+## 6. 验收：看产物，不看日志
+
+逐端核对，全部要真凭据：
+
+1. `POST /health_check` → `healthy: true`。
+2. 每端聊一轮后，`<REME_WORKSPACE>/session/` 下出现本端对应的存档：
+   Codex 与本方案的 Claude Code 落 `dialog/`（`codex-*.jsonl` 或 `<会话id>.jsonl`）；
+   走官方插件的 Claude Code 落 `claude_code/<会话id>.jsonl`（保留原始条目）。
+3. `<REME_WORKSPACE>/daily/<对话实际发生那天>/` 下出现便签（日期是对话那天，不是今天）。
+   ReMe 会自行判断有无长期价值：寒暄之类只留存档、不建便签，属正常。
+4. 跨机那端：在 ReMe 所在机器的记忆里能检索到另一台机器上聊过的内容。
+5. 幂等：同一轮再提交一次 → 报告"无新增"，水位线不动、便签不重复。
+6. 对账：`POST /app_config` 的 `jobs` 里只有一个 `dream_cron`；各客户端无定时任务。
+
+**不算凭据的**：钩子日志里的 `ok`、`worker submitted`、HTTP 200 但 `success:false`。
+
+命令行自查（Codex 侧；虚拟机里的 codex 通常不在 PATH，VSCode 扩展自带的例如 `/usr/lib/chatgpt/resources/codex`）：
+
+```bash
+CX=<codex 可执行文件>
+$CX mcp list | grep reme
+$CX exec --skip-git-repo-check --approve-for-me "随便说一句" < /dev/null
+tail -5 <CODEX_HOME>/reme-bridge/capture.log
+```
+
+`< /dev/null` 不可省：非交互执行时 stdin 是不关闭的管道，`codex exec` 会一直等它而卡住。
+
+---
+
+## 7. 会静默失败的坑（按危险程度排序）
+
+| 现象 | 原因 | 处置 |
+|---|---|---|
+| 钩子日志正常，但零产物 | 服务端读不到对话文件（跨机），或钩子未分离进程被会话结束取消 | 走捕获桥（§4） |
+| `fetch failed` / `Connection refused` | 端点写错（跨机必须写隧道端口，不是本机默认端口） | 改端点，再手动补一次 |
+| 钩子一直没反应 | Codex 的钩子未被信任 | 在 Codex 里执行 `/hooks` 信任 |
+| HTTP 200 但 `success:false`、`validation error for Msg` | 消息缺 `name` 字段（必须等于 `role`） | 按 §2 的消息形状 |
+| 同一段对话两份便签 | agent 手动记录 + 钩子捕获重复 | 在 `AGENTS.md` 里禁止手动调用 |
+| 记忆里出现审批 JSON、环境样板 | 内部线程与注入文本未过滤 | 按 §4 的渲染规则 |
+| 已入库内容被反复重发 | 水位线被并发打回 | 水位线只增不减 + 锁覆盖全部提交入口 |
+| Windows 上官方 Claude Code 钩子超时 | 无 `fork` 退化成同步，超过 30 秒被砍 | 打异步补丁，或改用捕获桥 |
+| DSH 插件报 `settingsNamespace` | 装了包管理源上的旧组合包 | 按 §9 源码构建 |
+| DSH 插件报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-llm` | 插件没放在 profile 目录内 | 移到 `<DSH_HOME>\profiles\<DSH_PROFILE>\local-plugins\` |
+| DSH 里看不到 `mcp__reme__*` 工具 | MCP 客户端没连上（`failOnStartupError: false` 不阻塞启动） | 确认 ReMe 在跑、`url` 正确；重启 DSH Web |
+
+---
+
+## 8. 回退
+
+| 停用什么 | 操作 |
+|---|---|
+| Codex 自动记录 | 删掉 `<CODEX_HOME>/hooks.json`（每台机器各一份） |
+| Claude Code 自动记录 | 删掉 `<CLAUDE_HOME>/settings.json` 里对应的 `Stop` 条目 |
+| Claude Code 记忆工具 | 删掉 MCP 注册里的 `reme` |
+| Codex 记忆工具 | 删掉 `config.toml` 里的 `[mcp_servers.reme]` |
+| DSH 记忆插件 | `dsh plugin --profile <DSH_PROFILE> remove @agentscope-ai/reme-dsh-plugin` 后重启 |
+
+改动前对每个被修改的文件留 `.bak-<时间戳>` 备份。
+
+---
+
+## 9. 可选端：DSH（装了才做）
+
+**Windows 侧安装（源码构建）**：包管理源上的旧组合包 `@agentscope-ai/reme@0.1.2` 与本机 DSH 版本不兼容
+（它 import 了 `@deepseek-ai/dsh-settings` 运行时并未导出的 `settingsNamespace`，属上游打包不一致）；
+新的专用包尚未发布到包管理源，因此按官方推荐的源码构建路径安装：
 
 ```powershell
 git clone --depth 1 https://github.com/agentscope-ai/ReMe <SRC_DIR>\ReMe-src
@@ -91,8 +245,7 @@ node node_modules\typescript\bin\tsc -p tsconfig.json
 node scripts\build-client.mjs            # 生成 dist\client.js；需要允许 esbuild 启动子进程
 ```
 
-把构建产物装到 profile 下（**必须放在 profile 目录内**，否则宿主 peer 包解析不到，会报
-`ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-llm`）：
+把构建产物装到 profile 下（**必须放在 profile 目录内**，否则宿主 peer 包解析不到，会报 `ERR_MODULE_NOT_FOUND`）：
 
 ```powershell
 $dst = '<DSH_HOME>\profiles\<DSH_PROFILE>\local-plugins\dsh-reme-plugin'
@@ -101,7 +254,7 @@ Copy-Item dist,cordis.patch.yml,package.json,README.md,README_ZH.md $dst -Recurs
 dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
 ```
 
-在 `<DSH_HOME>\profiles\<DSH_PROFILE>\cordis.patch.yml` 追加：
+在 `<DSH_HOME>\profiles\<DSH_PROFILE>\cordis.patch.yml` 追加 `reme-memory` 段：
 
 ```yaml
 - id: reme-memory
@@ -109,7 +262,7 @@ dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
     - id: reme-memory-runtime
       name: "@agentscope-ai/reme-dsh-plugin"
       config:
-        endpoint: http://127.0.0.1:<REME_PORT>
+        endpoint: http://127.0.0.1:<REME_PORT>   # 跨机那台改成隧道端口
         language: zh            # 记忆指引语言，可改 en
         timezone: Asia/Shanghai
         autoMemoryEnabled: true
@@ -118,10 +271,7 @@ dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
         rootAgentsOnly: true
 ```
 
-### 3.3 DSH：挂官方 MCP 客户端，补齐「写记忆」能力
-
-官方插件**只注册只读工具 `reme_search`**，写入只发生在后台自动记忆。会话内需要主动落盘时，
-在同一份 `cordis.patch.yml` 里再插入一段：
+官方插件**只注册只读工具 `reme_search`**；会话内需要主动写记忆时，在同一份 `cordis.patch.yml` 里再插一段：
 
 ```yaml
 - insert:
@@ -137,196 +287,30 @@ dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
           enabled: true
 ```
 
-然后**重启 DSH Web**（浏览器再 Ctrl+Shift+R 强刷）。
+然后**重启 DSH Web**（浏览器再强刷）。验证：新会话里出现 `reme-memory` 的上下文注入块；工具表里同时有
+`reme_search` 与 `mcp__reme__<tool>`；聊满 `autoMemoryInterval` 轮后 `session/dialog/` 出现 `dsh-*.jsonl`。
 
-**验证**：
-- 新会话里出现 `reme-memory` 的上下文注入块（元数据 `plugin=reme-memory`、`form=instructions`）；
-- 工具表里同时有插件自带的 `reme_search` 与 MCP 的 `mcp__reme__<tool>`（`search`/`read`/`write`/`edit`/…）；
-- 聊满 `autoMemoryInterval` 轮后，`<REME_WORKSPACE>\session\dialog\` 出现 `dsh-*.jsonl`、`daily\<日期>\` 出现便签。
-
-**上下文与费用影响（实测）**：MCP 工具会全部注册进每次请求。以 ReMe 默认暴露（官方全开）为例：
-30 个工具使请求工具块从 53,535 → 65,201 字符（+11,137 ≈ 2.8k tokens）。
-这些工具落在稳定前缀里、走**缓存价**（DeepSeek V4 Flash 类模型：输入 $0.14/M、缓存 $0.0028/M，
-缓存价约为输入价的 1/50），因此**每请求增量的钱可以忽略**；
-粗算公式：`增量 ≈ 2,942 tokens × 请求次数 × 缓存单价`。
-MCP 的真实代价不在钱，而在**模型注意力**（工具越多，工具选择越容易出错），
-以及能力面：官方全开会把 `delete`/`move`/`reindex`/`auto_dream` 一并交给 agent。
-若想收窄，用 reme-helper 的「MCP 工具暴露」逐项开关；收窄不影响后台自动记忆与定时整理。
-
-### 3.4 Codex：自动记录（本文最关键的一步）
-
-**参考实现**：ReMe 官方 Claude Code hook —— `integrations/claude_code/reme/hooks/hooks.json`
-与 `hooks/auto_memory.py`。官方那份做的是：绑定 **`Stop` 事件** → 脚本从 stdin 取 `session_id` →
-**先脱离进程（double-fork）立刻返回，绝不阻塞停止** → 由脱离出来的进程调用 ReMe 的记忆记录任务。
-
-我们的 Codex 版**沿用同一设计**，只有一处必要差异：ReMe 没有 Codex 的对话解析器
-（它有 Claude Code 专用的 `auto_memory_cc`，但没有 `auto_memory_codex`），
-所以捕获脚本要自己解析 Codex 的 rollout 文件，再交给**通用**的 `auto_memory` 任务。
-
-**第一步**：把**附录 A** 的捕获脚本原样写到 `<CODEX_HOME>\reme-bridge\capture.mjs`
-（reme-helper 的「复制接入文档」会把附录 A 一并附在文末；若你只拿到文件，则见上一级目录的 `capture.mjs`（`doc/capture.mjs`））。
-
-它做五件事：读 rollout → 过滤注入样板与内部线程 → 组装 ReMe 的消息结构 →
-按 rollout 记水位线做增量幂等 → `POST /auto_memory`。
-其中两条是硬约束（都来自 Codex hook 的文档行为，违反会**静默失败**）：
-
-- hook 本体必须**毫秒返回**：`Stop` 事件要求退出码 0 时 stdout 是合法 JSON，且后台 `async` hook 会在会话结束时被取消。
-  所以 hook 只做「解析事件里的 `transcript_path` → 分离一个常驻 worker → 输出 `{}` → 退出」。
-- 并发会话不能丢记录：用队列文件 + 锁重试 + 失败回队。
-
-**第二步**：写端点配置 `<CODEX_HOME>\reme-bridge\config.json`：
-
-```json
-{ "endpoint": "http://127.0.0.1:<REME_PORT>" }
-```
-
-**第三步**：新建 `<CODEX_HOME>\hooks.json`（**纯新增文件，不要改 config.toml 里的 notify**）：
-
-```jsonc
-{
-  "hooks": {
-    "Stop": [
-      { "hooks": [ {
-        "type": "command",
-        "command": "node \"$HOME/.codex/reme-bridge/capture.mjs\" --hook",
-        "commandWindows": "node \"<CODEX_HOME>\\reme-bridge\\capture.mjs\" --hook",
-        "timeout": 30,
-        "statusMessage": "ReMe: capturing this turn"
-      } ] }
-    ]
-  }
-}
-```
-
-**第四步（必须人工做一次）**：在 Codex 里执行 `/hooks`，审核并**信任**这个 hook。
-未信任的 hook 会被 Codex **静默跳过**（不报错，日志里什么都没有）。
-
-**验证**：随便聊一轮后，`<CODEX_HOME>\reme-bridge\capture.log` 出现
-`hook event=Stop … queued+drain` 与 `worker submitted session=codex-…`；
-`<REME_WORKSPACE>\session\dialog\` 出现 `codex-*.jsonl`。
-（ReMe 会自行判断对话是否有长期价值：寒暄之类只留 transcript、不建便签，属正常。）
-
-**边界**：不要既让 agent 手动调用记忆记录、又让 hook 捕获，否则同一段对话会被写两遍。
-建议在 `<CODEX_HOME>\AGENTS.md` 写明：**不要手动调用 `auto_memory` / `auto_dream`**。
-
-### 3.5 记忆整理归属（只允许一份）
-
-`POST /app_config` 的 `jobs` 中应只有**一个** `dream_cron`（如 `0 23 * * *`，由 reme-helper 写入）；
-`auto_dream`/`auto_memory` 是按需任务，不是调度器。
-客户端侧：DSH 插件 `autoDreamEnabled: false`；Codex 不建任何定时任务；不要手动调用 `auto_dream`。
+**成本与能力面**：MCP 工具会全部注册进每次请求。这些工具落在稳定前缀里、走缓存价，**每请求增量的钱可以忽略**；
+真正的代价是模型注意力（工具越多，工具选择越容易出错）与能力面（官方全开时 `delete`/`move`/`reindex`/`auto_dream`
+也会交给 agent）。想收窄就用 reme-helper 的「MCP 工具暴露」逐项开关，收窄不影响后台自动记忆与定时整理。
 
 ---
 
-## 4. 虚拟机（Ubuntu）端：先隧穿，再同款接入
+## 附录：捕获脚本
 
-### 4.1 为什么必须隧穿
+两份脚本的全文由 reme-helper 在**复制时**自动附在下面，本文件里不重复维护，避免两处内容漂移。
 
-ReMe 只监听回环地址，虚拟机无法直连 Windows 的 `<REME_PORT>`。
-reme-helper 的做法是在 Windows 上向虚拟机建立 **SSH 反向隧道**：
-虚拟机的 `127.0.0.1:<REMOTE_PORT>` → Windows 的 `127.0.0.1:<REME_PORT>`。
-（reme-helper 的托盘菜单「VM 目标」里添加目标、配置端口后随 ReMe 一起启停。）
+### 附录 A：Codex 捕获脚本（`capture.mjs`）
 
-在虚拟机里验证：
+落地 `<CODEX_HOME>/reme-bridge/capture.mjs`（**原样写入，不要改动消息结构**）。
+同机与跨机是**同一份**脚本，只有 `config.json` 里的端点不同。
 
-```bash
-ss -ltn | grep <REMOTE_PORT>
-python3 -c "import json,urllib.request;r=urllib.request.Request('http://127.0.0.1:<REMOTE_PORT>/version',data=b'{}',headers={'Content-Type':'application/json'});print(json.loads(urllib.request.urlopen(r,timeout=20).read())['answer'])"
-```
+<!--APPENDIX A-->
 
-### 4.2 虚拟机侧配置（与 Windows 同款，端点换成隧道端口）
+### 附录 B：Claude Code 捕获脚本（`capture_cc.mjs`）
 
-1. `<VM_CODEX_HOME>/config.toml` 追加：
+落地 `<CLAUDE_HOME>/plugins/reme-claude/hooks/capture_cc.mjs`（同机改走捕获桥时同理）；
+运行时状态（水位线 / 锁 / 队列 / 日志）写在**脚本同级的 `bridge/` 目录**，与 Codex 侧完全隔离。
+与附录 A 同构，只换了 §4 说的那四处。
 
-```toml
-[mcp_servers.reme]
-url = "http://127.0.0.1:<REMOTE_PORT>/mcp"
-```
-
-2. 拷贝捕获脚本到 `<VM_CODEX_HOME>/reme-bridge/capture.mjs`（与 Windows 同一份，Linux 的 node 18+ 可直接运行）。
-3. 写 `<VM_CODEX_HOME>/reme-bridge/config.json`：
-
-```json
-{ "endpoint": "http://127.0.0.1:<REMOTE_PORT>" }
-```
-
-4. 拷贝 `hooks.json` 到 `<VM_CODEX_HOME>/hooks.json`（同一份文件即可：`command` 用 `$HOME` 供 Linux，
-   `commandWindows` 供 Windows）。
-5. 在虚拟机里的 Codex 中同样执行一次 `/hooks` 信任。
-
-**验证**（虚拟机的 codex 通常不在 PATH，VSCode 扩展自带，例如 `/usr/lib/chatgpt/resources/codex`）：
-
-```bash
-CX=/usr/lib/chatgpt/resources/codex
-$CX mcp list | grep reme
-$CX doctor | grep -E 'parse|MCP servers'
-$CX exec --skip-git-repo-check --approve-for-me "随便说一句" < /dev/null
-tail -5 <VM_CODEX_HOME>/reme-bridge/capture.log
-```
-
-`< /dev/null` 不可省：非交互执行时 stdin 是不关闭的管道，`codex exec` 会一直等它而卡住。
-
-### 4.3 虚拟机上不该存在的东西
-
-- `notify` 若指向 Windows 路径（例如 `C:\...\codex-computer-use.exe`），在 Linux 上永不生效，
-  且 `doctor` 不报错 —— 应删除或替换为虚拟机本地命令。
-- 客户端侧的整理调度：`crontab -l`、`systemctl --user list-timers` 不应有 ReMe 相关项。
-
----
-
-## 5. 故障排查（按「会静默出错」排序）
-
-| 现象 | 原因 | 处置 |
-|---|---|---|
-| `worker error … fetch failed` | 端点写错（虚拟机上的 ReMe 在隧道端口，不是 `<REME_PORT>`） | 改 `reme-bridge/config.json`，再 `node capture.mjs --drain` |
-| `capture.log` 一直没有内容 | hook 未信任 | 在 Codex 里执行 `/hooks` 信任 |
-| `validation error for Msg`（HTTP 200 但 `success:false`） | 消息缺 `name` 字段 | 用附录 A 的脚本，勿自改消息结构 |
-| 记录丢失 / `worker skipped` | 旧实现并发时丢记录 | 用附录 A 的脚本（队列 + 锁重试），并 `--drain` 补回 |
-| 同一对话两份便签 | agent 手动记录 + hook 捕获重复 | 在 `AGENTS.md` 写明不要手动调用 `auto_memory` |
-| 记忆里出现审批 JSON / 环境样板 | rollout 里的内部线程与注入文本未过滤 | 用附录 A 的脚本（已按来源与前缀过滤） |
-| 插件报 `settingsNamespace` | 装了包管理源上的旧组合包 | 按 §3.2 源码构建 |
-| 插件报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-llm` | 插件没放在 profile 目录内 | 移到 `<DSH_HOME>\profiles\<DSH_PROFILE>\local-plugins\` |
-| MCP 调用被拒 `requires approval` | `approval_policy = "never"` | 交互式批准；自动化用 `--approve-for-me` |
-| MCP 工具没出现在 DSH 里 | MCP 客户端没连上（`failOnStartupError: false` 不阻塞启动） | 确认 ReMe 在跑、`url` 正确；重启 DSH Web |
-
-## 6. 做完怎么确认（逐条核对）
-
-1. `POST /health_check` → `healthy: true`，四个组件 `is_started: true`
-2. DSH 新会话有 `reme-memory` 注入块；工具表里有 `reme_search` 与 `mcp__reme__*`
-3. DSH 聊满 `autoMemoryInterval` 轮 → `<REME_WORKSPACE>\session\dialog\dsh-*.jsonl` 出现
-4. `codex mcp list` → `reme enabled`
-5. Codex 聊一轮 → `capture.log` 有 `worker submitted`；ReMe 侧出现 `codex-*.jsonl`
-6. 虚拟机：`ss -ltn | grep <REMOTE_PORT>` 有监听；`$CX mcp list` 里 reme enabled；虚拟机会话能在 Windows 侧检索到
-7. `POST /app_config` → 只有一个 `dream_cron`；客户端无定时任务
-
-## 7. 一键跑通（新机器按此顺序）
-
-| 步骤 | 做什么 | 见 |
-|---|---|---|
-| 1 | reme-helper：装好并启动 ReMe（完整模式 + LLM + embedding）；确认 `/health_check` 正常；记下端口与 workspace | §0 |
-| 2 | DSH 官方插件：源码构建 → 拷进 profile 的 `local-plugins` → `dsh plugin add` → 在 `cordis.patch.yml` 写 `reme-memory` 段 | §3.2 |
-| 3 | DSH 的 MCP 写能力：同一 patch 文件里 insert `mcp-reme` 段 | §3.3 |
-| 4 | **重启 DSH Web**，浏览器 Ctrl+Shift+R | §3.3 |
-| 5 | Codex 记忆工具：`config.toml` 加 `[mcp_servers.reme]` | §3.1 |
-| 6 | Codex 自动捕获：写 `capture.mjs` → 写 `reme-bridge/config.json` → 新建 `hooks.json` → 在 Codex 里 `/hooks` 信任 | §3.4 |
-| 7 | 虚拟机：开隧穿 → 虚拟机的 `config.toml` / `hooks.json` / `reme-bridge/config.json`（端点写 `<REMOTE_PORT>`）→ 在虚拟机的 Codex 里 `/hooks` 信任 | §4 |
-| 8 | 逐条核对第 6 节 | §6 |
-
-**两个硬依赖**：第 2 步必须在第 4 步（重启）之前完成；第 6/7 步的 `/hooks` 信任是人工动作，
-未信任时 hook 静默跳过。
-
-## 8. 回退
-
-| 停用什么 | 操作 |
-|---|---|
-| Codex 自动捕获 | 删除 `<CODEX_HOME>\hooks.json`（Windows 与虚拟机各一份） |
-| DSH 记忆插件 | `dsh plugin --profile <DSH_PROFILE> remove @agentscope-ai/reme-dsh-plugin` 后重启 |
-| DSH 的 MCP 写能力 | 删掉 `cordis.patch.yml` 里的 `- insert: mcp-reme` 段后重启 |
-| Codex 记忆工具 | 删除 `config.toml` 里的 `[mcp_servers.reme]` |
-
----
-
-## 附录 A：Codex 捕获脚本（`capture.mjs`）
-
-> reme-helper 的「复制接入文档」会把脚本全文附在这里，粘贴给 AI 即可一次拿到"文档 + 脚本"。
-> 如果你是在文件系统里看到这份文档，脚本在上一级目录的 `capture.mjs`（`doc/capture.mjs`）。
-> 落地路径：`<CODEX_HOME>\reme-bridge\capture.mjs`（**原样写入，不要改动消息结构**）。
+<!--APPENDIX B-->

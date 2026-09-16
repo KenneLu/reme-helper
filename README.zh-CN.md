@@ -5,7 +5,8 @@
 把 ReMe 配好、把 Agent 接上，让多台机器共用同一份记忆。
 
 **一个面向 [ReMe](https://github.com/agentscope-ai/ReMe) 的 Windows 托盘应用。** 它用窗口代替手写来生成 ReMe 的配置，运行服务，
-并把 Agent 客户端——Windows 上的 Codex、虚拟机里的 Codex、DeepSeek Harness——接到同一个 ReMe 实例、同一份 workspace 上。
+并把 Agent 客户端——Windows 上的 Codex 与 Claude Code、虚拟机里的 Codex 与 Claude Code、DeepSeek Harness——
+接到同一个 ReMe 实例、同一份 workspace 上。
 
 ## 功能
 
@@ -33,10 +34,13 @@ ReMe 的行为来自 YAML：哪些 job 开、按什么计划跑、用哪个模�
 | 客户端 | 接入方式 |
 |---|---|
 | Codex（Windows） | MCP server 配置 + 一个自动记录对话的生命周期 hook |
-| Codex（虚拟机内） | 同上，走反向隧道，端点指向隧道端口 |
+| Claude Code（Windows） | MCP 注册 + skill，记录走官方 Stop hook（Windows 需一处异步补丁）或同一套捕获脚本 |
+| Codex（虚拟机内） | 与 Windows 同一份脚本，走反向隧道，端点指向隧道端口 |
+| Claude Code（虚拟机内） | 官方方案跨机读不到对话，改用捕获脚本：客户端本地读 transcript、算增量后提交 |
 | DeepSeek Harness | ReMe 官方 DSH 插件，另加 MCP 客户端配置以获得写记忆能力 |
 
-三者的一步步做法随应用分发——可以在窗口里阅读，也可以复制（会自动附上 Codex 捕获脚本）后整份交给一个能改本机文件的 Agent。
+接入文档随应用分发（含两份捕获脚本）：可以**阅读接入文档**先看一遍，也可以**复制接入文档**整份交给一个能改本机文件的
+Agent——它会**先探测这台机器装了哪些客户端、有没有第二台机器**，报告哪几端适用，你确认后再逐端接上并逐端验收。
 
 ## 安装
 

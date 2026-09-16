@@ -42,8 +42,8 @@ const NOISE_PREFIXES = [
 
 /**
  * ReMe 端点优先级：环境变量 REME_URL > 本目录 config.json 的 endpoint > 默认 http://127.0.0.1:2333。
- * reme 只监听回环地址：同机直连用 2333；经 reme-helper 反向隧穿的机器（如 VM）必须用隧道端口
- * （例如 22333）。所以端点必须能在不改脚本的前提下切换 —— 这就是 config.json 存在的理由。
+ * ReMe 只监听回环地址：同机直连用默认端口；经隧道接入的机器必须写**本侧隧道端口**
+ * （不是 ReMe 本机的默认端口）。所以端点必须能在不改脚本的前提下切换 —— 这就是 config.json 存在的理由。
  */
 async function currentEndpoint() {
   if (process.env.REME_URL) return process.env.REME_URL.replace(/\/$/, '')
@@ -145,8 +145,11 @@ async function saveState(state) {
   await writeFile(STATE_FILE, JSON.stringify(state, null, 2) + '\n', 'utf8')
 }
 
-/** 获取锁；允许重试以覆盖并发会话（另一个 worker 通常 2~4 秒完成）。 */
-async function acquireLock(attempts = 12, delayMs = 700) {
+/**
+ * 获取锁；等待上限要覆盖 auto_memory 单次最长耗时，否则并发 worker 会让后到者白跑一趟。
+ * 陈旧锁按 mtime 回收：worker 崩死留下的锁不会永久堵住队列。
+ */
+async function acquireLock(attempts = 60, delayMs = 2000) {
   await mkdir(BRIDGE_DIR, { recursive: true })
   for (let i = 0; i < attempts; i++) {
     try {
@@ -205,22 +208,37 @@ async function submit(sessionId, messages) {
   return { ok, answer: parsed && typeof parsed.answer === 'string' ? parsed.answer.slice(0, 160) : '', raw: raw.replace(/\s+/g, ' ').slice(0, 240) }
 }
 
+/**
+ * 处理单个 rollout：算出水位线之后的增量并提交。
+ *
+ * 两条纪律：
+ *   ① 只取最前面的 N 条（oldest-first），未发的留给下一轮 —— 不会跳过中间的消息；
+ *   ② 水位线只增不减：写回前重新读盘取 max，且只按"实际发出的条数"推进。
+ * 否则手工提交与 Stop worker 并发时，两者各读旧值、各写回，后写者胜，水位线会被打回，
+ * 已入库内容被反复重发。
+ */
 async function handleOne(path, args, state, { commit }) {
   const text = await readFile(path, 'utf8')
   const { messages, fileId, source } = extract(text)
   if (isInternal(source)) return { kind: 'internal', count: 0 }
   if (!messages.length) return { kind: 'empty', count: 0 }
-  const seen = Number((state.rollouts[path] || {}).count || 0)
+  const stored = state.rollouts[path] || {}
+  // rollout 被重写/截断时水位线失效，从头重来（id 确定性，服务端会去重）
+  let seen = Number(stored.count || 0)
+  if (seen > messages.length) seen = 0
   const fresh = messages.slice(seen)
   if (!fresh.length) return { kind: 'uptodate', count: messages.length }
-  const batch = fresh.slice(-args.max)
+  const batch = fresh.slice(0, args.max)
   const sessionId = `codex-${fileId || 'unknown'}`
   const payload = toRemeMessages(sessionId, batch, seen)
   if (!commit) return { kind: 'pending', count: messages.length, fresh: batch.length, sessionId, preview: batch[0] && batch[0].content.slice(0, 60) }
   const result = await submit(sessionId, payload)
   if (result.ok) {
-    state.rollouts[path] = { count: messages.length, sessionId, at: new Date().toISOString() }
-    await saveState(state)
+    const disk = await loadState()
+    const cur = Number((disk.rollouts[path] || {}).count || 0)
+    disk.rollouts[path] = { count: Math.max(cur, seen + batch.length), sessionId, at: new Date().toISOString() }
+    state.rollouts = disk.rollouts
+    await saveState(disk)
   }
   return { kind: result.ok ? 'submitted' : 'failed', count: messages.length, fresh: batch.length, sessionId, answer: result.answer }
 }
@@ -252,27 +270,36 @@ async function runDrain() {
 }
 
 async function runSweep(args, log) {
-  const rollouts = await collectRollouts()
-  const state = await loadState()
-  const stats = { rollouts: rollouts.length, internal: 0, empty: 0, uptodate: 0, pending: [], submitted: 0, failed: 0, failedSample: [] }
-  for (const r of rollouts) {
-    const res = await handleOne(r.path, args, state, { commit: args.submit })
-    if (res.kind === 'internal') stats.internal++
-    else if (res.kind === 'empty') stats.empty++
-    else if (res.kind === 'uptodate') stats.uptodate++
-    else if (res.kind === 'pending') stats.pending.push({ sessionId: res.sessionId, fresh: res.fresh, preview: res.preview })
-    else if (res.kind === 'submitted') stats.submitted++
-    else if (res.kind === 'failed') { stats.failed++; if (stats.failedSample.length < 3) stats.failedSample.push({ sessionId: res.sessionId, answer: res.answer }) }
+  // 锁必须覆盖所有提交入口（hook worker / 单会话 / 全量回补），否则两条路径必然抢写水位线。
+  if (args.submit) {
+    const got = await acquireLock()
+    if (!got) { log('lock busy: another submit is running, try again later'); return 1 }
   }
-  log(JSON.stringify({
-    mode: args.submit ? 'sweep+submit' : 'sweep(dry)',
-    rollouts: stats.rollouts, internal: stats.internal, empty: stats.empty, upToDate: stats.uptodate,
-    pendingRollouts: stats.pending.length,
-    pendingMessages: stats.pending.reduce((n, x) => n + x.fresh, 0),
-    pendingSample: stats.pending.slice(-5),
-    submitted: stats.submitted, failed: stats.failed, failedSample: stats.failedSample
-  }, null, 2))
-  return stats.failed ? 1 : 0
+  try {
+    const rollouts = await collectRollouts()
+    const state = await loadState()
+    const stats = { rollouts: rollouts.length, internal: 0, empty: 0, uptodate: 0, pending: [], submitted: 0, failed: 0, failedSample: [] }
+    for (const r of rollouts) {
+      const res = await handleOne(r.path, args, state, { commit: args.submit })
+      if (res.kind === 'internal') stats.internal++
+      else if (res.kind === 'empty') stats.empty++
+      else if (res.kind === 'uptodate') stats.uptodate++
+      else if (res.kind === 'pending') stats.pending.push({ sessionId: res.sessionId, fresh: res.fresh, preview: res.preview })
+      else if (res.kind === 'submitted') stats.submitted++
+      else if (res.kind === 'failed') { stats.failed++; if (stats.failedSample.length < 3) stats.failedSample.push({ sessionId: res.sessionId, answer: res.answer }) }
+    }
+    log(JSON.stringify({
+      mode: args.submit ? 'sweep+submit' : 'sweep(dry)',
+      rollouts: stats.rollouts, internal: stats.internal, empty: stats.empty, upToDate: stats.uptodate,
+      pendingRollouts: stats.pending.length,
+      pendingMessages: stats.pending.reduce((n, x) => n + x.fresh, 0),
+      pendingSample: stats.pending.slice(-5),
+      submitted: stats.submitted, failed: stats.failed, failedSample: stats.failedSample
+    }, null, 2))
+    return stats.failed ? 1 : 0
+  } finally {
+    if (args.submit) await releaseLock()
+  }
 }
 
 async function main() {
@@ -311,8 +338,18 @@ async function main() {
   const path = args.rollout || (rollouts.length ? rollouts[rollouts.length - 1].path : '')
   if (!path) { log('no rollout found'); return 0 }
 
-  const state = await loadState()
-  const res = await handleOne(path, args, state, { commit: !args.dryRun })
+  const committing = !args.dryRun
+  if (committing) {
+    const got = await acquireLock()
+    if (!got) { log('lock busy: another submit is running, try again later'); return 1 }
+  }
+  let res
+  try {
+    const state = await loadState()
+    res = await handleOne(path, args, state, { commit: committing })
+  } finally {
+    if (committing) await releaseLock()
+  }
   if (res.kind === 'internal') log('skip: internal codex thread — not a user conversation')
   else if (res.kind === 'empty') log(`no capturable messages in ${path}`)
   else if (res.kind === 'uptodate') log(`nothing new (${res.count} messages already captured)`)
