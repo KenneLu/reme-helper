@@ -21,6 +21,7 @@ This document is about one thing only: connecting clients to ReMe. It is not abo
 | `<REME_WORKSPACE>` | ReMe's memory directory (`daily/ digest/ session/`) | the `workspace` folder under the ReMe directory configured in reme-helper |
 | `<CODEX_HOME>` | Codex home | `%USERPROFILE%\.codex` on Windows, `~/.codex` on Linux |
 | `<CLAUDE_HOME>` | Claude Code home | `%USERPROFILE%\.claude` on Windows, `~/.claude` on Linux |
+| `<ZCODE_HOME>` | ZCode home, native CLI side (only if installed) | `%USERPROFILE%\.zcode` on Windows, `~/.zcode` on Linux |
 | `<DSH_HOME>` `<DSH_PROFILE>` | DSH home and profile (only if DSH is installed) | `%USERPROFILE%\.dsh` on Windows; `web` for the Web UI |
 | `<SRC_DIR>` | Scratch source directory (for the DSH source build) | your choice |
 | `<VM_HOST>` `<VM_USER>` | Address and user of the second Linux machine (skip if none) | your environment |
@@ -82,6 +83,10 @@ Two capabilities per end:
    Getting it wrong shows up as `fetch failed` / `Connection refused`.
 7. **Proof is an artifact, not a log line**: `ok` in a hook log only means the call returned — it also returns `ok` for a
    session id that does not exist. Real evidence is in §6.
+8. **Watermark keys must be normalized**: state is keyed by the transcript's **absolute path**; normalize the slash
+   direction to one spelling (on Windows a hook and a manual call can hand you `C:\` and `C:/` for the same file),
+   or one file splits into two watermarks that push each other back — server-side id dedup keeps the artifacts clean,
+   but the watermark never converges.
 
 ---
 
@@ -91,6 +96,7 @@ Two capabilities per end:
 |---|---|---|
 | **Codex** | capture bridge (§4) | **the same capture bridge**, endpoint changed |
 | **Claude Code** | official plugin | **must switch to the capture bridge** |
+| **ZCode** (native route, only if installed) | capture bridge (Appendix C) | the same capture bridge, endpoint changed |
 | **DSH** (only if installed) | official plugin | official plugin, endpoint changed |
 
 Facts you must know, or you will get this wrong:
@@ -108,6 +114,10 @@ Facts you must know, or you will get this wrong:
 - **Codex has no official automatic capture**: officially you get a skill / MCP only ("automatic capture requires
   integrating with the host lifecycle" — their words). The capture bridge is the glue we add; the mechanism itself
   (host lifecycle hooks) is an official Codex feature, not a hack.
+- **ZCode native sessions have no `~/.claude/projects` transcript and do not read `~/.claude/settings.json`**: the
+  conversation lives in their own rollout (`<ZCODE_HOME>/cli/rollout/model-io-sess_<id>.jsonl`) and hooks are
+  configured in `<ZCODE_HOME>/cli/config.json` — the official Claude Code hook does nothing for them; use the
+  capture bridge.
 
 ### Claude Code memory backend policy (ask the user before wiring; identical on Windows and Linux)
 
@@ -172,6 +182,25 @@ Everything else (endpoint resolution, watermark, lock, queue, detached process, 
 |---|---|---|---|
 | Codex | `<CODEX_HOME>/sessions/<year>/<month>/<day>/rollout-*.jsonl` | names start with `rollout-`; session id from the `session_meta` line | internal threads, approval/environment boilerplate |
 | Claude Code | `<CLAUDE_HOME>/projects/<project>/<session-id>.jsonl` | one JSON object per line; session id is the file name | `isSidechain`, injected templates, thinking |
+| ZCode | `<ZCODE_HOME>/cli/rollout/model-io-sess_*.jsonl` | names start with `model-io-sess_`; session id is the file name minus the `model-io-` prefix | auxiliary calls (`querySource≠main_turn`), system role, injected templates, reasoning blocks |
+
+**ZCode rollout format notes** (implement the parser exactly this way; do not guess):
+
+- One model-I/O record per line:
+  `{ querySource, sessionId, turnId, attempt, startedAt, completedAt, request, response }`.
+- Messages live in `request.messages`, stored one of three ways: `full` (everything, offset 0), `delta` (new entries
+  starting at `messageOffset`), `tail` (a trailing window that drops the first `messageOffset` entries). All three
+  locate an entry at **absolute index = `messageOffset` + j**; walk the lines and overwrite per index to rebuild the
+  conversation — when history has been rewritten, the newest line wins.
+- **Only consume lines with `querySource = "main_turn"`**: auxiliary calls like `session_title` use a completely
+  different coordinate system; mixing them in corrupts the reconstruction.
+- Every line also carries a `response` (the model's reply for that call: `text` + `toolCalls:[{id,name,input}]`). It
+  only enters history with the **next** line — so after scanning the file, append the **last** line's `response` to the
+  end of the conversation, or every round loses the final assistant message.
+- Message entries: `role ∈ system|user|assistant|tool`; assistant content blocks are only `text` (keep) and `reasoning`
+  (drop); `tool_calls` is flat `{id,name,input}`, not OpenAI's nested `function`.
+- **ReMe's Msg accepts only `user/assistant/system`**: standalone `role:"tool"` result entries must be mapped onto
+  `user` with the `[tool_result …]` text inlined; submitting them verbatim fails with `validation error for Msg`.
 
 **Endpoint resolution order** (same everywhere): `REME_URL` env var > **the host's own config file** > default local
 port. On the Codex side that is `config.json` next to the capture script; on the Claude Code side it is the plugin's
@@ -189,6 +218,7 @@ two can disagree. We hit exactly that: the hook kept dialling the default port w
 | Codex (remote) | the same file (**one file for both**: `command` uses `$HOME` for Linux, `commandWindows` holds the absolute path) | same file, value becomes `http://127.0.0.1:<REMOTE_PORT>` | same, once per machine |
 | Claude Code (remote) | `Stop` in `<CLAUDE_HOME>/settings.json`, pointing at the capture bridge | the plugin's `.mcp.json` (**rewritten to the tunnel port**) **and** the `reme` MCP entry in `~/.claude.json` — **both must match** | none (user-level settings hooks run directly) |
 | Claude Code (co-located, official) | same, pointing at the official hook (needs the async patch on Windows, see §3) | plugin `.mcp.json` = local port | none |
+| ZCode | `Stop` under the top-level `hooks` in `<ZCODE_HOME>/cli/config.json`, pointing at the capture bridge | `config.json` next to the script (`mcpServers.reme.url`) | none (applies to **new sessions**; **`"enabled": true` is mandatory** — config-file hooks are disabled by default) |
 | DSH | managed by the official plugin (no hook) | `endpoint` in the plugin config | restart DSH Web and hard-refresh the browser |
 
 MCP registration for recall:
@@ -276,11 +306,14 @@ forever.
 | Hook logs look fine, zero artifacts | the server cannot read the transcript (remote), or the hook was cancelled because it was not detached | use the capture bridge (§4) |
 | `fetch failed` / `Connection refused` | wrong endpoint (remote machines need the tunnel port, not the default local port) | fix the endpoint, then submit once by hand |
 | The hook never fires | Codex hook not trusted | run `/hooks` in Codex and trust it |
+| ZCode hook never fires | config-file hooks are disabled by default, or the hook was put in `~/.claude/settings.json` (ZCode does not read it) | top-level `"hooks": { "enabled": true, … }` in `<ZCODE_HOME>/cli/config.json` |
 | HTTP 200 but `success:false`, `validation error for Msg` | message lacks `name` (must equal `role`) | follow the message shape in §2 |
+| `validation error for Msg role` (ZCode) | `role:"tool"` result entries submitted under their original role | map onto `user` + `[tool_result …]` (see §4) |
 | The same conversation produces two notes | manual recording plus hook capture | forbid manual calls in `AGENTS.md` |
 | The same fact lives in two memories, context gets double-injected | Claude Code built-in memory still on, alongside ReMe | ask the user to pick a policy per §3; for "ReMe only" shut the built-in one down per §5 |
 | Approval JSON or environment boilerplate shows up in memory | internal threads and injected text not filtered | follow the rendering rules in §4 |
 | Already-recorded content is resubmitted | watermark pushed backwards by a concurrent writer | forward-only watermark + lock on every submission path |
+| Content resubmitted forever and the watermark never converges (ZCode) | manual and hook submissions used different slash directions for the same path | normalize watermark keys (invariant 8) |
 | The official Claude Code hook times out on Windows | no `fork`, runs inline, killed by the 30-second hook timeout | patch it to detach, or use the capture bridge |
 | DSH plugin reports `settingsNamespace` | an old combined package from the registry is installed | source build, §9 |
 | DSH plugin reports `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-llm` | plugin not inside the profile directory | move it under `<DSH_HOME>\profiles\<DSH_PROFILE>\local-plugins\` |
@@ -376,8 +409,8 @@ background auto-memory or scheduled consolidation.
 
 ## Appendices: the capture scripts
 
-reme-helper appends both scripts in full **when the guide is copied**; they are not duplicated in this file, so the two
-can never drift apart.
+reme-helper appends all three scripts in full **when the guide is copied**; they are not duplicated in this file, so the
+two can never drift apart.
 
 ### Appendix A: Codex capture script (`capture.mjs`)
 
@@ -393,3 +426,12 @@ bridge). Runtime state (watermark / lock / queue / log) lives in the `bridge/` d
 isolated from the Codex side. Same skeleton as Appendix A with the four host-specific pieces from §4 swapped.
 
 <!--APPENDIX B-->
+
+### Appendix C: ZCode capture script (`capture_zcode.mjs`)
+
+Install at `<ZCODE_HOME>/cli/reme-bridge/capture_zcode.mjs` (co-located and remote share the same script — only the
+endpoint in `config.json` differs). Runtime state (watermark / lock / queue / log) lives in the `bridge/` directory
+**next to the script**, fully isolated from the Codex / Claude Code sides. Same skeleton as Appendix A with the four
+host-specific pieces from §4 swapped; for the rollout format see "ZCode rollout format notes" in §4.
+
+<!--APPENDIX C-->

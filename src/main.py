@@ -3207,6 +3207,7 @@ CONFIG_DOC_NAME = "configuration.md"
 INTEGRATION_DOC_SCRIPTS: tuple[tuple[str, str], ...] = (
     ("<!--APPENDIX A-->", "capture.mjs"),
     ("<!--APPENDIX B-->", "capture_cc.mjs"),
+    ("<!--APPENDIX C-->", "capture_zcode.mjs"),
 )
 SETUP_GUIDE_MIN_CHARS = 20000
 

@@ -18,6 +18,7 @@
 | `<REME_WORKSPACE>` | ReMe 记忆目录（含 `daily/ digest/ session/`） | reme-helper 里 ReMe 目录下的 `workspace` |
 | `<CODEX_HOME>` | Codex 主目录 | Windows 默认 `%USERPROFILE%\.codex`，Linux 默认 `~/.codex` |
 | `<CLAUDE_HOME>` | Claude Code 主目录 | Windows 默认 `%USERPROFILE%\.claude`，Linux 默认 `~/.claude` |
+| `<ZCODE_HOME>` | ZCode 主目录（原生 CLI 那份，装了才用） | Windows 默认 `%USERPROFILE%\.zcode`，Linux 默认 `~/.zcode` |
 | `<DSH_HOME>` `<DSH_PROFILE>` | DSH 主目录与 profile（装了 DSH 才用） | Windows 默认 `%USERPROFILE%\.dsh`，Web 界面用 `web` |
 | `<SRC_DIR>` | 临时源码目录（DSH 源码构建用） | 自选 |
 | `<VM_HOST>` `<VM_USER>` | 第二台 Linux 机器的地址与用户名（没有就跳过） | 你的环境 |
@@ -72,6 +73,9 @@ ReMe **只监听回环地址、不使用 API Key** —— 这两点决定了「�
 5. **记忆整理全局只留一份**：只由 reme-helper 启动的那个 ReMe 做；客户端不要另开定时整理，也不要手动调用 `auto_dream`。
 6. **端点写"本侧实际监听的那个口"**：同机写本机端口，跨机写隧道端口。写错的表现是 `fetch failed` / `Connection refused`。
 7. **成功的凭据是产物，不是日志**：日志里的 `ok` 只说明这次调用返回了，对不存在的会话也会 `ok`。真凭据见 §6。
+8. **水位线键必须规范化**：状态按「对话文件绝对路径」记账，斜杠方向要统一成一种写法
+   （Windows 上钩子与手动调用拿到的可能是 `C:\` 与 `C:/` 两种），否则同一份文件裂成两条水位线互相打回——
+   服务端按 id 去重能兜住产物不重复，但水位线永远合不拢。
 
 ---
 
@@ -81,6 +85,7 @@ ReMe **只监听回环地址、不使用 API Key** —— 这两点决定了「�
 |---|---|---|
 | **Codex** | 捕获桥（见 §4） | **同一套捕获桥**，只换端点 |
 | **Claude Code** | 官方插件 | **必须换成捕获桥** |
+| **ZCode**（原生路线，装了才做） | 捕获桥（附录 C） | 同一套捕获桥，只换端点 |
 | **DSH**（装了才做） | 官方插件 | 官方插件，只换端点 |
 
 判断依据，必须知道，否则会做错：
@@ -94,6 +99,9 @@ ReMe **只监听回环地址、不使用 API Key** —— 这两点决定了「�
     重新拉起自己后立即返回，钩子命令写 `pythonw` 的绝对路径，不依赖 PATH）。
 - **Codex 官方没有自动记录**：官方只给 skill / MCP（文档原话是"自动捕获需要显式接入宿主生命周期"）。
   捕获桥是我们补的那一层胶水；机制本身（宿主生命周期钩子）是 Codex 官方功能，不是 hack。
+- **ZCode 原生会话既没有 `~/.claude/projects` 转录，也不读 `~/.claude/settings.json`**：对话记录在自己的
+  rollout（`<ZCODE_HOME>/cli/rollout/model-io-sess_<id>.jsonl`），钩子配置在 `<ZCODE_HOME>/cli/config.json`
+  ——官方 Claude Code 钩子对它完全不生效，必须走捕获桥。
 
 ### Claude Code 记忆后端策略（接入前必须问用户，Windows 与 Linux 机制一致）
 
@@ -146,9 +154,24 @@ Claude Code 内核**自带一套记忆系统**，且**默认开启**：按项目
 这四处之外的基础设施（端点解析、水位线、锁、队列、分离进程、REST 提交）各端共用：
 
 | 端 | 对话文件位置 | 匹配规则 | 额外过滤 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Codex | `<CODEX_HOME>/sessions/<年>/<月>/<日>/rollout-*.jsonl` | 文件名以 `rollout-` 开头；会话 id 取 `session_meta` 行 | 内部子线程、审批/环境样板 |
 | Claude Code | `<CLAUDE_HOME>/projects/<项目目录>/<会话id>.jsonl` | 每行一条 JSON；会话 id 即文件名 | `isSidechain`、注入模板、thinking |
+| ZCode | `<ZCODE_HOME>/cli/rollout/model-io-sess_*.jsonl` | 文件名以 `model-io-sess_` 开头；会话 id 取文件名去掉 `model-io-` 前缀 | 辅助调用（`querySource≠main_turn`）、system 角色、注入模板、reasoning 块 |
+
+**ZCode rollout 格式要点**（解析器照此实现，不要另猜）：
+
+- 每行一条模型 I/O 记录：`{ querySource, sessionId, turnId, attempt, startedAt, completedAt, request, response }`。
+- 消息在 `request.messages`，三种存法：`full`（全量，offset=0）、`delta`（自 `messageOffset` 起的增量）、
+  `tail`（丢掉头部 `messageOffset` 条的尾部窗口）。三种都用**绝对下标 = `messageOffset` + j** 定位，
+  逐行覆盖写入即可重建完整对话；历史被改写时以最新行为准。
+- **只吃 `querySource = "main_turn"` 的行**：`session_title` 等辅助调用的消息坐标系与主对话完全不同，混进来必错。
+- 每行还带一条 `response`（模型本轮回复：`text` + `toolCalls:[{id,name,input}]`）。它要等**下一行**才进历史
+  ——扫完整个文件后必须把最后一行的 `response` 补到对话末尾，否则每轮漏最后一条助手消息。
+- 消息条目 `role ∈ system|user|assistant|tool`；assistant 的 content 块只有 `text`（保留）与 `reasoning`（丢弃）；
+  `tool_calls` 是扁平的 `{id,name,input}`，不是 OpenAI 的 function 嵌套。
+- **ReMe 的 Msg 只收 `user/assistant/system`**：独立的 `role:"tool"` 结果条目必须映射成 `user` 角色内联
+  `[tool_result …]` 文本，原样提交会报 `validation error for Msg`。
 
 **端点解析优先级**（各端一致）：环境变量 `REME_URL` > **宿主自己那份配置** > 默认本机端口。
 Codex 侧读捕获脚本目录下的 `config.json`；Claude Code 侧读插件自带的 `.mcp.json`（去掉 `/mcp` 后缀）。
@@ -165,6 +188,7 @@ Codex 侧读捕获脚本目录下的 `config.json`；Claude Code 侧读插件自
 | Codex（跨机） | 同上（**同一份文件**：`command` 用 `$HOME` 供 Linux，`commandWindows` 用绝对路径供 Windows） | 同上，值改成 `http://127.0.0.1:<REMOTE_PORT>` | 同上，在那台机器的 Codex 里再做一次 |
 | Claude Code（跨机） | `<CLAUDE_HOME>/settings.json` 的 `Stop`，指向捕获桥脚本 | 插件自带 `.mcp.json`（**改写成隧道端口**）+ `~/.claude.json` 的 `reme` MCP 注册，**两处必须一致** | 无（用户级 settings 里的钩子直接生效） |
 | Claude Code（同机，走官方） | 同上，指向官方钩子（Windows 需打异步补丁，见 §3） | 插件 `.mcp.json` = 本机端口 | 无 |
+| ZCode | `<ZCODE_HOME>/cli/config.json` 顶层 `hooks` 的 `Stop`，指向捕获桥脚本 | 脚本同目录 `config.json`（`mcpServers.reme.url`） | 无（对新会话生效；**必须显式 `"enabled": true`**——配置型钩子默认禁用） |
 | DSH | 官方插件自管（无需钩子） | 插件配置里的 `endpoint` | 重启 DSH Web 并强刷浏览器 |
 
 召回用的 MCP 注册：
@@ -239,11 +263,14 @@ tail -5 <CODEX_HOME>/reme-bridge/capture.log
 | 钩子日志正常，但零产物 | 服务端读不到对话文件（跨机），或钩子未分离进程被会话结束取消 | 走捕获桥（§4） |
 | `fetch failed` / `Connection refused` | 端点写错（跨机必须写隧道端口，不是本机默认端口） | 改端点，再手动补一次 |
 | 钩子一直没反应 | Codex 的钩子未被信任 | 在 Codex 里执行 `/hooks` 信任 |
+| ZCode 钩子一直不触发 | 配置型钩子默认禁用，或钩子错挂在 `~/.claude/settings.json`（ZCode 不读它） | `<ZCODE_HOME>/cli/config.json` 顶层设 `"hooks": { "enabled": true, … }` |
 | HTTP 200 但 `success:false`、`validation error for Msg` | 消息缺 `name` 字段（必须等于 `role`） | 按 §2 的消息形状 |
+| `validation error for Msg role`（ZCode） | `role:"tool"` 的结果条目按原角色提交了 | 映射成 `user` + `[tool_result …]`（见 §4） |
 | 同一段对话两份便签 | agent 手动记录 + 钩子捕获重复 | 在 `AGENTS.md` 里禁止手动调用 |
 | 同一事实两份记忆、上下文重复注入 | Claude Code 内建记忆未关，与 ReMe 并存 | 按 §3 问用户选定策略；只用 ReMe 时按 §5 关闭内建记忆 |
 | 记忆里出现审批 JSON、环境样板 | 内部线程与注入文本未过滤 | 按 §4 的渲染规则 |
 | 已入库内容被反复重发 | 水位线被并发打回 | 水位线只增不减 + 锁覆盖全部提交入口 |
+| 已入库内容反复重发且水位线合不拢（ZCode） | 手动与钩子提交的路径斜杠方向不同，水位线裂成两条 | 键统一规范化（见不变量 8） |
 | Windows 上官方 Claude Code 钩子超时 | 无 `fork` 退化成同步，超过 30 秒被砍 | 打异步补丁，或改用捕获桥 |
 | DSH 插件报 `settingsNamespace` | 装了包管理源上的旧组合包 | 按 §9 源码构建 |
 | DSH 插件报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-llm` | 插件没放在 profile 目录内 | 移到 `<DSH_HOME>\profiles\<DSH_PROFILE>\local-plugins\` |
@@ -333,7 +360,7 @@ dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
 
 ## 附录：捕获脚本
 
-两份脚本的全文由 reme-helper 在**复制时**自动附在下面，本文件里不重复维护，避免两处内容漂移。
+三份脚本的全文由 reme-helper 在**复制时**自动附在下面，本文件里不重复维护，避免两处内容漂移。
 
 ### 附录 A：Codex 捕获脚本（`capture.mjs`）
 
@@ -349,3 +376,11 @@ dsh plugin --profile <DSH_PROFILE> add $dst --ignore-scripts
 与附录 A 同构，只换了 §4 说的那四处。
 
 <!--APPENDIX B-->
+
+### 附录 C：ZCode 捕获脚本（`capture_zcode.mjs`）
+
+落地 `<ZCODE_HOME>/cli/reme-bridge/capture_zcode.mjs`（同机与跨机同一份，只有 `config.json` 里的端点不同）。
+运行时状态（水位线 / 锁 / 队列 / 日志）写在**脚本同级的 `bridge/` 目录**，与 Codex / Claude Code 侧完全隔离。
+与附录 A 同构，只换了 §4 说的那四处；rollout 的格式见 §4 的「ZCode rollout 格式要点」。
+
+<!--APPENDIX C-->
