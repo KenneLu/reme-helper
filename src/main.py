@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -629,6 +629,12 @@ def settings_resettable(draft: dict, saved_cfg: dict) -> set:
     return names
 
 
+def _strip_probe(section: dict) -> dict:
+    """剔除探测副作用字段：probe_ok / probe_detail 是「测试连接」写进草稿的运行状态，
+    不是用户的可保存改动——计数与悬浮明细都必须把它们排除（否则点了测试就永远"待保存"）。"""
+    return {k: v for k, v in section.items() if k not in ("probe_ok", "probe_detail")}
+
+
 def settings_changed_items(draft: dict, saved_cfg: dict, saved_root: str, saved_mode: str,
                            targets: list) -> list:
     """Differences against what is currently saved on disk (not against defaults).
@@ -637,6 +643,7 @@ def settings_changed_items(draft: dict, saved_cfg: dict, saved_root: str, saved_
       * 将要写入 = 窗口显示的能力集（固定预设下就是该预设的能力集）；
       * 当前生效 = 当前模式对应的能力集（固定预设用它自己的，自定义才用保存下来的 custom）。
     否则固定预设下刚打开窗口就会把预设与旧 custom 的差异列成"未保存改动"（误报）。
+    LLM / Embedding 的比较剔除探测副作用字段，与 settings_pending_details 同一口径。
     """
     items = []
     if draft["mode"] != saved_mode:
@@ -647,19 +654,120 @@ def settings_changed_items(draft: dict, saved_cfg: dict, saved_root: str, saved_
     for key in FEATURES:
         if bool(pending_features.get(key)) != bool(effective_features.get(key)):
             items.append(FEATURES[key]["name"])
-    if draft["llm"] != saved_cfg["llm"]:
-        items.append("LLM 参数")
-    if draft["embedding"] != saved_cfg["embedding"]:
-        items.append("Embedding")
+    if _strip_probe(draft["llm"]) != _strip_probe(saved_cfg["llm"]):
+        items.append("LLM 与模型")
+    if _strip_probe(draft["embedding"]) != _strip_probe(saved_cfg["embedding"]):
+        items.append("Embedding（语义检索）")
     if draft["pipeline"] != saved_cfg["pipeline"]:
         items.append("记忆管道")
     if draft["expose"] != saved_cfg["expose"]:
-        items.append("MCP 暴露")
+        items.append("MCP 工具暴露")
     if draft["reme_root"] != saved_root:
         items.append("ReMe 目录")
     if targets != saved_cfg.get("targets", []):
-        items.append("VM 目标")
+        items.append("VM 隧道目标")
     return items
+
+
+def _format_pending_value(section: str, key: str, value) -> str:
+    """把单个字段值格式化成人能读的短文本（差异列表右列/左列共用）。"""
+    if isinstance(value, bool):
+        return "开启" if value else "停用"
+    if isinstance(value, list):
+        return f"{len(value)} 项" + (f"（{'、'.join(str(x) for x in value[:3])}{'…' if len(value) > 3 else ''}）" if value else "")
+    text = str(value)
+    lower = text.lower()
+    if "key" in key.lower() or ("token" in lower and len(text) > 12):
+        text = "•" * 8 if text else "（空）"
+    if key == "reasoning_effort":
+        text = EFFORT_LABELS.get(text, text) or "不设置"
+    if key == "mode":
+        text = MODE_NAMES.get(text, text)
+    if len(text) > 46:
+        text = text[:45] + "…"
+    return text or "（空）"
+
+
+# 悬浮明细的大节顺序与字段标签：严格对应面板的大标题与选项小标题，按面板顺序排列方便对照修改。
+PENDING_SECTION_ORDER = (
+    "运行与模式", "LLM 与模型", "Embedding（语义检索）",
+    "记忆管道", "MCP 工具暴露", "自定义模式功能", "VM 隧道目标",
+)
+PENDING_FIELD_LABELS = {
+    "mode": "模式",
+    "reme_root": "ReMe 目录",
+    "base_url": "Base URL",
+    "model": "模型",
+    "max_tokens": "max_tokens",
+    "thinking_enable": "允许内部思考",
+    "reasoning_effort": "思考强度",
+    "dimensions": "维度",
+    "scan_days": "扫描天数",
+    "max_units": "每次最沉淀",
+    "dream_cron": "整理计划",
+    "custom": "自定义选择",
+    "jobs": "暴露的 Job",
+    "targets": "VM 目标",
+}
+
+
+def settings_pending_details(draft: dict, saved_cfg: dict, saved_root: str, saved_mode: str,
+                             targets: list) -> list[tuple[str, str, str, str]]:
+    """字段级未保存差异：[(大节名, 选项小标题, 旧值文本, 新值文本), …]，供悬浮明细用。
+
+    与 settings_changed_items() 同一套比较口径（对比磁盘已保存值、剔除探测副作用）。
+    排版跟随面板：大节按 PENDING_SECTION_ORDER（即面板大标题顺序），节内先按面板
+    出现顺序、功能开关按 FEATURE_GROUPS 分组，字段显示面板上的小标题。
+    """
+    grouped: dict[str, list[tuple[str, str, str]]] = {}
+
+    def add(section: str, key: str, old, new, label: str | None = None) -> None:
+        grouped.setdefault(section, []).append(
+            (label or PENDING_FIELD_LABELS.get(key, key),
+             _format_pending_value(section, key, old),
+             _format_pending_value(section, key, new)))
+
+    def walk(section: str, new: dict, old: dict) -> None:
+        for key in list(new) + [k for k in old if k not in new]:
+            nv, ov = new.get(key, "（新增）"), old.get(key, "（新增）")
+            if nv != ov and key not in ("probe_ok", "probe_detail"):
+                add(section, key, ov, nv)
+
+    # ---- 1. 运行与模式 ----
+    if draft["mode"] != saved_mode:
+        add("运行与模式", "mode", saved_mode, draft["mode"])
+    if draft["reme_root"] != saved_root:
+        add("运行与模式", "reme_root",
+            str(saved_root or "（空）"), str(draft["reme_root"] or "（空）"))
+    # ---- 6. 自定义模式功能（按面板的 FEATURE_GROUPS 分组顺序）----
+    pending_features = settings_display_features(draft)
+    effective_features = (saved_cfg["custom"] if saved_mode == "custom"
+                          else preset_features(saved_mode))
+    for _group_name, keys in FEATURE_GROUPS:
+        for key in keys:
+            new_on, old_on = bool(pending_features.get(key)), bool(effective_features.get(key))
+            if new_on != old_on:
+                add("自定义模式功能", key, old_on, new_on, label=FEATURES[key]["name"])
+    # ---- 2/3. LLM 与模型 / Embedding ----
+    if _strip_probe(draft["llm"]) != _strip_probe(saved_cfg["llm"]):
+        walk("LLM 与模型", _strip_probe(draft["llm"]), _strip_probe(saved_cfg["llm"]))
+    if _strip_probe(draft["embedding"]) != _strip_probe(saved_cfg["embedding"]):
+        walk("Embedding（语义检索）", _strip_probe(draft["embedding"]), _strip_probe(saved_cfg["embedding"]))
+    # ---- 4. 记忆管道 ----
+    if draft["pipeline"] != saved_cfg["pipeline"]:
+        walk("记忆管道", draft["pipeline"], saved_cfg["pipeline"])
+    # ---- 5. MCP 工具暴露 ----
+    if draft["expose"] != saved_cfg["expose"]:
+        walk("MCP 工具暴露", draft["expose"], saved_cfg["expose"])
+    # ---- 7. VM 隧道目标 ----
+    if targets != saved_cfg.get("targets", []):
+        add("VM 隧道目标", "targets", f"{len(saved_cfg.get('targets', []))} 项", f"{len(targets)} 项")
+
+    details: list[tuple[str, str, str, str]] = []
+    for sec in PENDING_SECTION_ORDER:
+        for label, ov, nv in grouped.get(sec, []):
+            details.append((sec, label, ov, nv))
+    return details
 
 
 def settings_gating(draft: dict, service_up: bool, llm_ready: bool) -> dict:
@@ -4215,6 +4323,16 @@ class Tooltip:
 
     def set_text(self, text: str) -> None:
         self.text = text
+        # 悬停期间文本被刷新（如「测试连接」完成回写计数）：重建浮窗，否则显示滞留旧内容。
+        # text 为空且浮窗开着 → 直接熄灭（无差异时不该有任何浮窗）。
+        if self.tip is not None:
+            try:
+                self.tip.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+            self.tip = None
+            if text:
+                self.show()
 
     @classmethod
     def update_text(cls, widget, text: str) -> None:
@@ -4240,13 +4358,38 @@ class Tooltip:
         except Exception:  # noqa: BLE001 - tooltips must never break the window
             self.tip = None
 
-    def hide(self, _event=None) -> None:
+    def hide(self, event=None) -> None:
+        # 组合悬停（attach_to + 多个部件共享同一浮窗）：指针从子部件移到父容器时，Tk 会给
+        # **子部件**发一个 <Leave>（detail=NotifyInferior），此时指针并没有离开整块区域，
+        # 熄灭浮窗就会在标题/数字之间移动时产生闪烁。于是先查指针真实位置：仍落在宿主
+        # 部件（或其子部件）内就吞掉这次 Leave。普通单部件悬浮不受影响（enter 恒在）。
+        if event is not None and getattr(self, "attach_to", None) is not None:
+            try:
+                host = self.attach_to
+                w = host.winfo_containing(event.x_root, event.y_root)
+                inside = False
+                while w is not None:
+                    if str(w) == str(host):
+                        inside = True
+                        break
+                    w = w.master
+                if inside:
+                    return
+            except Exception:  # noqa: BLE001 - 判定失败按普通悬浮处理
+                pass
         if self.tip is not None:
             try:
                 self.tip.destroy()
             except Exception:  # noqa: BLE001
                 pass
             self.tip = None
+
+    def attach(self, widget) -> None:
+        """把同一浮窗挂到更多部件上（组合块悬浮：整块区域任一处都保持显示）。"""
+        self.attach_to = self.widget
+        widget.bind("<Enter>", self.show, add="+")
+        widget.bind("<Leave>", self.hide, add="+")
+        widget.bind("<ButtonPress>", self.hide, add="+")
 
 
 def show_settings(autoclose_ms: int | None = None, harness=None) -> None:
@@ -4529,6 +4672,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         # ================= 0. 状态条 =================
         strip = ttk.Frame(inner)
         strip.pack(fill="x", padx=14, pady=(14, 0))
+        pending_tip: Tooltip | None = None   # 「未保存改动」整格的组合悬浮明细
         for index, name in enumerate(("模式", "基线", "服务", "LLM", "Embedding", "未保存改动")):
             cell = ttk.Frame(strip)
             cell.grid(row=0, column=index, sticky="w", padx=(0, 30))
@@ -4536,6 +4680,18 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
             value = tk.Label(cell, text="—", font=FONT_NUM, foreground=THEME["text"], background=THEME["bg"])
             value.pack(anchor="w")
             chips[name] = value
+            if name == "未保存改动":
+                # 明细挂在**整格**上（容器+两个 Label 共享同一浮窗）：只绑 Label 的话，
+                # 指针在标题与数字之间的空隙就会离开部件、浮窗熄灭，看起来像闪烁。
+                pending_tip = Tooltip(cell, "")
+                cell.configure(cursor="hand2")
+                value.configure(cursor="hand2")
+                for w in cell.winfo_children():
+                    pending_tip.attach(w)
+                # 容器本身也要听事件（Label 之间的空隙属于它）
+                cell.bind("<Enter>", pending_tip.show, add="+")
+                cell.bind("<Leave>", pending_tip.hide, add="+")
+                cell.bind("<ButtonPress>", pending_tip.hide, add="+")
         theme_button = ttk.Button(strip, text="深色" if theme_name() == "light" else "浅色",
                                   command=lambda: switch_theme_here())
         theme_button.grid(row=0, column=len(chips), sticky="e", padx=(0, 4))
@@ -5507,6 +5663,23 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                 text=(t("未启用") if not features.get("embedding") else (t("可用") if emb_ok else t("未通过测试"))),
                 foreground=THEME["ok"] if (features.get("embedding") and emb_ok) else THEME["muted"])
             chips["未保存改动"].configure(text=str(len(pending)), foreground=THEME["warn"] if pending else THEME["muted"])
+            # 悬浮明细与计数同源同刷：按面板大节分组、节间空行；无改动时文本为空 → 不出现
+            if pending_tip is not None:
+                rows_ = settings_pending_details(draft, saved_snapshot[0], saved_snapshot[1],
+                                                 saved_snapshot[2], targets_data)
+                if rows_:
+                    lines_ = []
+                    cur_section = None
+                    for sec, label, old_v, new_v in rows_:
+                        if sec != cur_section:
+                            if cur_section is not None:
+                                lines_.append("")
+                            lines_.append(t("【" + sec + "】"))
+                            cur_section = sec
+                        lines_.append("  " + t(f"{label}：{old_v} → {new_v}"))
+                    pending_tip.set_text("\n".join(lines_))
+                else:
+                    pending_tip.set_text("")
 
             if footer_label is not None:
                 footer_label.configure(

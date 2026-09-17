@@ -14,6 +14,11 @@ import test_baseline
 # （验证测试没漏改模式）才有意义。
 test_baseline.pin_clean_baseline()
 original = main.deep_copy(main.CFG)
+# 档位断言用的是 openai 梯子（"low" 只在 openai 的合法集合里）。生成器按 **.env 里的
+# LLM_BACKEND** 校验档位（本机可能已切到 deepseek，只有 高/最大 两档），所以这里把
+# env 读取钉成 openai——否则构建结果随每台机器的 .env 漂移，正是 test_baseline 反对的。
+_saved_read_env = main.read_env_values
+main.read_env_values = lambda: {**_saved_read_env(), "LLM_BACKEND": "openai"}
 try:
     with tempfile.TemporaryDirectory(prefix="reme-helper-test-") as temp:
         # 显式固定能力集再断言。下面几条断言描述的是「auto_memory 开 / CC 关 / 资料关 /
@@ -148,6 +153,7 @@ try:
     assert ok, detail
     assert "ReMe " in detail
     assert main.CFG["mode"] == original["mode"]
+    main.read_env_values = _saved_read_env
 
     main.set_state(healthy=False)
     old_probe = main.probe_health
