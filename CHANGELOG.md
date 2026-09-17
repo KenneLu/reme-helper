@@ -3,6 +3,19 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## v1.2.2
+
+- **接入文档新增 ZCode 原生路线（中英同步），附录新增第三份捕获脚本 `capture_zcode.mjs`（附录 C）**。
+  ZCode 原生会话（bigmodel 路线）的对话记录在自己的 rollout（`~/.zcode/cli/rollout/model-io-sess_*.jsonl`），
+  既没有 `~/.claude/projects` 转录、也不读 `~/.claude/settings.json`，官方 Claude Code 钩子对它完全不生效，
+  故按捕获桥方案接入：§3 决策表、§4 移植表与「ZCode rollout 格式要点」（`querySource=main_turn` 过滤、
+  full/delta/tail 绝对下标重建、末行 response 补齐、tool 角色映射 user）、§5 接线清单
+  （`~/.zcode/cli/config.json` 的 `Stop`，配置型钩子必须显式 `enabled: true`）与 §7 三条新坑全部入档；
+  「复制接入文档」机制同步附带第三份脚本（`main.py` 附录注册表加一行）。
+- **新增不变量 8：水位线键必须规范化路径斜杠方向**。手动提交与钩子提交拿到的可能是 `C:\` 与 `C:/` 两种写法，
+  不统一会把同一份文件裂成两条互相打回的水位线（服务端按 id 去重可兜底产物不重复，但水位线永远合不拢）；
+  ZCode 版已按此实现，Claude Code 版（`capture_cc.mjs`）同款隐患本次未动，待裁定。
+
 ## v1.2.1
 
 - **托盘「退出」加二次确认**。此前右键 → 退出立即执行，误点一下就会连带停掉 VM 隧道与 ReMe 服务。
