@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -5546,14 +5546,23 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
             updates: dict = {}
             if CFG["llm"]["base_url"]:
                 updates["LLM_BASE_URL"] = CFG["llm"]["base_url"]
-                updates["LLM_BACKEND"] = "openai"
+                # LLM_BACKEND 不在这里写：backend 决定 agentscope 用哪个模型类——档位
+                # Literal（openai 类停在 xhigh，deepseek 类只有 high/max）、thinking 字段、
+                # formatter 全都跟着变。除 openai/ollama 外的取值是用户在 .env 里的显式
+                # 选择，保存端点字段不等于要换模型类。这里曾经无条件写回 "openai"，会把
+                # deepseek 后端静默改掉：GUI 按旧 backend 显示的档位随即不被新类接受，
+                # 生成器把 effort 整个丢弃，再下次保存才可能被发现。
+                if not read_env_values().get("LLM_BACKEND"):
+                    updates["LLM_BACKEND"] = "openai"   # 全新 .env 的播种，维持旧行为
             if CFG["llm"]["model"]:
                 updates["LLM_MODEL_NAME"] = CFG["llm"]["model"]
             if not key_field_untouched(llm_key_var.get()):
                 updates["LLM_API_KEY"] = llm_key_var.get().strip()
             if CFG["embedding"]["base_url"]:
                 updates["EMBEDDING_BASE_URL"] = CFG["embedding"]["base_url"]
-                updates["EMBEDDING_BACKEND"] = "openai"
+                # EMBEDDING_BACKEND 同理：.env 里已有值就不动，缺省时才播种 openai。
+                if not read_env_values().get("EMBEDDING_BACKEND"):
+                    updates["EMBEDDING_BACKEND"] = "openai"
             if CFG["embedding"]["model"]:
                 updates["EMBEDDING_MODEL_NAME"] = CFG["embedding"]["model"]
             if not key_field_untouched(emb_key_var.get()):

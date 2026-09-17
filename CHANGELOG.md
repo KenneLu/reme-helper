@@ -3,6 +3,18 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## v1.1.1
+
+- **保存设置不再把 `LLM_BACKEND`/`EMBEDDING_BACKEND` 强制写回 `openai`**。此前只要 Base URL 非空，
+  保存就无条件覆盖 .env 里的 backend——`deepseek` 等后端被静默改掉：GUI 按 .env 里的 backend 派生档位梯子
+  （deepseek 只有 高/最大，openai 停在 极高），backend 被改回后，界面选的档位不再被 agentscope 对应模型类的
+  Literal 接受，生成器只能把 effort 整个丢弃，服务端实际跑的是"无档位"状态。
+  现在的行为：.env 里已有 `LLM_BACKEND`/`EMBEDDING_BACKEND` 值时**原样保留**；只有全新 .env（键缺失）才播种
+  `openai` 维持旧行为。backend 本身的切换仍走 .env（与 ReMe 读取路径一致），不在 GUI 里提供入口。
+- 动机：本机把做梦链路切到 `LLM_BACKEND=deepseek`（DeepSeekChatModel——原生 formatter 回传
+  `reasoning_content`、结构化输出降级阶梯含 no_think 档、effort=语义正确的 max）。切换后第一次在设置页保存时，
+  backend 被这段代码写回 `openai`，档位 `max` 旋即被丢弃，静默回到 openai 路径。
+
 ## v1.1.0
 
 - **接入文档重写成「规格 + 决策表」，从"按机器列步骤"改成"先探测、再按判断选路"**。旧文档只覆盖 Codex 与 DSH，
