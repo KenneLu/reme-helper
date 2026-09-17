@@ -76,6 +76,8 @@ TEXT: list[tuple[str, str]] = [
     ("每次最沉淀", "Units per run"),
     ("自定义选择", "Custom selection"),
     ("暴露的 Job", "Exposed jobs"),
+    ("确定退出 ReMe 助手？", "Quit ReMe Helper?"),
+    ("退出会同时停止 VM 隧道和由助手启动的 ReMe 服务。", "Quitting also stops the VM tunnels and the ReMe service that this helper started."),
     ("；留空＝不改）", "; leave blank to keep)"),
     ("（来自 .env）", "(from .env)"),
     ("（测试）", "(test)"),

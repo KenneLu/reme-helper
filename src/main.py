@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.1.3"
+VERSION = "1.2.1"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -6908,12 +6908,25 @@ def shutdown_tray(icon, *, claimed: bool = False) -> None:
 
 
 def quit_app(icon, _item) -> None:
-    """托盘菜单的「退出」：立即归还 pystray 回调线程，清理在后台执行。
+    """托盘菜单的「退出」：先二次确认，再立即归还 pystray 回调线程，清理在后台执行。
 
     pystray wraps every menu callback in a final ``update_menu()``. Running ``icon.stop()`` inside
     that same callback can leave WM_STOP waiting behind the callback/menu teardown. Returning first
     lets its Win32 message loop unwind and consume the stop posted by the worker.
     """
+    # 二次确认只挂在托盘菜单这条人工路径上；`--quit`（更新器/外部工具在用）绝不能被弹窗卡住。
+    # 弹窗必须进 UI 线程（pystray 回调线程绝不碰 Tcl），所以用 ui_call 同步拿结果。
+    confirmed = True
+    try:
+        confirmed = bool(ui_call(lambda: messagebox.askyesno(
+            APP_NAME,
+            "确定退出 ReMe 助手？\n\n退出会同时停止 VM 隧道和由助手启动的 ReMe 服务。",
+            parent=ui_parent(),
+        )))
+    except Exception as exc:  # noqa: BLE001 - 弹窗失败宁可放行也不能把退出通道锁死
+        log(f"quit confirm failed ({type(exc).__name__}: {exc}); proceeding without confirmation")
+    if not confirmed:
+        return
     if not claim_shutdown():
         return
     STOP_EVENT.set()

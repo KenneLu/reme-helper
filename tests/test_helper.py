@@ -648,6 +648,8 @@ _saved_shutdown = main.shutdown_tray
 _shutdown_called = main.threading.Event()
 _shutdown_args = []
 main.SHUTDOWN_STARTED.clear()
+_saved_ui_call = main.ui_call
+main.ui_call = lambda work, timeout=20.0: True      # 用户在确认框点了“是”
 
 
 def _record_shutdown(icon, *, claimed=False):
@@ -662,6 +664,23 @@ main.quit_app(_quit_icon, None)
 assert main.time.monotonic() - _quit_started < 0.1, "托盘退出回调必须立即返回"
 assert _shutdown_called.wait(1.0), "托盘退出应把清理交给后台线程"
 assert _shutdown_args == [(_quit_icon, True)], _shutdown_args
+
+# 18b) 确认框点“否”→ 不退出、不启动清理（v1.2.1 二次确认）。
+main.SHUTDOWN_STARTED.clear()
+_shutdown_args.clear()
+_shutdown_called.clear()
+main.ui_call = lambda work, timeout=20.0: False
+main.quit_app(_quit_icon, None)
+assert not _shutdown_called.wait(0.3), "取消确认后不得进入清理"
+assert _shutdown_args == [], _shutdown_args
+# 18c) 确认框本身失败（无显示环境等）→ 宁可放行也不锁死退出通道。
+main.SHUTDOWN_STARTED.clear()
+_shutdown_args.clear()
+main.ui_call = lambda work, timeout=20.0: (_ for _ in ()).throw(TimeoutError("no ui"))
+main.quit_app(_quit_icon, None)
+assert _shutdown_called.wait(1.0), "弹窗失败时应放行退出"
+assert _shutdown_args == [(_quit_icon, True)], _shutdown_args
+main.ui_call = _saved_ui_call
 main.shutdown_tray = _saved_shutdown
 main.STOP_EVENT.clear()
 
