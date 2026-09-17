@@ -95,6 +95,24 @@ ReMe **只监听回环地址、不使用 API Key** —— 这两点决定了「�
 - **Codex 官方没有自动记录**：官方只给 skill / MCP（文档原话是"自动捕获需要显式接入宿主生命周期"）。
   捕获桥是我们补的那一层胶水；机制本身（宿主生命周期钩子）是 Codex 官方功能，不是 hack。
 
+### Claude Code 记忆后端策略（接入前必须问用户，Windows 与 Linux 机制一致）
+
+Claude Code 内核**自带一套记忆系统**，且**默认开启**：按项目存放在
+`<CLAUDE_HOME>/projects/<项目目录>/memory/`（含 `MEMORY.md` 索引与 `.consolidate-lock` 整理锁），
+由官方开关 `autoMemoryEnabled` / `autoDreamEnabled`（settings.json 顶层键）治理，另可设 `autoMemoryDirectory`。
+接入 ReMe **不会自动关掉它**——不处理就会双记忆并存。先向用户说明两个选项，确认后再继续：
+
+| | 只用 ReMe（推荐） | 双记忆共存 |
+|---|---|---|
+| 做法 | 关闭内建两开关 + 清理已有 memory 缓存（流程见 §5） | 什么都不用做 |
+| 作用域 | ReMe 全机共享（同机所有端、跨机经隧道共用一个 workspace） | 内建记忆**按项目隔离**（`projects/<项目>/memory/`），换项目即失效 |
+| 整理 | ReMe 的 dream 统一沉淀 digest | 内建 auto-dream 另行整理（实测常有"只写不整理"的堆积） |
+| 代价 | 无 | 同一事实双写；两套记忆同时注入上下文，摊薄注意力；clear-code 等约定"单一记忆后端"的工具契约被破坏 |
+| 还原 | 随时可还原（见 §8） | — |
+
+选定"只用 ReMe"后执行 §5 的关闭小流程；用户选共存则跳过，**不要代做**。
+注意 `~/.claude/rules/`（每会话强制注入）与内建 auto-memory 是**两套独立机制**——关闭后者不影响前者。
+
 ---
 
 ## 4. 通用捕获桥（唯一需要写代码的地方）
@@ -168,6 +186,21 @@ Claude Code 侧写 `~/.claude.json` 的 `mcpServers.reme`：`{ "type": "http", "
 - Codex 的 MCP 工具调用受 approval 管控：`approval_policy = "never"` 会**直接拒绝**（报 `MCP tool call requires approval`）。
   交互式会话会弹批准；自动化运行加 `--approve-for-me`。
 
+### Claude Code「只用 ReMe」关闭内建记忆（用户在 §3 选定后执行）
+
+> 顺序不可换：**先备份 → 再看内容 → 再关 → 再删**。删掉的东西靠三重留存兜底
+> （tar 备份 + 关键条目 `cat` 进会话输出 + 本会话结束时被 ReMe 钩子捕获入库）。
+
+1. **前置确认**：没有其他活动 Claude Code 会话（`pgrep -af claude`；VSCode Remote 里常驻的会话先关）。
+2. **备份**：`settings.json` 复制为 `.bak-<时间戳>`；把每个项目的 `memory/` 打成 tar 包并 `tar -tzf` 验证完整性。
+3. **留存**：逐个 `cat` memory/ 下的条目进会话输出；其中 ReMe 已覆盖的注明出处，ReMe 未覆盖的**逐字迁入 ReMe**
+   （daily 笔记或让用户拍板去向），不要静默删除独有内容。
+4. **关开关**：`~/.claude/settings.json` **顶层**新增 `"autoMemoryEnabled": false` 与 `"autoDreamEnabled": false`，
+   其余键（尤其 `hooks`——捕获链路在里面——与 `env`）一个字符都不动；改完用 `python3 -c "import json,…"` 校验 JSON。
+5. **删缓存**：`rm -rf` 各项目的 `memory/` 目录，`find <CLAUDE_HOME>/projects -maxdepth 2 -type d -name memory` 应无输出。
+6. **验收**：两键为 `false`；`hooks` 各键完好（Stop 下捕获钩子还在）；`rules/`、`skills/` 未被误伤。
+7. **告知用户**：配置只对**新会话**生效，改动前已开的会话要关掉重开；若将来弃用 ReMe，按 §8 还原。
+
 ---
 
 ## 6. 验收：看产物，不看日志
@@ -208,6 +241,7 @@ tail -5 <CODEX_HOME>/reme-bridge/capture.log
 | 钩子一直没反应 | Codex 的钩子未被信任 | 在 Codex 里执行 `/hooks` 信任 |
 | HTTP 200 但 `success:false`、`validation error for Msg` | 消息缺 `name` 字段（必须等于 `role`） | 按 §2 的消息形状 |
 | 同一段对话两份便签 | agent 手动记录 + 钩子捕获重复 | 在 `AGENTS.md` 里禁止手动调用 |
+| 同一事实两份记忆、上下文重复注入 | Claude Code 内建记忆未关，与 ReMe 并存 | 按 §3 问用户选定策略；只用 ReMe 时按 §5 关闭内建记忆 |
 | 记忆里出现审批 JSON、环境样板 | 内部线程与注入文本未过滤 | 按 §4 的渲染规则 |
 | 已入库内容被反复重发 | 水位线被并发打回 | 水位线只增不减 + 锁覆盖全部提交入口 |
 | Windows 上官方 Claude Code 钩子超时 | 无 `fork` 退化成同步，超过 30 秒被砍 | 打异步补丁，或改用捕获桥 |
@@ -226,6 +260,7 @@ tail -5 <CODEX_HOME>/reme-bridge/capture.log
 | Claude Code 记忆工具 | 删掉 MCP 注册里的 `reme` |
 | Codex 记忆工具 | 删掉 `config.toml` 里的 `[mcp_servers.reme]` |
 | DSH 记忆插件 | `dsh plugin --profile <DSH_PROFILE> remove @agentscope-ai/reme-dsh-plugin` 后重启 |
+| **弃用 ReMe、恢复 Claude Code 内建记忆** | 按接入时的备份还原：settings 备份复制回去（或把 `autoMemoryEnabled`/`autoDreamEnabled` 改回 `true`/删除——默认即开启），再把当时的 memory 缓存 tar 包解回 `projects/<项目目录>/`。**只对新会话生效**。ReMe 侧的 daily/digest/session 数据仍在 workspace 里，不会被这次还原删除 |
 
 改动前对每个被修改的文件留 `.bak-<时间戳>` 备份。
 

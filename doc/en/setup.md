@@ -109,6 +109,26 @@ Facts you must know, or you will get this wrong:
   integrating with the host lifecycle" — their words). The capture bridge is the glue we add; the mechanism itself
   (host lifecycle hooks) is an official Codex feature, not a hack.
 
+### Claude Code memory backend policy (ask the user before wiring; identical on Windows and Linux)
+
+The Claude Code kernel **ships its own memory system, enabled by default**: per-project storage under
+`<CLAUDE_HOME>/projects/<project>/memory/` (with a `MEMORY.md` index and a `.consolidate-lock`), governed by the
+official toggles `autoMemoryEnabled` / `autoDreamEnabled` (top-level keys in settings.json; `autoMemoryDirectory`
+also exists). Wiring in ReMe **does not turn it off** — skip this and you get two parallel memories. Present the two
+options to the user and wait for a decision:
+
+| | ReMe only (recommended) | Coexistence |
+|---|---|---|
+| What it takes | turn both toggles off + clean up existing memory caches (see §5) | nothing |
+| Scope | ReMe is machine-wide (every end on the host, and remote ends over the tunnel, share one workspace) | built-in memory is **per project** (`projects/<project>/memory/`) and lost when you switch projects |
+| Consolidation | ReMe's dream consolidates into digest | built-in auto-dream consolidates separately (in practice it often piles up without ever consolidating) |
+| Cost | none | the same fact is written twice; both memories inject into context and dilute attention; tools that assume a single memory backend (e.g. clear-code) get their contract broken |
+| Restoring | always possible (see §8) | — |
+
+If the user picks "ReMe only", run the shutdown procedure in §5; if they pick coexistence, skip it — **do not decide
+for them**. Note that `~/.claude/rules/` (per-session forced injection) and built-in auto-memory are **two separate
+mechanisms** — turning off the latter does not affect the former.
+
 ---
 
 ## 4. The generic capture bridge (the only part that needs code)
@@ -193,6 +213,28 @@ Other fixed actions:
 - Codex gates MCP tool calls behind approval: `approval_policy = "never"` **rejects them outright**
   (`MCP tool call requires approval`). Interactive sessions prompt; for automation pass `--approve-for-me`.
 
+### Claude Code "ReMe only": turning off built-in memory (run after the user picks it in §3)
+
+> The order is fixed: **back up first → review contents → flip toggles → delete last**. What gets deleted is covered
+> by triple redundancy (the tar backup + key entries `cat`-ed into the session output + this very session being
+> captured into ReMe by its Stop hook).
+
+1. **Precondition**: no other active Claude Code session (`pgrep -af claude`; close the ones living in VSCode Remote
+   first).
+2. **Back up**: copy `settings.json` to `.bak-<timestamp>`; tar each project's `memory/` and verify with `tar -tzf`.
+3. **Preserve**: `cat` every entry under `memory/` into the session output; note where ReMe already covers an entry,
+   and **migrate anything ReMe does not cover verbatim** (a daily note, or wherever the user decides) — never delete
+   unique content silently.
+4. **Flip toggles**: add `"autoMemoryEnabled": false` and `"autoDreamEnabled": false` as **top-level** keys in
+   `~/.claude/settings.json`, touching nothing else (especially `hooks` — the capture chain lives there — and `env`);
+   validate the JSON afterwards.
+5. **Delete caches**: `rm -rf` each project's `memory/`, then
+   `find <CLAUDE_HOME>/projects -maxdepth 2 -type d -name memory` must print nothing.
+6. **Verify**: both toggles `false`; every `hooks` entry intact (the Stop capture hook still there); `rules/` and
+   `skills/` untouched.
+7. **Tell the user**: the toggles only affect **new sessions**; sessions opened before the change must be closed and
+   reopened. If ReMe is ever retired, restore per §8.
+
 ---
 
 ## 6. Verification: look at artifacts, not logs
@@ -236,6 +278,7 @@ forever.
 | The hook never fires | Codex hook not trusted | run `/hooks` in Codex and trust it |
 | HTTP 200 but `success:false`, `validation error for Msg` | message lacks `name` (must equal `role`) | follow the message shape in §2 |
 | The same conversation produces two notes | manual recording plus hook capture | forbid manual calls in `AGENTS.md` |
+| The same fact lives in two memories, context gets double-injected | Claude Code built-in memory still on, alongside ReMe | ask the user to pick a policy per §3; for "ReMe only" shut the built-in one down per §5 |
 | Approval JSON or environment boilerplate shows up in memory | internal threads and injected text not filtered | follow the rendering rules in §4 |
 | Already-recorded content is resubmitted | watermark pushed backwards by a concurrent writer | forward-only watermark + lock on every submission path |
 | The official Claude Code hook times out on Windows | no `fork`, runs inline, killed by the 30-second hook timeout | patch it to detach, or use the capture bridge |
@@ -254,6 +297,7 @@ forever.
 | Claude Code memory tools | delete the `reme` MCP entry |
 | Codex memory tools | delete `[mcp_servers.reme]` from `config.toml` |
 | DSH memory plugin | `dsh plugin --profile <DSH_PROFILE> remove @agentscope-ai/reme-dsh-plugin`, then restart |
+| **Retire ReMe, restore Claude Code built-in memory** | restore from the backups taken at integration time: copy the settings backup back (or set `autoMemoryEnabled`/`autoDreamEnabled` back to `true` / delete them — on by default), and untar the memory cache back into `projects/<project>/`. **New sessions only.** ReMe's own daily/digest/session data stays in the workspace; restoring Claude Code does not delete it |
 
 Back up every file you modify as `.bak-<timestamp>` first.
 
