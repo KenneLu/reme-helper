@@ -26,8 +26,17 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, ttk
 from tkinter import messagebox as _raw_messagebox
-import i18n
 import guide
+from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
+from modules.appconfig import APP_NAME, APP_ID   # noqa: F402
+from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
+from modules.log_kit import configure_logging, log  # noqa: F402
+from modules.paths import (  # noqa: F402  T2 路径与数据区（四区定义住 modules/paths）
+    APP_DIR, PACKAGE_DIR, RUN_DIR, LOCAL_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
+    DIAG_LOG_DIR, RUN_LOG_DIR, APP_LOG_DIR, LOG_DIR, LOG_PATH, QUIT_REQUEST_PATH,
+    ICON_PATH, ICON_SIZES, TASKBAR_ICON_PATH, TASKBAR_ICON_SIZES, TRAY_HICON_PIXELS)
+from modules.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 三件）
+    acquire_single_instance, single_instance_free)
 
 import psutil
 import pystray
@@ -35,54 +44,12 @@ import yaml
 from PIL import Image, ImageDraw, ImageFont
 
 
-APP_NAME = "ReMe 助手"
-APP_ID = "reme-helper"
+# 模板化状态（W-f，执行文档-20260918 §四.9）：
+#   appconfig/paths/log_kit/tray_kit/i18n/service_link 已住 src/modules/<模块>/；
+#   autostart / update_helper / icons 三件**申报留痕**（TEMPLATE-LOCAL-OVERRIDE）：
+#     自启键名 APP_ID + sync_autostart_path 修复语义、更新链 bat+备份目录、运行态图标着色
+#     ——与模板接口不同构，强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板。
 VERSION = "1.2.4"
-# 四个位置，别混在一起：
-#   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
-#               **只放程序本身**：用户数据（配置、日志）都不在这儿。
-#   RUN_DIR     分发包目录——打包态是 exe 旁边，开发态是仓库根。静态资源（doc/、图标）
-#               与「跑一次就丢」的诊断输出（smoke / ui-check / release / lang-audit）走这里。
-#   APP_LOG_DIR 应用自己的日志，属于用户数据：%LOCALAPPDATA%\reme-helper\log\。
-#               放包里的后果很实际——应用正在跑时日志被占用，构建就没法把 release 目录
-#               清干净（实测 rmdir 直接失败），发布包里会一直挂着一个 log/。
-#   CONFIG_PATH 机器相关的可写状态，也属于用户数据：%LOCALAPPDATA%\reme-helper\config.json。
-#               理由与日志一样，外加更要紧的一条：**原地更新要能整目录替换**，配置若住在
-#               exe 旁边，updater 就得为它写例外。
-APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-PACKAGE_DIR = APP_DIR if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
-RUN_DIR = APP_DIR if getattr(sys, "frozen", False) else PACKAGE_DIR
-LOCAL_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
-                      or Path.home() / ".local" / "share") / APP_ID
-# config.json 以前住在 APP_DIR；旧位置只在首次播种/迁移时读一次（见 seed_config）。
-LEGACY_CONFIG_PATH = APP_DIR / "config.json"
-# REME_HELPER_CONFIG 是显式覆盖，给测试与便携用：打包自检靠它去读发布包里的**出厂模板**，
-# 否则它会读到开发机上的活配置（那样 --release 的断言必然失败）。
-CONFIG_PATH = (Path(os.environ["REME_HELPER_CONFIG"]).expanduser()
-               if os.environ.get("REME_HELPER_CONFIG")
-               else LOCAL_DATA_DIR / "config.json")
-# 诊断输出跟着「这次运行的那个包」走：构建脚本就在 %RELEASE_DIR%\log\ 里读它、清它。
-DIAG_LOG_DIR = RUN_DIR / "log"
-RUN_LOG_DIR = DIAG_LOG_DIR
-APP_LOG_DIR = LOCAL_DATA_DIR / "log"
-LOG_DIR = APP_LOG_DIR
-LOG_PATH = LOG_DIR / "reme-helper.log"
-# `--quit` 的请求文件：`reme-helper --quit` 写它，运行中的实例在 quit_watch_loop 里发现后
-# 删掉它并走正常的退出路径。用文件而不是命名事件：零 Win32 句柄管理，且天然幂等。
-QUIT_REQUEST_PATH = LOCAL_DATA_DIR / "quit.request"
-# exe 与窗口共用的图标：由 --make-icon 用托盘那套画法生成，构建时喂给 PyInstaller。
-ICON_PATH = RUN_DIR / f"{APP_ID}.ico"
-ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
-# The tray image is stateful and rendered by pystray. Windows taskbar/titlebar icons have a
-# different job and much less room, so use a second asset whose small frames fill more pixels.
-TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
-# 帧尺寸按「外壳真实索要的像素」铺开：100%/125%/150%/175%/200% 缩放下的标题栏 16/20/24/
-# 28/32、任务栏 24/30/36/42/48、Alt-Tab 32/40/48/56/64。少一档，LoadImage 就会拿邻近
-# 尺寸缩放，缩过的边缘在深色任务栏上看着就是「糊」。
-TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
-# pystray 把 PIL 图写成单帧 .ico 后交给 LoadImage(LR_DEFAULTSIZE)，外壳固定取 32×32；
-# 所以托盘图按 32×DPI 渲染，避免 64→32→16 的两次重采样。
-TRAY_HICON_PIXELS = 32
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -834,41 +801,7 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
 
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE_MAX_BYTES = 1 << 20      # 1 MB per file
-LOG_FILE_BACKUPS = 3              # reme-helper.log.1 ... .3, so ~4 MB ceiling
-
-
-def _configure_logging() -> None:
-    """装一个会自转的日志处理器：单文件 1MB，保留 3 份备份。
-
-    托盘程序长期常驻，纯追加的日志会一直涨（这台机器上已经 55KB，且只在出问题时才有人看）。
-    按大小滚动是常规做法，也不需要额外依赖。
-
-    滚动在 Windows 上有个坑：另一个进程还开着日志文件时改不了名。正常情况下单实例守卫
-    保证只有一个托盘，但升级期间新旧版本可能同时在跑；这种情况退回普通 FileHandler，
-    宁可这次不滚，也不要因为日志装不上而启动失败。
-    """
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    handler: logging.Handler
-    try:
-        from logging.handlers import RotatingFileHandler
-
-        handler = RotatingFileHandler(LOG_PATH, maxBytes=LOG_FILE_MAX_BYTES,
-                                      backupCount=LOG_FILE_BACKUPS, encoding="utf-8")
-    except Exception:  # noqa: BLE001 - 装不上日志不该拦住启动
-        handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
-    handler.setFormatter(formatter)
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers.clear()
-    root.addHandler(handler)
-
-
-_configure_logging()
-
-
-def log(message: str) -> None:
-    logging.info(message)
+configure_logging(LOG_PATH)   # T12：1MB×3 滚动 + 升级窗口回退 FileHandler（modules/log_kit）
 
 
 def write_log_file(name: str, text: str) -> Path:
@@ -7101,7 +7034,7 @@ def quit_app(icon, _item) -> None:
 #
 # 配置已经不在安装目录了（见 CONFIG_PATH），所以这里可以整目录铺过去，不必给任何文件写例外。
 # ---------------------------------------------------------------------------
-HELPER_RELEASES_API = f"https://api.github.com/repos/KenneLu/{APP_ID}/releases/latest"
+HELPER_RELEASES_API = f"https://api.github.com/repos/{appconfig.REPO_OWNER}/{appconfig.REPO_NAME}/releases/latest"
 HELPER_ASSET_SUFFIX = "-windows-x64.zip"
 HELPER_EXE = f"{APP_ID}.exe"
 HELPER_UPDATE_LOG = LOCAL_DATA_DIR / "update.log"
@@ -7614,60 +7547,7 @@ def ui_check() -> int:
         return 1
 
 
-SINGLE_INSTANCE_HANDLE = None    # 必须留在模块级：句柄被回收就等于放锁
-SINGLE_INSTANCE_NAME = APP_ID + "-tray"
-
-
-def single_instance_free() -> bool:
-    """探一下托盘互斥体现在是否空着，**不持有**它。
-
-    诊断参数（如 --release）用它来判断「此刻没有别的实例在跑」，
-    自己不能顺手把锁占住——否则自检进程退出前，用户紧接着启动的托盘会以为自己被抢了。
-    """
-    if os.name != "nt":
-        return True
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.restype = wintypes.HANDLE
-    kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
-    handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_NAME)
-    if not handle:
-        return True
-    already = ctypes.get_last_error() == 183   # ERROR_ALREADY_EXISTS
-    kernel32.CloseHandle(handle)
-    return not already
-
-
-def acquire_single_instance() -> bool:
-    """抢一个命名互斥体：多开时只有第一个实例能继续，其余直接退出。
-
-    必须在托盘与服务逻辑之前判定：工具默认可在启动时拉起 ReMe，
-    两个实例同时启动会把「谁在管服务、谁在管隧道」搅乱。
-    诊断类参数（--smoke / --ui-check / --release / --lang-audit / --make-icon）
-    不走这里——它们本来就要能在工具运行时执行。
-    """
-    global SINGLE_INSTANCE_HANDLE
-    if os.name != "nt":
-        return True
-    import ctypes
-    from ctypes import wintypes
-
-    ERROR_ALREADY_EXISTS = 183
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.restype = wintypes.HANDLE
-    kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
-    # 名字不带版本号：旧版本与新版也必须互斥，否则升级期间会出现两个托盘在抢同一份配置
-    handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_NAME)
-    if not handle:
-        log("single-instance: CreateMutexW failed; continuing without the guard")
-        return True
-    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-        kernel32.CloseHandle(handle)
-        return False
-    SINGLE_INSTANCE_HANDLE = handle
-    return True
+SINGLE_INSTANCE_NAME = APP_ID + "-tray"   # 全局命名空间互斥体，名字不带版本号（历史行为）
 
 
 def warn_duplicate_instance() -> None:

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from conftest import SRC_DIR as SRC, TOOL  # noqa: E402  (puts src/ on sys.path)
-import i18n  # noqa: E402
+from modules.i18n import i18n  # noqa: E402
 
 CHECKS: list[tuple[str, bool, str]] = []
 

@@ -120,7 +120,7 @@ GUIDE_LINES: list[str] = [
 
 def guide_markdown(context: dict) -> str:
     """把内置说明渲染成 Markdown；``context`` 里的本机路径现场生成。"""
-    from i18n import translate  # 局部导入：guide 只被 main 用，避免循环依赖
+    from modules.i18n.i18n import translate  # 局部导入：guide 只被 main 用，避免循环依赖
 
     lang = context.get("lang") or "zh"
     rows = [
