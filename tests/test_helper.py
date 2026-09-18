@@ -441,9 +441,13 @@ prompt = main.reme_install_prompt(r"D:\X\ReMe")
 for needle in ('reme-ai[core]', "service.backend=http", "2333", r"D:\X\ReMe", "health_check"):
     assert needle in prompt, needle
 
-# 16) 从日志解析“上次整理结果”
+# 16) 从日志解析“上次整理结果”；workspace 产物为权威（外部服务的梦也能被看见），日志只作补充
 with _tempfile.TemporaryDirectory() as temp:
     log_dir = main.Path(temp)
+    original_reme_root = main.reme_root
+    empty_ws = main.Path(temp) / "empty-ws"
+    empty_ws.mkdir()
+    main.reme_root = lambda: empty_ws  # workspace 无产物：日志分支为准，旧行为断言全部成立
     (log_dir / "reme-20260101.log").write_text(
         "2026-01-01 23:00:01 | INFO | extract.py:49 | execute | [DreamExtractStep] start date=2026-01-01 "
         "dates=2025-12-31,2026-01-01 scan_days=2 max_units=5 hint=False\n"
@@ -486,8 +490,19 @@ with _tempfile.TemporaryDirectory() as temp:
     ok, detail = main.last_dream_summary()
     assert ok is False and "整理失败" in detail and "已整合 2" in detail and "失败 1" in detail, detail
     main.reme_log_dir = lambda: log_dir / "missing"
+    # 日志缺失但 workspace 有产物：以 workspace 为权威——外部服务的梦必须被看见
+    ws_dir = main.Path(temp) / "ws"
+    (ws_dir / "workspace" / "daily" / "2026-01-03").mkdir(parents=True)
+    (ws_dir / "workspace" / "daily" / "2026-01-03" / "interests.yaml").write_text(
+        "date: '2026-01-03'\ntopics: []\n", encoding="utf-8")
+    main.reme_root = lambda: ws_dir
     ok, detail = main.last_dream_summary()
-    assert ok is False and "日志" in detail, detail
+    assert ok is True and "来自 workspace 产物" in detail and "日志缺失" in detail, detail
+    # workspace 也没有任何产物：如实报“还没有整理记录”
+    main.reme_root = lambda: empty_ws
+    ok, detail = main.last_dream_summary()
+    assert ok is False and "还没有整理记录" in detail, detail
+    main.reme_root = original_reme_root
     main.reme_log_dir = original_log_dir
 
 # 17) 测试探针用到的判定函数（不联网，纯计算）
