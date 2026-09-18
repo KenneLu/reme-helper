@@ -6940,10 +6940,21 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
              justify="left", wraplength=380).pack(anchor="w")
     opts = tk.Frame(win)
     opts.pack(anchor="w", padx=18, pady=(6, 0))
+    def _persist_quit_choice(key: str, value: bool) -> None:
+        # G4.2 条款 5（2026-09-18 用户定）：勾选一变即持久化，不等「退出」点击——
+        # 点取消也留存勾选状态。
+        CFG[key] = bool(value)
+        try:
+            save_config()
+        except Exception as exc:  # noqa: BLE001 - 落盘失败不拦住退出流程
+            log(f"persist quit checkbox failed: {exc}")
+
     var_reme = tk.BooleanVar(master=win, value=result["reme"])
     var_tunnels = tk.BooleanVar(master=win, value=result["tunnels"])
-    tk.Checkbutton(opts, text="同时关闭当前 ReMe 服务", variable=var_reme).pack(anchor="w")
-    tk.Checkbutton(opts, text="同时关闭当前 VM 隧道", variable=var_tunnels).pack(anchor="w")
+    tk.Checkbutton(opts, text="同时关闭当前 ReMe 服务", variable=var_reme,
+                   command=lambda: _persist_quit_choice("quit_stop_reme", var_reme.get())).pack(anchor="w")
+    tk.Checkbutton(opts, text="同时关闭当前 VM 隧道", variable=var_tunnels,
+                   command=lambda: _persist_quit_choice("quit_stop_tunnels", var_tunnels.get())).pack(anchor="w")
     btns = tk.Frame(win)
     btns.pack(pady=(8, 12))
 
