@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -362,6 +362,9 @@ DEFAULT_CONFIG = {
     "start_on_launch": False,
     "autostart": False,
     "start_tunnels_with_reme": False,
+    # G4.2 条款 5：退出时的清理勾选（持久化、默认不清理——服务与隧道越过托盘生命周期继续运行）
+    "quit_stop_reme": False,
+    "quit_stop_tunnels": False,
     "probe_interval_sec": 300,
     "probe_interval_user_set": False,
     "custom": {
@@ -2881,10 +2884,33 @@ def start_service(mode: str | None = None) -> tuple[bool, str]:
     return True, f"ReMe 已启动（{MODE_NAMES[selected]}）"
 
 
-def stop_service() -> tuple[bool, str]:
+def adopted_reme_pid():
+    """接入实例 = 规范端点（health_url）的监听进程（G4.2 条款 2）。
+
+    多开（调试等业务自由）时，其余实例是旁观者，不清理。查找失败返回 None。
+    """
+    try:
+        import psutil
+        from urllib.parse import urlsplit
+
+        port = urlsplit(health_url()).port or 80
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:
+                return conn.pid
+    except Exception as exc:
+        log(f"adopted pid lookup failed: {exc}")
+    return None
+
+
+def stop_service(include_tunnels: bool = True, only_attached: bool = True) -> tuple[bool, str]:
     global SERVICE_PROCESS, SERVICE_LOG_HANDLE
-    stop_all_tunnels()
+    if include_tunnels:
+        stop_all_tunnels()
     processes = matching_reme_processes()
+    if only_attached:
+        # G4.2 条款 2/3：只终止接入实例（规范端点的监听者）；多开的调试实例是旁观者
+        attached = adopted_reme_pid()
+        processes = [proc for proc in processes if proc.pid == attached] if attached else []
     if not processes and not probe_health():
         set_state(phase="stopped", healthy=False, pid=None, managed=False, message="")
         return True, "ReMe已经停止"
@@ -6337,7 +6363,8 @@ def run_helper_update() -> None:
             return
         left["done"] = True
         if TRAY_ICON is not None:
-            shutdown_tray(TRAY_ICON)
+            # 零中断更新：helper 换装期间 ReMe 与隧道保持运行，重启后自动重新接入
+            shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
 
     def work() -> None:
         ok, detail = download_and_apply_helper_update()
@@ -6875,15 +6902,21 @@ def request_quit() -> int:
     return 0
 
 
-def begin_shutdown() -> None:
-    """退出的第一步：停掉探测、摘掉隧道、停掉「自己启动的」那个 ReMe。
+def begin_shutdown(stop_tunnels: bool = True, stop_reme: bool = True) -> None:
+    """退出的第一步：按清理开关收拾**接入的服务实例**与隧道。
 
     抽出来是为了让托盘菜单退出与 `--quit` **走同一条清理路径** —— 不许有第二套关闭逻辑。
+    开关来自退出确认的持久化勾选（G4.2 条款 5，默认不清理）：放行的服务与隧道越过托盘
+    生命周期继续运行，helper 下次启动自动重新接入。清理范围（G4.2 条款 3）：
+    **接入的那一个服务实例**——不管是本 helper 启动的（OWNED，按句柄）还是识别接入的
+    （ADOPTED，按签名定位 pid）——**只关这一个**；业务自由多开的其他实例不清理。
+    隧道与服务是两个独立开关，避免"只勾关服务"误伤隧道。
     """
     STOP_EVENT.set()
-    stop_all_tunnels()
-    if SERVICE_PROCESS is not None:
-        stop_service()
+    if stop_tunnels:
+        stop_all_tunnels()
+    if stop_reme:
+        stop_service(include_tunnels=False, only_attached=True)
 
 
 def claim_shutdown() -> bool:
@@ -6895,13 +6928,20 @@ def claim_shutdown() -> bool:
         return True
 
 
-def shutdown_tray(icon, *, claimed: bool = False) -> None:
+def shutdown_tray(icon, *, claimed: bool = False, stop_reme: bool | None = None,
+                  stop_tunnels: bool | None = None) -> None:
     """走完整退出路径（菜单项与 quit_watch_loop 共用）。
 
-    The final deadline is armed before cleanup and does not depend on Tk ever having been opened.
+    清理开关（G4.2）：未显式传入时读持久化配置（quit_stop_reme / quit_stop_tunnels，
+    默认不清理）。更新链（run_helper_update）显式传 False——helper 换装期间服务与隧道
+    零中断。The final deadline is armed before cleanup and does not depend on Tk ever having been opened.
     A tray-only process commonly has no Tk root; the old conditional timer gave that most common
     path no escape if pystray's message loop did not consume its own WM_STOP.
     """
+    if stop_reme is None:
+        stop_reme = bool(CFG.get("quit_stop_reme", False))
+    if stop_tunnels is None:
+        stop_tunnels = bool(CFG.get("quit_stop_tunnels", False))
     if not claimed and not claim_shutdown():
         return
 
@@ -6924,8 +6964,10 @@ def shutdown_tray(icon, *, claimed: bool = False) -> None:
     log("shutdown: waiting for active action")
     with ACTION_LOCK:
         log("shutdown: active action drained; cleanup starting")
-        begin_shutdown()
-    log("shutdown: tunnels and managed ReMe stopped")
+        begin_shutdown(stop_tunnels=stop_tunnels, stop_reme=stop_reme)
+    log("shutdown: tunnels %s; managed ReMe %s" % (
+        "stopped" if stop_tunnels else "left running",
+        "stopped" if stop_reme else "left running"))
 
     def finish() -> None:
         host = UI_HOST.get("root")
@@ -6943,8 +6985,63 @@ def shutdown_tray(icon, *, claimed: bool = False) -> None:
     icon.stop()
 
 
+def confirm_quit_dialog() -> tuple[bool, bool, bool]:
+    """UI 线程内运行：退出确认 + 两个清理勾选项（G4.2 条款 5）。
+
+    勾选初值回读配置，确认时把选择交回 quit_app 持久化。
+    取消/关窗/Esc 都不退出；确认钮红底、取消默认焦点、模态 grab_set（G4.1 条款 4）。
+    """
+    import tkinter as tk
+
+    win = tk.Toplevel(ui_parent())
+    win.title(APP_NAME)
+    win.attributes("-topmost", True)
+    win.resizable(False, False)
+    result = {"go": False,
+              "reme": bool(CFG.get("quit_stop_reme", False)),
+              "tunnels": bool(CFG.get("quit_stop_tunnels", False))}
+
+    body = tk.Frame(win)
+    body.pack(padx=18, pady=(14, 6))
+    tk.Label(body, text="确定退出 ReMe 助手？勾选项会记住，下次退出沿用。",
+             justify="left", wraplength=380).pack(anchor="w")
+    opts = tk.Frame(win)
+    opts.pack(anchor="w", padx=18, pady=(6, 0))
+    var_reme = tk.BooleanVar(master=win, value=result["reme"])
+    var_tunnels = tk.BooleanVar(master=win, value=result["tunnels"])
+    tk.Checkbutton(opts, text="同时关闭当前 ReMe 服务", variable=var_reme).pack(anchor="w")
+    tk.Checkbutton(opts, text="同时关闭当前 VM 隧道", variable=var_tunnels).pack(anchor="w")
+    btns = tk.Frame(win)
+    btns.pack(pady=(8, 12))
+
+    def confirm():
+        result.update(go=True, reme=var_reme.get(), tunnels=var_tunnels.get())
+        win.destroy()
+
+    def cancel():
+        win.destroy()
+
+    quit_btn = tk.Button(btns, text="退出", command=confirm, width=10,
+                         bg="#E5534B", fg="#FFFFFF", relief="flat")
+    cancel_btn = tk.Button(btns, text="取消", command=cancel, width=10)
+    quit_btn.pack(side="left", padx=8)
+    cancel_btn.pack(side="left", padx=8)
+    cancel_btn.focus_set()
+    win.protocol("WM_DELETE_WINDOW", cancel)
+    win.bind("<Escape>", lambda _event: cancel())
+    win.update_idletasks()
+    win.geometry("+%d+%d" % ((win.winfo_screenwidth() - win.winfo_width()) // 2,
+                             max(40, (win.winfo_screenheight() - win.winfo_height()) // 3)))
+    win.grab_set()
+    win.wait_window()
+    return result["go"], result["reme"], result["tunnels"]
+
+
+QUIT_CONFIRM = confirm_quit_dialog   # 测试缝：可替换为返回 (confirmed, stop_reme, stop_tunnels) 的桩
+
+
 def quit_app(icon, _item) -> None:
-    """托盘菜单的「退出」：先二次确认，再立即归还 pystray 回调线程，清理在后台执行。
+    """托盘菜单的「退出」：确认框 + 清理勾选（G4.2），再立即归还 pystray 回调线程，清理在后台执行。
 
     pystray wraps every menu callback in a final ``update_menu()``. Running ``icon.stop()`` inside
     that same callback can leave WM_STOP waiting behind the callback/menu teardown. Returning first
@@ -6952,22 +7049,46 @@ def quit_app(icon, _item) -> None:
     """
     # 二次确认只挂在托盘菜单这条人工路径上；`--quit`（更新器/外部工具在用）绝不能被弹窗卡住。
     # 弹窗必须进 UI 线程（pystray 回调线程绝不碰 Tcl），所以用 ui_call 同步拿结果。
+    stop_reme = bool(CFG.get("quit_stop_reme", False))
+    stop_tunnels = bool(CFG.get("quit_stop_tunnels", False))
     confirmed = True
     try:
-        confirmed = bool(ui_call(lambda: messagebox.askyesno(
-            APP_NAME,
-            "确定退出 ReMe 助手？\n\n退出会同时停止 VM 隧道和由助手启动的 ReMe 服务。",
-            parent=ui_parent(),
-        )))
-    except Exception as exc:  # noqa: BLE001 - 弹窗失败宁可放行也不能把退出通道锁死
-        log(f"quit confirm failed ({type(exc).__name__}: {exc}); proceeding without confirmation")
+        confirmed, stop_reme, stop_tunnels = ui_call(QUIT_CONFIRM)
+    except Exception as exc:
+        # 降级链（G4.1 条款 4 × G4.2 条款 5 互补，禁止跳过确认）：
+        # 富对话框失败 → 原生确认框（清理按持久化配置）→ 原生也失败（无 UI 的纯托盘
+        # 实例，唯一豁免）→ 放行退出；默认不清理，服务无损。
+        log(f"quit dialog failed ({type(exc).__name__}: {exc}); falling back to native confirm")
+        try:
+            confirmed = bool(ui_call(lambda: messagebox.askyesno(
+                APP_NAME,
+                "确定退出 ReMe 助手？清理选项按配置（退出后可在配置中修改）。",
+                parent=ui_parent(),
+            )))
+        except Exception as exc2:
+            log(f"native confirm failed ({type(exc2).__name__}: {exc2}); "
+                f"proceeding without confirmation (services untouched by default)")
     if not confirmed:
         return
+    # 持久化勾选（G4.2 条款 5：记住选择，下次退出沿用）
+    CFG["quit_stop_reme"] = bool(stop_reme)
+    CFG["quit_stop_tunnels"] = bool(stop_tunnels)
+    save_config()
     if not claim_shutdown():
         return
     STOP_EVENT.set()
-    notify("正在安全退出：正在停止 VM 隧道和由助手启动的 ReMe…")
-    threading.Thread(target=shutdown_tray, args=(icon,), kwargs={"claimed": True}, daemon=True).start()
+    if stop_reme and stop_tunnels:
+        notify("正在安全退出：正在停止服务与隧道…")
+    elif stop_reme:
+        notify("正在安全退出：正在停止 ReMe 服务…")
+    elif stop_tunnels:
+        notify("正在安全退出：正在停止 VM 隧道…")
+    else:
+        notify("正在安全退出（ReMe 与隧道保持运行）…")
+    threading.Thread(target=shutdown_tray, args=(icon,),
+                     kwargs={"claimed": True, "stop_reme": bool(stop_reme),
+                             "stop_tunnels": bool(stop_tunnels)},
+                     daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
