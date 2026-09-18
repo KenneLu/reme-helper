@@ -6814,7 +6814,7 @@ def request_quit() -> int:
     走 shutdown_tray()（摘隧道、停掉自己启动的 ReMe）。没有实例在跑时也返回 0：要达成的
     目标是「确保没有实例在跑」，而它已经成立。
     """
-    running = not single_instance_free()
+    running = not single_instance_free(SINGLE_INSTANCE_NAME)
     try:
         QUIT_REQUEST_PATH.parent.mkdir(parents=True, exist_ok=True)
         QUIT_REQUEST_PATH.write_text(time.strftime("%Y-%m-%dT%H:%M:%S\n"), encoding="utf-8")
@@ -7477,7 +7477,7 @@ def release_check() -> int:
         tray = pystray.Icon(APP_ID, icon, t(APP_NAME), build_menu())
         checks.append(("menu built", tray is not None))
         # 此刻没有别的托盘实例在跑（只探测，不占锁）
-        checks.append(("no other instance", single_instance_free()))
+        checks.append(("no other instance", single_instance_free(SINGLE_INSTANCE_NAME)))
         # 服务探测：不要求 ReMe 在跑，但必须能给出结论而不是抛异常
         checks.append(("service probe", isinstance(service_is_healthy(), bool)))
         doc = integration_doc_markdown()
@@ -7903,7 +7903,7 @@ def main() -> int:
         sys.stdout.flush()
         time.sleep(1.5)
         os._exit(0)
-    if not acquire_single_instance():
+    if not acquire_single_instance(SINGLE_INSTANCE_NAME, log=log):
         warn_duplicate_instance()
         return 0
     sync_autostart_path()
