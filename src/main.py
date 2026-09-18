@@ -49,7 +49,7 @@ from PIL import Image, ImageDraw, ImageFont
 #   autostart / update_helper / icons 三件**申报留痕**（TEMPLATE-LOCAL-OVERRIDE）：
 #     自启键名 APP_ID + sync_autostart_path 修复语义、更新链 bat+备份目录、运行态图标着色
 #     ——与模板接口不同构，强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板。
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
