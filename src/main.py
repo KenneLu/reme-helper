@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "ReMe 助手"
 APP_ID = "reme-helper"
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 # 四个位置，别混在一起：
 #   APP_DIR     运行时目录——打包后是 exe 所在目录，开发时是本文件所在的 src/。
 #               **只放程序本身**：用户数据（配置、日志）都不在这儿。
@@ -1397,26 +1397,61 @@ def dream_runs_from_log(lines: list[str]) -> list[dict]:
 
 
 def last_dream_summary(max_files: int = 32, tail_lines: int = 20000) -> tuple[bool, str]:
-    """Summarise the most recent dream run from ReMe's logs (read-only, no service call)."""
-    log_dir = reme_log_dir()
-    if not log_dir.is_dir():
-        return False, "还没有日志目录"
+    """Summarise the most recent dream run (read-only, no service call).
+
+    Authority order (2026-09-18): the workspace's newest ``daily/*/interests.yaml``
+    is what every completing dream writes — including services helper did not
+    launch, whose logs may land somewhere we cannot see (a standalone service
+    dreamed at 03:22 while ``logs\\`` stayed silent, so the old log-only view
+    kept showing a stale record). The log scan adds per-run statistics but is
+    only trusted when it is at least as recent as the workspace write; a log-only
+    "skip" run still wins, because skipped dreams write no interests file.
+    """
+    workspace_when = ""
     try:
-        files = sorted((path for path in log_dir.glob("*.log")), key=lambda path: path.stat().st_mtime)
+        interests = list((reme_root() / "workspace").glob("daily/*/interests.yaml"))
+        if interests:
+            newest = max(interests, key=lambda path: path.stat().st_mtime)
+            workspace_when = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(newest.stat().st_mtime))
     except OSError:
-        return False, "读取日志失败"
-    if not files:
-        return False, "还没有日志"
+        workspace_when = ""
+
+    log_dir = reme_log_dir()
     runs: list[dict] = []
-    for path in files[-max_files:]:
+    if log_dir.is_dir():
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail_lines:]
-            runs.extend(dream_runs_from_log(lines))
+            files = sorted((path for path in log_dir.glob("*.log")), key=lambda path: path.stat().st_mtime)
         except OSError:
-            continue
-    if not runs:
+            files = []
+        for path in files[-max_files:]:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail_lines:]
+                runs.extend(dream_runs_from_log(lines))
+            except OSError:
+                continue
+    state = max(runs, key=lambda item: str(item.get("when") or "")) if runs else None
+
+    def _as_timestamp(text: str):
+        try:
+            return time.mktime(time.strptime(text, "%Y-%m-%d %H:%M:%S"))
+        except (ValueError, TypeError):
+            return None
+
+    ws_ts = _as_timestamp(workspace_when)
+    log_ts = _as_timestamp(state.get("when", "")) if state else None
+    # 日志缺失，或比 workspace 产物旧 5 分钟以上：最后一轮梦发生在我们看不到日志的地方
+    if ws_ts is not None and (log_ts is None or ws_ts - log_ts > 300):
+        detail = f"上次整理：{workspace_when} · 来自 workspace 产物"
+        if log_ts is None:
+            detail += "（该轮日志缺失，详细统计不可用）"
+        else:
+            detail += "（日志中的记录更旧，应为外部服务所做）"
+        return True, detail
+    if state is None:
+        if ws_ts is not None:
+            return True, f"上次整理：{workspace_when} · 来自 workspace 产物"
         return False, "还没有整理记录"
-    state = max(runs, key=lambda item: str(item.get("when") or ""))
     when = state["when"] or "（时间未知）"
     if state["skip"]:
         return True, f"上次整理：{when} · 判定无新内容，直接跳过（未消耗 token）"
