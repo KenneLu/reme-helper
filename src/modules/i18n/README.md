@@ -1,5 +1,9 @@
 # i18n（reme-helper 重形态）
 
+<!--
+# TEMPLATE-LOCAL-OVERRIDE: reme 用「中文即键 + pairs.json 片段替换」重形态，README 与代码均非模板 modules/i18n（轻量 T5 2.1.0）拷贝；STANDARDS §E4 明示许可（轻/重是数据格式分叉，"词表即数据"底线两形态通用）。
+-->
+
 中文即键 + 片段组合翻译 + AST 覆盖率审计。机制（translate / audit / collect_literals /
 review_markdown）与词表数据（pairs.json，826 对 `[zh,en]`）分离——加词条只改 pairs.json。
 

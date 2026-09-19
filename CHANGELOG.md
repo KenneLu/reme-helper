@@ -31,6 +31,13 @@
   `icons`（~59 处引用 + 13 处测试引用；运行态着色 vs 模板构建期 `ICON_DRAW`，接口不同构）、
   `update_helper`（~52 处引用 + 5 处测试引用；目标目录 + `PENDING_CMD`/`UPDATE_READY`
   形态不同）继续内联。抽件需同步改菜单 5 处与更新链退出路径，风险高，排后续轮次。
+- **i18n 重形态正式申报**：`i18n.py` / `__init__.py` / `README.md` 三处加
+  `TEMPLATE-LOCAL-OVERRIDE`（对照模板 2.1.0），sync_check 由 `[NOHDR]` 永久隐身转为
+  `[decl]` 已申报；`pairs.json` 是模板没有的数据文件，不需要申报。
+- **模块 README 全部换成模板正本**（paths / log_kit / tray_kit / appconfig；service_link
+  本就是）。此前的 reme README 还在描述已撤销的 override 状态，属错误文档。
+  `__init__.py` 也统一补 `TEMPLATE-FROM` 头，sync_check 现在把 README 与 `__init__.py`
+  一并纳入比对（CONFORMANCE §4.1.9/§4.1.10）。
 
 ## v1.2.5
 

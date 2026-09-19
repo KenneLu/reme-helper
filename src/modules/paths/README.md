@@ -1,12 +1,38 @@
-# paths（reme-helper 形态）
+# T2 · paths —— 数据区 / 播种 / 稳定安装位
 
-四区路径：APP_DIR / RUN_DIR / LOCAL_DATA_DIR / 诊断区。接口与模板 T2 同名同义：
-CONFIG_PATH / LEGACY_CONFIG_PATH / LOG_DIR / LOG_PATH 及图标、退出请求文件的定位常量。
+> 规范出处：STANDARDS.md §F1「用户数据区」、§B3 环境变量覆盖；执行文档 F11/D12（实例隔离）。
+> 蓝本：local-speak2text/paths.py（reme-helper 同款四区设计）。
 
-与模板 T2 的差异（TEMPLATE-LOCAL-OVERRIDE，已申报）：
-- dev 态 RUN_DIR = 仓库根（模板 = APP_DIR）——诊断输出（--smoke/--release/lang-audit）、
-  图标、文档查找都跟「这次运行的那个包」走，构建脚本按发布目录下的 log 读取并清理；
-- 增补 DIAG_LOG_DIR / RUN_LOG_DIR / ICON_PATH / TASKBAR_ICON_PATH / 帧表常量 / TRAY_HICON_PIXELS；
-- env 覆盖用 REME_HELPER_CONFIG（模板是 <APP>_DATA_DIR 整根重定向 + <APP>_CONFIG）。
+## 定位
 
-播种 seed_config 留在 main.py：它依赖 log() 与「播种+迁移二合一」语义（源文件有两种身份）。
+所有路径的唯一出处：`APP_DIR`（程序本体）、`RUN_DIR`（本次运行的包）、
+`USER_DATA_DIR`(用户数据)、`INSTALL_DIR`（稳定安装位）。config / log / update
+全部派生自这里，**任何模块禁止自己拼路径**。
+
+## 对外接口（稳定承诺）
+
+| 名称 | 说明 |
+|---|---|
+| `APP_DIR` / `RUN_DIR` | 打包后 = exe 所在目录；开发态 = 仓库根 |
+| `USER_DATA_DIR` | `%LOCALAPPDATA%\<APP_ID>\`；**整体可被 `<APP_ID 大写>_DATA_DIR` env 重定向**（F11：测试/工具链实例必须重定向，严禁与常驻实例共享任何落盘文件） |
+| `CONFIG_PATH` | 默认 `USER_DATA_DIR/config.json`；**可被 `<APP_ID 派生式>_CONFIG` 钉死**（1.1.3 补实现，兑现本文档早先承诺，见 CONFORMANCE §4.1.5）。派生式 = `APP_ID.upper().replace('-','_') + '_CONFIG'`（NAME-10），四工具统一按此命名 |
+| `LEGACY_CONFIG_PATH` | exe 旁旧位置，仅 `seed_config()` 首次迁移读一次 |
+| `LOG_DIR` / `LOG_PATH` | `USER_DATA_DIR/log/`，T12 log_kit 消费 |
+| `UPDATE_DIR` | T4 update_helper 的下载/暂存区 |
+| `INSTALL_DIR` / `INSTALL_EXE` | 稳定安装位：自启指向这里，更新整目录替换路径不变 |
+| `is_stable_install()` | 当前 exe 是否就是稳定位实例 |
+| `ensure_user_dirs()` / `seed_config()` | 建目录 / 旧配置一次性播种 |
+| `process_pending_update()` | （可选）启动兜底：处理退出时未完成的更新镜像 |
+
+## 采纳步骤
+
+1. 拷 `paths.py`，确认 `appconfig.py` 在位（唯一 import）；
+2. `main()` 最先调用 `seed_config()`，之后所有模块从这里拿路径；
+3. 测试/CI 里设 `<APP>_DATA_DIR` 指向临时目录（实例隔离，F11/D12）；
+   需要连配置文件位置也钉死时再设 `<APP>_CONFIG`（1.1.3+）。
+
+## 边界与坑
+
+- exe 旁的文件运行时被锁、更新要整目录替换——**除出厂模板外禁止往 APP_DIR 写状态**。
+- 大资源（模型 2GB+）放 APP_DIR 下、不入库，但配置里存相对路径时要配"向上查找回退"。
+- 坑实录：reme-helper 独立服务的日志曾落错目录导致 helper 账本失明（F11 一族）——路径必须出自本模块，`v1.2.3` 已改为读 workspace 产物兜底。
