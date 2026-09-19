@@ -88,7 +88,9 @@ try:
     M.main()
 except _StopBeforeTray:
     pass
-except BaseException as exc:                     # noqa: BLE001 - 顺序断言不依赖退出方式
+except SystemExit:                               # 正常收尾（重复实例等分支 return/exit 表达）不算"崩"。
+    pass                                         # SystemExit 是 BaseException 子类 ⇒ 必须排在下面那条之前
+except BaseException as exc:                     # noqa: BLE001 - ORDER 三条不依赖退出方式；_CRASH 那条依赖
     _CRASH = exc
     print("  (main() raised %s before reaching the tray - 继续按已记录的顺序判定)"
           % type(exc).__name__, flush=True)
@@ -101,6 +103,10 @@ except BaseException as exc:                     # noqa: BLE001 - 顺序断言�
 # 会跑 main()），所以必须在这里单独列一条。
 # 为什么**不**并进 ORDER 那条：合并会重犯"一个红代表多种病因"的老账——顺序错
 # 与"崩了"是两回事，读报的人需要一眼分清。
+# **第三种失败模式（`os._exit`）**：它**不抛异常** ⇒ 本处的 try/except 接不住——进程
+# 直接消失、`ORDER` 与 `FAILS` 都停在半路，报出来是**输出截断**而不是红。与
+# `except BaseException` 互补：一条管"抛出来的"，一条管"不抛就走的"。今天为潜伏态
+# （托盘构造在 `os._exit` 分支之前，打桩能走到），登记以免将来误判为"测试通过"。
 check("main() reached the tray without an unexpected exception", _CRASH is None,
       repr(_CRASH) if _CRASH else "")
 
