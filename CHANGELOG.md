@@ -3,6 +3,31 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## Unreleased
+
+- **模板件收敛（W-g）**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
+  `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §E4 许可保留）。
+  - `paths.py` → 模板 1.1.2 正本：dev 态 `APP_DIR` 改由「向上找 main.py 的仓库根」锚定，
+    撤掉 reme 的 dev-RUN_DIR override；新增 `REME_HELPER_DATA_DIR` **整体重定向数据根**
+    （F11/D12：测试/构建实例与常驻托盘彻底隔离）。reme 专有派生（`DIAG_LOG_DIR` /
+    `QUIT_REQUEST_PATH` / `ICON_*` / `TASKBAR_*` / `TRAY_HICON_PIXELS`）与
+    `<APP>_CONFIG` 接管（模板 1.1.2 尚未实现该 env，CONFORMANCE §4.1.5）移入 `main.py`；
+    `build.bat` 固定 `REME_HELPER_DATA_DIR` 到临时目录。
+  - `log_kit.py` → 模板 1.0.2 正本：撤销 root-logger/`configure_logging` override，改
+    `make_logger(LOG_DIR)`（named logger + 升级窗口 FileHandler 回退），轮转仍 1MB×3。
+    `open_log_dir` 已接住；托盘「打开日志目录」项仍缺（CONFORMANCE C-15，待办）。
+  - `tray_kit.py` → 模板 2.0.1 正本：调用点适配新签名
+    `acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log)`；互斥体名
+    `reme-helper-tray` **显式保留**（历史名 + 升级期新旧版本互斥保护；改名会换成另一个
+    内核对象，既有保护失效）。守卫失败方向确认放行。
+  - `service_link` 散文件 → 整文件夹（README + `__init__.py` + `service_link.py`）。
+    **现状：模块预置、未接线**——全仓库无 import；G4.2 的 ADOPTED 优雅关闭分支仍待接
+    （REVIEW 发现 #8）。不要按"已接入"理解。
+- **抽件评估（本轮只评估不改）**：`autostart`（~21 处引用；键名 + 自愈语义与模板不同）、
+  `icons`（~59 处引用 + 13 处测试引用；运行态着色 vs 模板构建期 `ICON_DRAW`，接口不同构）、
+  `update_helper`（~52 处引用 + 5 处测试引用；目标目录 + `PENDING_CMD`/`UPDATE_READY`
+  形态不同）继续内联。抽件需同步改菜单 5 处与更新链退出路径，风险高，排后续轮次。
+
 ## v1.2.5
 
 - **退出勾选即存**（G4.2）：确认框里的两个勾选一变就写进配置——不等「退出」点击，
