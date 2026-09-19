@@ -81,7 +81,7 @@ if exist "%RELEASE_DIR%" (
 
 rem No reme-helper of any version may run: files would be locked and two trays
 rem would fight over the same config, service and tunnels
-tasklist /fo csv 2>nul | findstr /i /c:"reme-helper" >nul
+tasklist /fo csv 2>nul | findstr /i /c:"%APPNAME%" >nul
 if not errorlevel 1 (
   echo [ERROR] reme-helper is running. Exit it from the tray before building.
   if not defined NOPAUSE pause
