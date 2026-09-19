@@ -179,11 +179,11 @@ def _old_version_in_place(install: Path) -> bool:
     return probe.exists() and "started-old.txt" in _read(probe)
 
 
-def _run_bat(root: Path, paths: dict) -> None:
+def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) -> None:
     text = main.HELPER_UPDATE_BAT.format(
         install=paths["install"], stage=paths["stage"], work=paths["work"],
         backup=paths["backup"], snapshot=paths["snapshot"], failed=paths["failed"],
-        log=paths["log"], exe="probe.vbs", limit=2, stamp="test",
+        log=paths["log"], exe=exe, limit=limit, stamp="test",
     )
     bat = root / "updater.bat"
     bat.write_text(text, encoding="ascii", newline="")
@@ -226,12 +226,79 @@ def _static_checks() -> None:
             unguarded.append(i + 1)
     check("bat: every start is guarded by an existence check", not unguarded,
           "unguarded at lines %s" % unguarded)
+    # ③ 外部命令必须走绝对路径。理由是本轮实测出来的：这台机器 PATH 上
+    #    H:\Tools\Git\usr\bin\find.exe 排在 System32 前面，而 GNU find 把 "smss.exe"
+    #    当**文件名**，恒返回 1 —— 等待循环于是永远判"旧进程已经退出"，直接去覆盖一个
+    #    还在运行的 exe（文件被锁 → robocopy 反复重试）。ping 同理（GNU 的 -n 是
+    #    "numeric"，不是次数）。裸名一律判红，防的是"换个 shell 启动就变了语义"。
+    bare = [i + 1 for i, line in enumerate(lines)
+            if re.match(r"\s*(tasklist|find|ping|robocopy|findstr)\b", line)]
+    check("bat: external commands use absolute System32 paths", not bare,
+          "bare invocations at lines %s" % bare)
+
+
+def _a_running_image() -> str:
+    """取一个**此刻确实在跑**的映像名，用来把 bat 的等待循环钉在超时那一支。
+
+    不写死 `svchost.exe`：写死等于赌这台机器上它有实例在跑；取不到就如实空串，
+    让调用方把这条判成 FAIL（门禁不许静默跳过）。
+    """
+    try:
+        out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True,
+                             timeout=30,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for line in out.splitlines():
+        name = line.split('","')[0].strip().strip('"')
+        if name.lower().endswith(".exe"):
+            return name
+    return ""
 
 
 def main_test() -> int:
     root = Path(tempfile.mkdtemp(prefix="reme-update-bat-"))
     try:
         _static_checks()
+
+        # ---------- 等待循环超时：`goto giveup` 必须真的走到标签并跑完原语义 ----------
+        # 这是 2026-09-19 的真实回归（b60bba5 里 `:giveup` 标签被删、`goto giveup` 悬空）：
+        # cmd 遇到不存在的标签会打印「找不到批处理标签」并**直接终止批处理**。静态地"标签
+        # 存在"不足以证明这条分支能走通——只断言标签在不在，等于把"分支可达"交给运气。
+        # 这里真跑：exe 取一个正在运行的映像名 + limit=1，必定落进 :giveup。
+        # 注意 bat 里 `{exe}` **一个占位符担两个角色**：tasklist 的映像名，以及
+        # STAGE/INSTALL 里的文件名。所以这一支要求 STAGE 里有一个**名字等于在跑映像名**
+        # 的文件（`:gone` 的源前置校验要求它存在，否则会先跳到 :stage_bad）。这里放一份
+        # probe.vbs 的拷贝改个名：本用例只走等待循环，**永远不会启动它**——而前置条件用
+        # 的是 smss.exe（Windows 上恒在、杀不掉的会话管理器），`find` 匹配失败从而跌进
+        # `:gone` 并把占位文件当 exe 启动，实际上不可能发生。
+        running = _a_running_image()
+        check("precondition: a running image is available for the giveup probe", bool(running),
+              repr(running))
+        if running:
+            paths = _stage_root(root)
+            (paths["stage"] / running).write_bytes((paths["stage"] / "probe.vbs").read_bytes())
+            started = time.time()
+            _run_bat(root, paths, exe=running, limit=1)
+            elapsed = time.time() - started
+            giveup_log = _read(paths["log"])
+            expect = "aborted: %s still running after 1s" % running
+            check("giveup: log records the abort line", expect in giveup_log,
+                  " | ".join(giveup_log.splitlines()[-3:]))
+            check("giveup: marker written", paths["failed"].exists()
+                  and "update aborted" in _read(paths["failed"]),
+                  _read(paths["failed"]) if paths["failed"].exists() else "(no marker)")
+            # 这两条一起证明**标签块的尾部真的跑完了**：标签缺失时 cmd 立刻中止，
+            # 既不会走 :cleanup（WORK 还在），也不会走到 done。
+            check("giveup: ran its tail (work cleaned)", not paths["work"].exists(),
+                  "work still exists = the batch aborted at a missing label")
+            check("giveup: never reported done", "[test] done" not in giveup_log)
+            check("giveup: nothing was replaced", _old_version_in_place(paths["install"])
+                  and not (paths["install"] / "data-new.txt").exists())
+            check("giveup: no snapshot taken yet", not paths["snapshot"].exists())
+            check("giveup: script returned (did not block)", elapsed < 30, "%.1fs" % elapsed)
+            _observe_started(paths["install"] / "started-old.txt",
+                             "previous version (aborted before touching anything)")
 
         # ---------- 成功路径 ----------
         paths = _stage_root(root)

@@ -14,6 +14,17 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **等待循环依赖 PATH：`find` 被 Git/MSYS 抢先时"旧进程已退出"恒为真（补 `:giveup` 真跑断言时逮到）**：
+  更新器 bat 的等待循环用 `tasklist … > 文件` + `find /i` 判断旧进程是否还在（不用管道是因为
+  detached 下管道会永久阻塞，见脚本内原注释）。但**命令名走 PATH 解析**：开发机装了
+  Git-for-Windows / MSYS 时 `H:\Tools\Git\usr\bin\find.exe` 排在 `System32` 前面，而
+  **GNU find 把 `smss.exe` 当文件名**，恒返回 1 ⇒ 等待循环**每次都判"旧进程已经退出"**，
+  直接去覆盖一个仍在运行的 exe（文件被锁 → robocopy 按默认 100 万次重试）。
+  本机实测 `where find` → `H:\Tools\Git\usr\bin\find.exe` 第一位。`ping` 同理（GNU 的 `-n`
+  是"numeric"而不是次数）。修法：`tasklist` / `find` / `ping` / `Robocopy` **四处全改
+  `%SystemRoot%\System32\…` 绝对路径**，脚本不再随"谁启动它"改变语义；并加静态判据
+  （裸名即红；负对照：逐个换回裸名 → 第 33 / 37 / 51,53,72,106 行被点名）。
+
 - **退出路径的失败方向（#44 A 项）+ 打包 Tcl/Tk 断言（B 项）**：
   - **A 项：现状已是"链路不可用即放行"，本轮把它钉成机械判据。** `quit_app` 的降级链是
     富对话框 → 原生 `askyesno` → 放行；`confirmed` 初值为 True，两级都抛异常时保持 True

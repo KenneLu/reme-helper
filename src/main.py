@@ -7201,12 +7201,22 @@ rem nothing else ever occurs. Verified by spawning this exact script both ways:
 rem with a console the pipeline finishes in 0.13s, detached it hangs
 rem indefinitely. Sending the child's stdio to DEVNULL does not help; removing
 rem the pipe does. So tasklist writes to a file and find reads that file.
-tasklist /fi "imagename eq {exe}" /nh > "%POLL%" 2>nul
-find /i "{exe}" "%POLL%" >nul
+rem
+rem %SystemRoot%\System32 on EVERY command below, never the bare name. PATH is not
+rem ours to assume: a developer machine with Git-for-Windows or MSYS on PATH puts
+rem H:\...\Git\usr\bin\find.exe ahead of the Windows one, and GNU find reads
+rem "smss.exe" as a FILE NAME, so it always exits 1. The wait loop then always
+rem concludes "the old process is already gone" and copies over a binary that is
+rem still running (locked files -> robocopy retries, no /R limit set). Measured
+rem here: `where find` -> H:\Tools\Git\usr\bin\find.exe first. Same trap applies
+rem to ping, whose -n means "numeric" to iputils. Absolute paths make the script
+rem independent of whoever launched it.
+%SystemRoot%\System32\tasklist.exe /fi "imagename eq {exe}" /nh > "%POLL%" 2>nul
+%SystemRoot%\System32\find.exe /i "{exe}" "%POLL%" >nul
 if errorlevel 1 goto gone
 set /a tries+=1
 if %tries% geq {limit} goto giveup
-ping -n 2 127.0.0.1 >nul
+%SystemRoot%\System32\ping.exe -n 2 127.0.0.1 >nul
 goto wait
 :gone
 rem Pre-check the SOURCE before touching anything at all. An EXISTING BUT EMPTY stage dir
@@ -7220,9 +7230,9 @@ if not exist "%STAGE%\{exe}" goto stage_bad
 rem Snapshot the CURRENT install first. The previous BACKUP is NOT deleted here: it is the
 rem rollback source and is only rotated AFTER a copy that succeeded.
 if exist "%SNAPSHOT%" rmdir /s /q "%SNAPSHOT%"
-robocopy "%INSTALL%" "%SNAPSHOT%" /e /njh /njs /nfl /ndl >nul
+%SystemRoot%\System32\Robocopy.exe "%INSTALL%" "%SNAPSHOT%" /e /njh /njs /nfl /ndl >nul
 echo [{stamp}] snapshot rc=%ERRORLEVEL% >> "%LOG%"
-robocopy "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+%SystemRoot%\System32\Robocopy.exe "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
 set "RC=%ERRORLEVEL%"
 echo [{stamp}] copied rc=%RC% >> "%LOG%"
 if %RC% geq 8 goto install_failed
@@ -7241,7 +7251,7 @@ rem robocopy: 0-7 = success, >=8 = failure. On failure NEVER start the new exe; 
 rem previous version from the snapshot so the tool comes back, and leave a marker for the app.
 > "%FAILED%" echo update failed {stamp}: install rc=%RC%
 echo [{stamp}] INSTALL FAILED rc=%RC% - restoring from snapshot >> "%LOG%"
-robocopy "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+%SystemRoot%\System32\Robocopy.exe "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
 if errorlevel 8 goto install_dead
 echo [{stamp}] restored - starting previous version >> "%LOG%"
 if not exist "%INSTALL%\{exe}" goto install_dead
@@ -7275,7 +7285,7 @@ rem Never `start` a missing exe: the modal error box cannot be dismissed and thi
 rem script runs detached, so the update would hang forever. Restore + report instead.
 echo [{stamp}] exe missing at "%INSTALL%\{exe}" - restoring >> "%LOG%"
 > "%FAILED%" echo update failed {stamp}: exe missing after copy
-robocopy "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+%SystemRoot%\System32\Robocopy.exe "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
 if not exist "%INSTALL%\{exe}" goto install_dead
 echo [{stamp}] restored - starting previous version >> "%LOG%"
 start "" "%INSTALL%\{exe}"
