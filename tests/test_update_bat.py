@@ -184,6 +184,15 @@ def _old_version_in_place(install: Path) -> bool:
 
 
 def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) -> None:
+    """跑一次渲染出的更新 bat。
+
+    **替身必须永远存在**（R1，2026-09-19 全员规则）：本函数跑的是真 bat，而 bat 会
+    `start "" "%INSTALL%\\{exe}"`。让被 `start` 的目标**缺失**来构造场景，等于拿
+    Windows Script Host 的"无法找到脚本文件"**模态框**当断言——模态框会把它自己挂死，
+    无人值守下永久卡住（2026-09-19 实测：一个删了临时目录又立刻重跑的调试脚本连弹了
+    **15 个**）。所以：① 所有 `start` 目标由用例保证存在；② 判"有没有被启动"看**副作用**
+    （marker 文件），绝不用"目标不存在"；③ 下面的超时把"挂死"转成**红灯**（R4）。
+    """
     text = main.HELPER_UPDATE_BAT.format(
         install=paths["install"], stage=paths["stage"], work=paths["work"],
         backup=paths["backup"], snapshot=paths["snapshot"], failed=paths["failed"],
@@ -191,9 +200,20 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
     )
     bat = root / "updater.bat"
     bat.write_text(text, encoding="ascii", newline="")
-    subprocess.run(["cmd.exe", "/c", str(bat)], cwd=str(root), timeout=60,
-                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(["cmd.exe", "/c", str(bat)], cwd=str(root), timeout=60,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired as exc:
+        # 更新 bat 正常都在亚秒级返回；卡住 60 秒基本只有一个原因——**模态框**：
+        #   * `start` 指向不存在的 .exe / .vbs（"找不到文件" / WSH"无法找到脚本文件"）；
+        #   * 真跑了单实例守卫（重复启动框）。
+        # 把它变成 AssertionError（进而非零退出），而不是让门禁挂死。
+        raise AssertionError(
+            "updater bat did not return within 60s - SUSPECTED MODAL DIALOG. "
+            "Check that every `start` target exists on disk (stand-ins must live for the "
+            "whole run) and that nothing runs the real single-instance guard. "
+            "root=%s" % root) from exc
 
 
 def _static_checks() -> None:
