@@ -7178,6 +7178,12 @@ HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
 # 差在 PS 冷启动与机器负载——所以预算按 `limit × tick_ms` 算，日志只报这个**下界**。
 # ⚠️ **别把次数当秒**：:giveup 报"拍数 × 每拍毫秒 + 名义预算"，不报一个没人量过的秒数
 # ——"名义 vs 实际差 9 倍"正是 ping 当节拍被判硬违规的原因（日志说谎）。
+# ⚠️ **`LIMIT` 是轮询次数，实际等待 ≈ `(LIMIT - 1) × TICK_MS`**：循环是
+# 「探测 → `tries+=1` → `if %tries% geq limit` **先跳走** → 否则才睡一拍」，
+# 所以**最后一拍不补睡**：`limit=1` 一次都不睡、`limit=2` 恰好睡一拍。
+# 实测（本机 2026-09-19，整轮墙钟）：`limit=1` **0.2 s**、`limit=2` **1.81 s**。
+# 门禁里有一条**耗时断言**钉住它（`test_update_bat.py`：limit=2 ⇒ elapsed ≥ tick/1000）——
+# "它在等"只能量出来：这一拍历史上曾因 `ping`+`dev/null` 折成 0.03 s（等价于没等）。
 HELPER_UPDATE_LIMIT = 120
 HELPER_UPDATE_TICK_MS = 1000
 HELPER_UPDATE_BUDGET_S = HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000

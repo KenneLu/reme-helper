@@ -397,6 +397,24 @@ def main_test() -> int:
             _observe_started(paths["install"] / "started-old.txt",
                              "previous version (aborted before touching anything)")
 
+            # ---------- 节拍**真的在等**：量耗时，而不是只看"代码里写了 Start-Sleep" ----------
+            # 循环结构 = 「探测 → tries+=1 → 够 limit 就**跳走** → 否则睡一拍」，所以：
+            #   * `limit=1` **一拍都不睡**（上面那条 0.3s 就是**设计如此**，不是没生效）；
+            #   * `limit=2` 恰好睡**一拍** ⇒ 正好用来测"这一拍生效"。
+            # 阈值取一拍的下界（tick_ms/1000 秒）；上界防挂死。**判别力**：这一拍历史上
+            # 曾因 `ping` 的 `dev/null` 折成 0.03s（等价于"没等"），那种情况下总耗时约
+            # 0.3s < 1.0s ⇒ 本条立刻红。⇒ **"它在等"只能量出来**。
+            paths2 = _stage_root(root)
+            (paths2["stage"] / running).write_bytes((paths2["stage"] / "probe.vbs").read_bytes())
+            tick_started = time.time()
+            _run_bat(root, paths2, exe=running, limit=2)
+            tick_elapsed = time.time() - tick_started
+            check("wait tick really sleeps (limit=2 => exactly one tick)",
+                  tick_elapsed >= main.HELPER_UPDATE_TICK_MS / 1000.0,
+                  "%.2fs >= %.2fs (本机每拍实测 ~1.66s incl. PS startup)"
+                  % (tick_elapsed, main.HELPER_UPDATE_TICK_MS / 1000.0))
+            check("wait tick does not hang", tick_elapsed < 30, "%.2fs" % tick_elapsed)
+
         # ---------- rc=0 那条"看起来成功、实则什么都没铺"的路径 ----------
         # 实测（见文件头/CHANGELOG）：空源 -> 空目标 robocopy 返回 **0**；空源 -> 有文件的
         # 目标返回 **2**（目标被 /purge 清空）。两个都落在 0-7 的"成功"区间，所以"判 rc"
