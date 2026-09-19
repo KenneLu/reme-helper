@@ -241,6 +241,35 @@ def _static_checks() -> None:
           "bare invocations at lines %s" % bare)
 
 
+def _cleanup_verdict_selftest() -> None:
+    """清理判据**自己**的双向自证（门禁不许"看起来在判"）。
+
+    只有两个方向都验过，"本次 root 必须删掉"这条断言才算数——否则它可能永远为真：
+      ① **能绿**：普通目录 -> `_rmtree_retry` 返回 True 且目录真的不在了；
+      ② **能红**：目录里有一个**本进程打开着的文件**时，Windows 拒绝删除该文件
+         （Python 的 open 不带 FILE_SHARE_DELETE）-> 必须返回 **False** 且目录仍在。
+         这正是"被 start 拉起的进程还占着 cwd"的真实机制；
+      ③ 关掉句柄后必须能绿，且**不留残留**（自证过程本身不能变成新的泄漏）。
+    """
+    ok_dir = Path(tempfile.mkdtemp(prefix="reme-rmtree-ok-"))
+    check("cleanup verdict: says OK for a normal dir",
+          _rmtree_retry(ok_dir, attempts=3, delay=0.05) and not ok_dir.exists(), str(ok_dir))
+
+    held = Path(tempfile.mkdtemp(prefix="reme-rmtree-held-"))
+    handle = open(held / "locked.txt", "wb")          # 故意持有，让删除失败
+    try:
+        handle.write(b"x")
+        handle.flush()
+        verdict = _rmtree_retry(held, attempts=3, delay=0.05)
+        check("cleanup verdict: says FAILED (not silent) while a handle is open",
+              verdict is False and held.exists(),
+              "returned=%s exists=%s" % (verdict, held.exists()))
+    finally:
+        handle.close()
+    check("cleanup verdict: green again once the handle is gone, no residue",
+          _rmtree_retry(held, attempts=5, delay=0.1) and not held.exists(), str(held))
+
+
 def _a_running_image() -> str:
     """取一个**此刻确实在跑**的映像名，用来把 bat 的等待循环钉在超时那一支。
 
@@ -264,6 +293,7 @@ def main_test() -> int:
     root = Path(tempfile.mkdtemp(prefix="reme-update-bat-"))
     try:
         _static_checks()
+        _cleanup_verdict_selftest()
 
         # ---------- 等待循环超时：`goto giveup` 必须真的走到标签并跑完原语义 ----------
         # 这是 2026-09-19 的真实回归（b60bba5 里 `:giveup` 标签被删、`goto giveup` 悬空）：
