@@ -7124,6 +7124,14 @@ if %tries% geq {limit} goto giveup
 ping -n 2 127.0.0.1 >nul
 goto wait
 :gone
+rem Pre-check the SOURCE before touching anything at all. An EXISTING BUT EMPTY stage dir
+rem is the dangerous case: `robocopy /e /purge` then deletes every file in the install dir
+rem (verified), and it still reports rc=2 - inside the 0-7 "success" range - so the failure
+rem would sail straight through the rc check below with the install already emptied.
+rem (A MISSING stage reports rc=16 but also wipes the destination first, so it only survives
+rem because the rollback path exists.) Template update_helper 1.4.0 carries the same
+rem pre-check; this script was missing it.
+if not exist "%STAGE%\{exe}" goto stage_bad
 rem Snapshot the CURRENT install first. The previous BACKUP is NOT deleted here: it is the
 rem rollback source and is only rotated AFTER a copy that succeeded.
 if exist "%SNAPSHOT%" rmdir /s /q "%SNAPSHOT%"
@@ -7133,9 +7141,13 @@ robocopy "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
 set "RC=%ERRORLEVEL%"
 echo [{stamp}] copied rc=%RC% >> "%LOG%"
 if %RC% geq 8 goto install_failed
+rem Check for the exe BEFORE rotating the snapshot away. The rotation moves SNAPSHOT to
+rem BACKUP, so a check placed after it would send the rollback below to a path that no
+rem longer exists: the restore would copy nothing, the install would stay empty, and the
+rem log would still claim the snapshot was kept - at a path that is gone.
+if not exist "%INSTALL%\{exe}" goto start_missing
 if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
 move /y "%SNAPSHOT%" "%BACKUP%" >nul 2>nul
-if not exist "%INSTALL%\{exe}" goto start_missing
 start "" "%INSTALL%\{exe}"
 echo [{stamp}] done >> "%LOG%"
 goto cleanup
@@ -7151,11 +7163,27 @@ if not exist "%INSTALL%\{exe}" goto install_dead
 start "" "%INSTALL%\{exe}"
 goto cleanup_keep
 :install_dead
-rem Last resort: the install dir is unusable and the snapshot could not be restored.
+rem Last resort: the install dir is unusable and the rollback copy could not be restored.
 rem Start nothing (a missing exe would open an undismissable modal box); leave the
 rem marker so the next manual launch can tell the user what happened.
-echo [{stamp}] RESTORE FAILED - not starting; snapshot kept at %SNAPSHOT% >> "%LOG%"
-> "%FAILED%" echo update failed {stamp}: restore failed, no exe started
+rem The report names only the copies that are REALLY there - the old wording always said
+rem "snapshot kept at %SNAPSHOT%" even on paths where the snapshot had already been
+rem rotated to %BACKUP%, i.e. it pointed the user at a path that did not exist.
+set "KEPT="
+if exist "%SNAPSHOT%" set "KEPT=%SNAPSHOT%"
+if exist "%BACKUP%" set "KEPT=%KEPT% %BACKUP%"
+if not defined KEPT set "KEPT=(none - the install dir itself is all that is left)"
+echo [{stamp}] RESTORE FAILED - not starting; rollback copies kept at %KEPT% >> "%LOG%"
+> "%FAILED%" echo update failed {stamp}: restore failed, no exe started; kept %KEPT%
+goto cleanup_keep
+:stage_bad
+rem Nothing was touched: the install dir is exactly as it was, so the OLD version can simply
+rem be started again (guarded, as everywhere else - `start` on a missing exe opens a modal
+rem box that cannot be dismissed and this script runs detached).
+echo [{stamp}] aborted: no staged exe at "%STAGE%\{exe}" - install untouched >> "%LOG%"
+> "%FAILED%" echo update aborted {stamp}: staged exe missing, install untouched
+if not exist "%INSTALL%\{exe}" goto cleanup_keep
+start "" "%INSTALL%\{exe}"
 goto cleanup_keep
 :start_missing
 rem Never `start` a missing exe: the modal error box cannot be dismissed and this
