@@ -7031,7 +7031,9 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
     import tkinter as tk
 
     win = tk.Toplevel(ui_parent())
-    win.title(APP_NAME)
+    # T3（HANDOFF R1 §3）：原来这里是裸常量 `APP_NAME`，**英文模式下退出框标题仍是
+    # "ReMe 助手"**。改用本仓现成的本地化标题入口 `app_title()`（= `f"{t(APP_NAME)} {VERSION}"`）。
+    win.title(app_title())
     win.attributes("-topmost", True)
     win.resizable(False, False)
     result = {"go": False,
@@ -7077,6 +7079,11 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
     cancel_btn.focus_set()
     win.protocol("WM_DELETE_WINDOW", cancel)
     win.bind("<Escape>", lambda _event: cancel())
+    # T3（HANDOFF R1 §3）：正文 / 两个勾选框 / 两个按钮共 5 处原为硬编码中文，
+    # **英文模式下全部显示中文**。它们用 Tk 的 Label/Checkbutton/Button 构造，
+    # **不经过** `_TranslatedMessageBox` 那条 messagebox 路径 ⇒ 当年两条路都绕开了。
+    # 一次 `translate_tree(win)` 递归换掉（它开头 `if ui_lang() == "zh": return` ⇒ 中文侧零风险）。
+    translate_tree(win)
     win.update_idletasks()
     win.geometry("+%d+%d" % ((win.winfo_screenwidth() - win.winfo_width()) // 2,
                              max(40, (win.winfo_screenheight() - win.winfo_height()) // 3)))
@@ -7821,8 +7828,13 @@ def release_check() -> int:
         checks.append(("menu built", tray is not None))
         # 此刻没有别的托盘实例在跑（只探测，不占锁）
         checks.append(("no other instance", single_instance_free(SINGLE_INSTANCE_NAME)))
-        # 服务探测：不要求 ReMe 在跑，但必须能给出结论而不是抛异常
-        checks.append(("service probe", isinstance(service_is_healthy(), bool)))
+        # 服务探测：**不要求 ReMe 在跑**，也不产生任何网络 I/O —— `service_is_healthy()`
+        # 只读监控线程缓存的 STATE（:2761），**不调** `probe_health()`。所以这条断言的是
+        # 「取值不抛异常」，**不是**「服务健康」；旧名字 "service probe" 紧挨 "menu built"
+        # 排版，读日志的人会当成"探测到服务在跑"（#61）。名字改对 + 把实际值打出来。
+        healthy_now = service_is_healthy()
+        checks.append(("service probe (no exception; healthy=%s)" % healthy_now,
+                       isinstance(healthy_now, bool)))
         doc = integration_doc_markdown()
         checks.append(("setup guide bundled", len(doc) > 20000 and "<REME_PORT>" not in doc))
         failed = [name for name, ok in checks if not ok]
