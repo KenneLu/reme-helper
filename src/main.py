@@ -7116,6 +7116,13 @@ def quit_app(icon, _item) -> None:
         except Exception as exc2:
             log(f"native confirm failed ({type(exc2).__name__}: {exc2}); "
                 f"proceeding without confirmation (services untouched by default)")
+            # **没人问过用户 ⇒ 一律不动服务**（lead 2026-09-19 撤回旧批准）。
+            # 旧行为沿用已存配置，等于拿"用户在**有确认框**时保存的偏好"去执行一次
+            # **没人确认过**的破坏性动作——勾过"退出时停服务"的用户会因为一次坏弹窗
+            # 被静默停掉服务/隧道。辅助机制坏掉不得触发破坏性动作。
+            # 与 dsh/ocx 的 `return True, False` 同形；**原生框那一支仍按已存配置走**
+            # （那时用户确实被问到了，只是没有勾选框），两条分支因此保持可分。
+            stop_reme = stop_tunnels = False
     if not confirmed:
         return
     # 持久化勾选（G4.2 条款 5：记住选择，下次退出沿用）

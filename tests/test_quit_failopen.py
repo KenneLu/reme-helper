@@ -95,15 +95,29 @@ def _rich_confirm():
 
 check("rich dialog 'confirm' -> exit", _run(_rich_confirm, _native_no))
 
-# ---------- ④ 清理选项在链路不可用时按**已存配置**走，不是硬编码 False ----------
+# ---------- ④ 清理选项：**用户没被问过时一律不动服务** ----------
+# 旧行为（lead 2026-09-19 **撤回**了原先的批准）：链路不可用时按**已存配置**走。
+# 危险面：用户在"有确认框"的语境下勾过"退出时停服务"，而一次坏掉的弹窗会在**没有任何确认**
+# 的情况下把服务/隧道停掉——「辅助机制坏掉 ⇒ 触发破坏性动作」，正是本轮一直在打的形态。
+# 新行为：**没人问过用户 ⇒ 必须选保住服务的那一侧**（与 dsh/ocx 的 `return True, False` 同形）。
 main.CFG["quit_stop_tunnels"] = True
-main.CFG["quit_stop_reme"] = False
-log_before = len(CALLS["log"])
-_run(_raise, _raise)
-check("fail-open keeps the persisted cleanup choice",
+main.CFG["quit_stop_reme"] = True
+_run(_raise, _raise)                     # 富框抛 + 原生框也抛 ⇒ 用户从未被问过
+check("fail-open forces cleanup OFF (user was never asked)",
+      main.CFG.get("quit_stop_tunnels") is False and main.CFG.get("quit_stop_reme") is False,
+      "CFG[reme]=%r CFG[tunnels]=%r"
+      % (main.CFG.get("quit_stop_reme"), main.CFG.get("quit_stop_tunnels")))
+
+# 正向对照：**原生框问到了**用户（只是没有勾选框）——这一支仍按已存配置走，与 dsh 同形。
+# 没有这条对照，上面那条"强制 False"就可能被写成"任何异常都 False"，把**问到过的**用户也一起无视。
+main.CFG["quit_stop_tunnels"] = True
+main.CFG["quit_stop_reme"] = True
+_run(_raise, lambda *_a, **_k: True)     # 富框抛 → 原生框答「是」
+check("native confirm (user WAS asked) still honours the persisted choice",
       main.CFG.get("quit_stop_tunnels") is True,
       "CFG[quit_stop_tunnels]=%r" % main.CFG.get("quit_stop_tunnels"))
 main.CFG["quit_stop_tunnels"] = False
+main.CFG["quit_stop_reme"] = False
 
 # ---------- ⑤ 二次退出：claim_shutdown 只放行一次 ----------
 # 前一个用例刚启动过一次清理，所以这里比的是**增量**而不是绝对值。
