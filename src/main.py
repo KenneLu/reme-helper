@@ -30,17 +30,15 @@ from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块�
 from modules.appconfig import APP_NAME, APP_ID   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
 from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.2：named logger + 闭包）
-from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.2：APP_DIR/RUN_DIR/USER_DATA_DIR）
+from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.3：四区 + _CONFIG/_DATA_DIR env）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH)
 
 # reme 专有派生：模板 paths.py 只出四区正本与稳定安装位，下面这些由四区派生，不进模板件。
 DIAG_LOG_DIR = RUN_DIR / "log"        # 诊断输出跟「这次跑的那个包」走（构建脚本在这里读/清）
 QUIT_REQUEST_PATH = USER_DATA_DIR / "quit.request"   # --quit 请求文件（与 tray_kit 契约同形）
-# `<APP>_CONFIG` 显式钉配置（STANDARDS F1/B3）：模板 paths 1.1.2 尚未实现该 env 覆盖
-# （见 CONFORMANCE §4.1.5），先在这里接管；模板补上后本段即可删除。
-if os.environ.get("REME_HELPER_CONFIG"):
-    CONFIG_PATH = Path(os.environ["REME_HELPER_CONFIG"]).expanduser()
+# `<APP>_CONFIG` 显式钉配置与 `<APP>_DATA_DIR` 数据根重定向都由模板 paths 1.1.3 提供
+# （CONFIG_PATH / USER_DATA_DIR）；main.py 不再自己接管 env。
 # 图标资产与多帧渲染参数（reme 专有：运行态着色 + 任务栏高 DPI 帧表，G5）
 ICON_PATH = RUN_DIR / f"{APP_ID}.ico"
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -57,7 +55,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 # 模板化状态（W-f/W-g，执行文档-20260918 §四.9）：
-#   paths 1.1.2 / log_kit 1.0.2 / tray_kit 2.0.1 / service_link 0.1.0 已是模板正本拷贝
+#   paths 1.1.3 / log_kit 1.0.2 / tray_kit 2.0.2 / service_link 0.1.0 已是模板正本拷贝
 #     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
 #     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
 #   autostart / update_helper / icons 三件仍**内联**（申报留痕）：

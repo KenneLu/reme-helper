@@ -7,16 +7,16 @@
 
 - **模板件收敛（W-g）**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
   `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §E4 许可保留）。
-  - `paths.py` → 模板 1.1.2 正本：dev 态 `APP_DIR` 改由「向上找 main.py 的仓库根」锚定，
-    撤掉 reme 的 dev-RUN_DIR override；新增 `REME_HELPER_DATA_DIR` **整体重定向数据根**
-    （F11/D12：测试/构建实例与常驻托盘彻底隔离）。reme 专有派生（`DIAG_LOG_DIR` /
-    `QUIT_REQUEST_PATH` / `ICON_*` / `TASKBAR_*` / `TRAY_HICON_PIXELS`）与
-    `<APP>_CONFIG` 接管（模板 1.1.2 尚未实现该 env，CONFORMANCE §4.1.5）移入 `main.py`；
+  - `paths.py` → 模板 1.1.3 正本：dev 态 `APP_DIR` 改由「向上找 main.py 的仓库根」锚定，
+    撤掉 reme 的 dev-RUN_DIR override；`REME_HELPER_DATA_DIR` **整体重定向数据根**
+    （F11/D12：测试/构建实例与常驻托盘彻底隔离），`REME_HELPER_CONFIG` 钉配置也由模板
+    1.1.3 统一提供（main.py 里的临时接管已删除）。reme 专有派生（`DIAG_LOG_DIR` /
+    `QUIT_REQUEST_PATH` / `ICON_*` / `TASKBAR_*` / `TRAY_HICON_PIXELS`）移入 `main.py`；
     `build.bat` 固定 `REME_HELPER_DATA_DIR` 到临时目录。
   - `log_kit.py` → 模板 1.0.2 正本：撤销 root-logger/`configure_logging` override，改
     `make_logger(LOG_DIR)`（named logger + 升级窗口 FileHandler 回退），轮转仍 1MB×3。
     `open_log_dir` 已接住；托盘「打开日志目录」项仍缺（CONFORMANCE C-15，待办）。
-  - `tray_kit.py` → 模板 2.0.1 正本：调用点适配新签名
+  - `tray_kit.py` → 模板 2.0.2 正本：调用点适配新签名
     `acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log)`；互斥体名
     `reme-helper-tray` **显式保留**（历史名 + 升级期新旧版本互斥保护；改名会换成另一个
     内核对象，既有保护失效）。守卫失败方向确认放行。
