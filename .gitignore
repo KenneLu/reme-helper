@@ -1,5 +1,9 @@
-# Generated at build time by `src/main.py --make-icon`; the repository carries the
-# one PyInstaller embeds, so a stray copy under src/ must never be committed.
+# Icons are generated, never committed (C-07: `git ls-files '*.ico'` must be empty).
+# build.bat runs `src/main.py --make-icon` BEFORE PyInstaller and then embeds
+# reme-helper-taskbar.ico via --icon, so a clean checkout builds without them; the
+# tray/window assets at runtime come from the same generator. Both locations are
+# covered: the repository root (RUN_DIR in dev) and src/ (a stray copy).
+/*.ico
 /src/*.ico
 
 # Build output and staging (release/<version>/ is rebuildable from a tag)

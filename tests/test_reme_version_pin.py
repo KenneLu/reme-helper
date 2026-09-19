@@ -102,10 +102,22 @@ check("install prompt pins the version", pinned in install,
       " | ".join(line for line in install.splitlines() if "pip install" in line))
 check("install prompt forbids latest", "不要装更高版本" in install and "latest" in install)
 
+# 变异负控：把**共享状态**染成"上游有 9.9.9"。提示词的目标版本不吃这个状态——
+# `reme_upgrade_prompt` 用参数，`reme_upgrade_target()` 直接返回常量。以后谁要是
+# 把升级目标接回 REME_UPDATE_STATE["latest"]（旧实现就是那个形态），这条会立刻红。
+main.REME_UPDATE_STATE.update(checked_for=old_pin, latest="9.9.9", at=0.0, error="")
+check("poisoned state cannot move the upgrade target", main.reme_upgrade_target() == PIN,
+      main.reme_upgrade_target())
+
 # 关键：上游有更新版本时，升级提示词的 pip 目标**仍然是 pin**
 upgrade = main.reme_upgrade_prompt(current=old_pin, latest="9.9.9")
 check("upgrade prompt pins the version even when upstream is newer", pinned in upgrade,
       " | ".join(line for line in upgrade.splitlines() if "pip install" in line))
+# 同一条走"不带 latest 参数"的路径：目标也必须还是 pin（这里读的是被染过的状态）
+upgrade_from_state = main.reme_upgrade_prompt(current=old_pin)
+check("upgrade prompt without an explicit latest still pins the pin",
+      pinned in upgrade_from_state and ("9.9.9" in upgrade_from_state),
+      " | ".join(line for line in upgrade_from_state.splitlines() if "pip install" in line))
 check("upgrade prompt names the pin as the target",
       ("reme-ai==" + PIN) in upgrade,
       " | ".join(line for line in upgrade.splitlines() if "目标版本" in line))

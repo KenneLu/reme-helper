@@ -44,6 +44,7 @@ if not exist "%PY%" set PY=python
 if errorlevel 1 (
   echo [ERROR] Python not found. Set PY=... at the top of build.bat.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -57,6 +58,7 @@ for /f "tokens=1" %%a in ("%VERSION:"=%") do set VERSION=%%a
 if not defined VERSION (
   echo [ERROR] Cannot read VERSION from src\main.py.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 set PACKAGE=reme-helper-%VERSION%
@@ -80,6 +82,7 @@ if exist "%RELEASE_DIR%" (
   echo [ERROR] %RELEASE_DIR% already exists. Run "build.bat clean --force" first.
   echo         One folder per version keeps releases reproducible.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -97,14 +100,26 @@ rem ---------------------------------------------------------------------------
 set "RUNNING_EXE="
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "(Get-Process -Name %APPNAME% -ErrorAction SilentlyContinue).Path | Select-Object -First 1"`) do set "RUNNING_EXE=%%p"
 set "RUNNING_DIR="
-if defined RUNNING_EXE for %%d in ("%RUNNING_EXE%") do set "RUNNING_DIR=%%~dpd"
-if defined RUNNING_DIR if "%RUNNING_DIR:~-1%"=="\" set "RUNNING_DIR=%RUNNING_DIR:~0,-1%"
+rem goto-based on purpose: with no %APPNAME%.exe running the probe above yields nothing,
+rem and the one-liner form used here before -
+rem   if defined RUNNING_DIR if "%RUNNING_DIR:~-1%"=="\" set "RUNNING_DIR=%RUNNING_DIR:~0,-1%"
+rem - expands to garbage when the variable is UNDEFINED and cmd aborts the whole script
+rem with "The syntax of the command is incorrect." before the tasklist fallback below
+rem can run. That is the state on every clean machine and every CI runner, i.e. the
+rem build could only ever work on a box where the tray was already up. %%~dpd keeps a
+rem trailing backslash; "path\." + %%~f is the standard way to drop it without a
+rem string comparison.
+if not defined RUNNING_EXE goto :running_dir_ready
+for %%d in ("%RUNNING_EXE%") do set "RUNNING_DIR=%%~dpd"
+for %%d in ("%RUNNING_DIR%.") do set "RUNNING_DIR=%%~fd"
+:running_dir_ready
 set "TARGET_DIR="
 for %%d in ("%CD%\%RELEASE_DIR%") do set "TARGET_DIR=%%~fd"
 if defined RUNNING_DIR if /i "%RUNNING_DIR%"=="%TARGET_DIR%" (
   echo [ERROR] A %APPNAME% instance is running FROM %RELEASE_DIR%.
   echo [ERROR] Exit it from the tray before building that directory.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if defined RUNNING_DIR echo [INFO] %APPNAME% running from "%RUNNING_DIR%" - not the target dir, build continues.
@@ -117,6 +132,7 @@ rem ---------------------------------------------------------------------------
 call :mktools
 if errorlevel 1 (
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -125,6 +141,7 @@ echo [TEST] unit tests + settings matrix ...
 if errorlevel 1 (
   echo [ERROR] test_helper.py failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -133,6 +150,7 @@ echo [TEST] baseline snapshot ...
 if errorlevel 1 (
   echo [ERROR] test_baseline.py failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -148,6 +166,7 @@ echo [TEST] i18n table + source coverage ...
 if errorlevel 1 (
   echo [ERROR] test_i18n.py failed. See %TEST_LOGS%\i18n-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\i18n-test.log" type "%TEST_LOGS%\i18n-test.log"
@@ -157,6 +176,7 @@ echo [TEST] API key field - load + mask + reveal ...
 if errorlevel 1 (
   echo [ERROR] test_key_field.py failed. See %TEST_LOGS%\key-field-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\key-field-test.log" type "%TEST_LOGS%\key-field-test.log"
@@ -166,6 +186,7 @@ echo [TEST] settings window UI test ...
 if errorlevel 1 (
   echo [ERROR] test_settings_ui.py failed. See %TEST_LOGS%\settings-ui-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\settings-ui-test.log" type "%TEST_LOGS%\settings-ui-test.log"
@@ -175,6 +196,7 @@ echo [TEST] theme consistency - no shift, no unreadable text ...
 if errorlevel 1 (
   echo [ERROR] test_theme_ui.py failed. See %TEST_LOGS%\theme-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\theme-test.log" type "%TEST_LOGS%\theme-test.log"
@@ -184,6 +206,7 @@ echo [TEST] english mode scan ...
 if errorlevel 1 (
   echo [ERROR] test_en_mode.py failed. See %TEST_LOGS%\en-mode-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\en-mode-test.log" type "%TEST_LOGS%\en-mode-test.log"
@@ -193,6 +216,7 @@ echo [TEST] console lifecycle - language and theme rebuilds ...
 if errorlevel 1 (
   echo [ERROR] test_console_lifecycle.py failed. See %TEST_LOGS%\console-lifecycle-test.log
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-lifecycle-test.log"
@@ -202,6 +226,7 @@ echo [TEST] update bat success/failure injection ...
 if errorlevel 1 (
   echo [ERROR] update bat test failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -211,6 +236,7 @@ if errorlevel 1 (
   echo [ERROR] ReMe version pin test failed - check that SUPPORTED_REME_VERSION is the
   echo         single source in appconfig and that both prompts pin ==that version.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -222,6 +248,7 @@ rem Generate separate state/tray and small-frame-optimised taskbar assets.
 if errorlevel 1 (
   echo [ERROR] icon generation failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -261,6 +288,7 @@ rem dropped as well.
 if errorlevel 1 (
   echo [ERROR] PyInstaller failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -270,14 +298,27 @@ robocopy "%STAGING%\%APPNAME%" "%RELEASE_DIR%" /E /R:1 /W:1 /NFL /NDL /NP >nul
 if errorlevel 8 (
   echo [ERROR] Package copy failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
+rem Both READMEs ship: README.md is the canonical English one and README.zh-CN.md is
+rem what most users here open. Copying only the English one left the Chinese reader
+rem with the English file (each links to the other at the top, so a missing sibling
+rem is a dead end). The pair is intentional - see 1.1.2 in CHANGELOG.
 copy /y README.md "%RELEASE_DIR%\README.md" >nul
+copy /y README.zh-CN.md "%RELEASE_DIR%\README.zh-CN.md" >nul
+if not exist "%RELEASE_DIR%\README.zh-CN.md" (
+  echo [ERROR] README.zh-CN.md was not copied into %RELEASE_DIR%.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
 copy /y LICENSE "%RELEASE_DIR%\LICENSE" >nul
 xcopy /e /i /y "doc" "%RELEASE_DIR%\doc" >nul
 if errorlevel 1 (
   echo [ERROR] doc copy failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -287,6 +328,7 @@ rem the live one holds the LLM/embedding keys and the user's own targets.
 if errorlevel 1 (
   echo [ERROR] make_release_config.py failed.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -295,6 +337,7 @@ rem then in _internal\doc, so both layouts remain covered.
 if not exist "%FROZEN_EXE%" (
   echo [ERROR] %APPNAME%.exe missing from the release.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 rem Guard against a silently empty package: --name and the robocopy source must
@@ -303,26 +346,31 @@ rem below 8, so the zip would ship with the exe and no runtime at all.
 if not exist "%RELEASE_DIR%\_internal\base_library.zip" (
   echo [ERROR] _internal has no runtime - the package is incomplete.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if not exist "%RELEASE_DIR%\doc\zh\setup.md" (
   echo [ERROR] integration doc missing from the release.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if not exist "%RELEASE_DIR%\doc\capture.mjs" (
   echo [ERROR] capture script missing from the release.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if not exist "%RELEASE_DIR%\doc\capture_cc.mjs" (
   echo [ERROR] Claude Code capture script missing from the release.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if not exist "%RELEASE_DIR%\_internal\reme-helper-taskbar.ico" (
   echo [ERROR] taskbar icon asset missing from the release.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 if not exist "%RELEASE_DIR%\_internal\doc\en\setup.md" (
@@ -352,6 +400,7 @@ rem renders in the packaged environment
 if errorlevel 1 (
   echo [ERROR] Packaged icon generation failed - a PIL dependency was excluded.
   if not defined NOPAUSE pause
+  call :drop_data_dir
   exit /b 1
 )
 echo.
@@ -380,13 +429,38 @@ if exist "%RELEASE_DIR%\log" (
   echo [WARN] %RELEASE_DIR%\log came back while packaging - check for a stray writer.
 )
 
+call :drop_data_dir
+
 echo [DONE] release: %FROZEN_EXE%
+rem The launched app INHERITS REME_HELPER_DATA_DIR and recreates it the moment it
+rem writes a log line, so the drop above is not enough. Wait, then drop again:
+rem   * app exited by itself - a second instance bows out with "already running"
+rem     within about six seconds - so the directory is gone and nothing is left;
+rem   * app still up - nobody else was running - rmdir fails and that directory
+rem     now belongs to the running app, not to the build. Deleting it underneath
+rem     a live instance would be worse than leaving it.
 if defined RUN_AFTER (
   echo [RUN] starting %APPNAME%.exe ...
   start "" "%FROZEN_EXE%"
+  ping -n 9 127.0.0.1 >nul
+  call :drop_data_dir
+  if exist "%REME_HELPER_DATA_DIR%" echo [INFO] %APPNAME%.exe is still running - the data dir belongs to it now.
 )
 if not defined NOPAUSE pause
 exit /b 0
+
+rem ---------------------------------------------------------------------------
+rem drop_data_dir: remove the isolated data root this build created.
+rem
+rem The build pins REME_HELPER_DATA_DIR (see the top of this file) so the suites
+rem and the frozen self-checks cannot read or write the user's real
+rem %LOCALAPPDATA%. Nothing ever removed it, so every build left a folder behind
+rem in %TEMP% - a leak by the harness rule (after a run: zero family-signature
+rem temp dirs, empty ones included). Called on the way out of every exit path.
+rem ---------------------------------------------------------------------------
+:drop_data_dir
+if exist "%REME_HELPER_DATA_DIR%" rmdir /s /q "%REME_HELPER_DATA_DIR%" 2>nul
+goto :eof
 
 rem ---------------------------------------------------------------------------
 rem release_failed: the packaged self-check said no; never publish this build
@@ -395,6 +469,7 @@ rem ---------------------------------------------------------------------------
 echo [ERROR] --release check failed. See %RELEASE_DIR%\log\release.log
 if exist "%RELEASE_DIR%\log\release.log" type "%RELEASE_DIR%\log\release.log"
 if not defined NOPAUSE pause
+call :drop_data_dir
 exit /b 1
 
 rem ---------------------------------------------------------------------------
@@ -408,12 +483,14 @@ rem ---------------------------------------------------------------------------
 echo [ERROR] Smoke test failed. See %RELEASE_DIR%\log\smoke.log
 if exist "%RELEASE_DIR%\log\smoke.log" type "%RELEASE_DIR%\log\smoke.log"
 if not defined NOPAUSE pause
+call :drop_data_dir
 exit /b 1
 
 :ui_failed
 echo [ERROR] UI check failed. See %RELEASE_DIR%\log\ui-check.log
 if exist "%RELEASE_DIR%\log\ui-check.log" type "%RELEASE_DIR%\log\ui-check.log"
 if not defined NOPAUSE pause
+call :drop_data_dir
 exit /b 1
 
 rem ---------------------------------------------------------------------------
@@ -445,6 +522,7 @@ echo [SETUP] PyInstaller missing - creating %VENV% ...
 "%PY%" -m venv "%VENV%"
 if errorlevel 1 (
   echo [ERROR] Could not create the build venv.
+  call :drop_data_dir
   exit /b 1
 )
 
@@ -455,6 +533,7 @@ echo [SETUP] installing build requirements ...
 "%VENV%\Scripts\python.exe" -m pip install --disable-pip-version-check --quiet pyinstaller
 if errorlevel 1 (
   echo [ERROR] pip install failed.
+  call :drop_data_dir
   exit /b 1
 )
 echo [SETUP] using %VENV%\Scripts\python.exe for this build

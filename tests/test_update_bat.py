@@ -71,11 +71,13 @@ def _probe_script(marker: Path, note: str = "") -> str:
     return ("' %s\r\n%s" % (note, body)) if note else body
 
 
-def _rmtree_retry(path: Path, attempts: int = 10, delay: float = 0.3) -> bool:
-    """删除临时目录，失败重试：刚 start 的进程可能还占着 cwd（Windows 会拒绝删除）。
+def _rmtree_retry(path: Path, attempts: int = 20, delay: float = 0.5) -> bool:
+    """删除临时目录，失败重试（最多约 10 秒）：刚 `start` 的进程可能还占着 cwd，
+    Windows 会拒绝删除。
 
     一次性 `rmtree(ignore_errors=True)` 会把失败吞掉并**静默留下空壳**——本轮实测
-    在 %TEMP% 里留了三个 `reme-update-bat-*`，所以这里重试并返回是否真的删掉。
+    在 %TEMP% 里留了三个 `reme-update-bat-*`，所以这里重试并返回是否真的删掉；
+    调用方**必须消费返回值**（丢掉返回值等于把"可能没删掉"重新变成沉默）。
     """
     for _ in range(attempts):
         shutil.rmtree(path, ignore_errors=True)
@@ -316,12 +318,16 @@ def main_test() -> int:
               bool(kept) and all(Path(p).exists() for p in named),
               "named=%s" % named)
     finally:
-        _rmtree_retry(root)
-
-    # 「不留垃圾」要变成机械判据：本轮实测到过空壳目录（窗口/进程的 cwd 还占着，
-    # 一次性 rmtree 会静默失败并留在 %TEMP%），所以这里断言而不是"希望它删掉了"。
+        cleaned_up = _rmtree_retry(root)
+    # 清理的**结论**要断言，不能把返回值丢掉：一次性 rmtree 会静默失败（被 start 拉起的
+    # 进程还占着 cwd），本轮实测在 %TEMP% 里留过空壳目录。
+    check("this run's temp dir was removed", cleaned_up, str(root))
+    # 只判**本次**的 root：全局 glob 是"跑完门禁后家族签名目录 = 0"那条跨进程判据的事，
+    # 这里如实打印，免得把别的套件/别人留下的目录算到本套件头上。
     leftovers = sorted(p.name for p in Path(tempfile.gettempdir()).glob("reme-update-bat-*"))
-    check("no temp leftovers from this test", not leftovers, ", ".join(leftovers))
+    if leftovers:
+        print("  ..   info: other reme-update-bat-* dirs present (not this run's): %s"
+              % ", ".join(leftovers), flush=True)
 
     print("UPDATE BAT TEST " + ("FAILED: " + ",".join(FAILS) if FAILS else "OK"), flush=True)
     return 1 if FAILS else 0

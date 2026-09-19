@@ -7360,18 +7360,23 @@ def check_helper_update() -> tuple[bool, str]:
 
 
 def _report_failed_previous_update() -> None:
-    """上一次自动更新失败时更新器留了 marker：读一次、通知用户、删掉。"""
+    """上一次自动更新失败时更新器留了 marker：读一次、通知用户、删掉。
+
+    删除**放在日志之后**：原顺序是"读证据 → 删证据 → 写日志"，一旦 log() 本身抛异常
+    （磁盘满、日志目录被占），证据已经被删掉，日志里也没有任何记录——那一刻这次失败
+    就彻底没有痕迹了。先落日志再删，至少保证"删掉之前一定已经写进日志"。
+    """
     if not HELPER_UPDATE_FAILED.exists():
         return
     try:
         detail = HELPER_UPDATE_FAILED.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         detail = ""
+    log(f"previous update failed: {detail}")
     try:
         HELPER_UPDATE_FAILED.unlink()
     except OSError:
         pass
-    log(f"previous update failed: {detail}")
     notify(t("上次自动更新失败，已回退到原版本并保留现场；详见 update.log"))
 
 
