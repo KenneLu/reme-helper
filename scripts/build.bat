@@ -151,6 +151,22 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem ---------------------------------------------------------------------------
+rem R-10 / C-30 runtime half: %TEMP% residue must not GROW while the tests run.
+rem The baseline is "what already existed before", so historical residue can never
+rem turn this red - only NEW dirs count. Skipped when the template repo is absent
+rem (CI single-repo checkout), same rule as the sync_check gate.
+rem ---------------------------------------------------------------------------
+if not exist "..\my-diy-tool-template\conformance_check.py" goto :templeak_skip
+if not exist "build" mkdir "build"
+echo [GATE] temp-leak baseline (R-10) ...
+"%PY%" "..\my-diy-tool-template\conformance_check.py" --roots reme-helper --temp-leak-save "build\_tmpbase.txt"
+if errorlevel 1 goto :templeak_fail
+goto :templeak_saved
+:templeak_skip
+echo [SKIP] temp-leak baseline: my-diy-tool-template not present (CI single-repo checkout)
+:templeak_saved
+
 echo [TEST] unit tests + settings matrix ...
 "%PY%" tests\test_helper.py
 if errorlevel 1 (
@@ -273,6 +289,18 @@ if errorlevel 1 (
   call :drop_data_dir
   exit /b 1
 )
+
+if not exist "build\_tmpbase.txt" goto :templeak_done
+echo [GATE] temp-leak increment check (R-10) ...
+"%PY%" "..\my-diy-tool-template\conformance_check.py" --roots reme-helper --temp-leak-baseline "build\_tmpbase.txt"
+if errorlevel 1 goto :templeak_fail
+del /q "build\_tmpbase.txt"
+goto :templeak_done
+:templeak_fail
+echo [ERROR] temp-dir leak: %TEMP% gained NEW residue during this build (R-10). See list above.
+if not defined NOPAUSE pause
+exit /b 1
+:templeak_done
 
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
