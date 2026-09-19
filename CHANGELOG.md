@@ -28,7 +28,8 @@
     `build.bat` 固定 `REME_HELPER_DATA_DIR` 到临时目录。
   - `log_kit.py` → 模板 1.0.2 正本：撤销 root-logger/`configure_logging` override，改
     `make_logger(LOG_DIR)`（named logger + 升级窗口 FileHandler 回退），轮转仍 1MB×3。
-    `open_log_dir` 已接住；托盘「打开日志目录」项仍缺（CONFORMANCE C-15，待办）。
+    `open_log_dir` 已接住，并已挂到托盘「打开区」（CONFORMANCE C-15 **已完成**，见本节末的
+    「新增托盘『打开日志目录』」条；实现位置 `src/main.py:6505`）。
   - `tray_kit.py` → 模板 2.0.2 正本：调用点适配新签名
     `acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log)`；互斥体名
     `reme-helper-tray` **显式保留**（历史名 + 升级期新旧版本互斥保护；改名会换成另一个
