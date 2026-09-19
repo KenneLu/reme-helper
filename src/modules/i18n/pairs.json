@@ -1356,14 +1356,6 @@
   "Target version: "
  ],
  [
-  "（PyPI 最新稳定版；以你自己查到的为准）",
-  " (the latest stable release on PyPI; verify it yourself)"
- ],
- [
-  "还没查过，请自行查 PyPI 上的最新稳定版",
-  " (not checked yet - look up the latest stable release on PyPI yourself)"
- ],
- [
   "（待确认）",
   " (to be confirmed)"
  ],
@@ -3314,5 +3306,97 @@
  [
   "上次自动更新失败，已回退到原版本并保留现场；详见 update.log",
   "The previous auto-update failed; the previous version was restored and the scene kept. See update.log"
+ ],
+ [
+  "（版本必须锁死，不要装更高版本、也不要写 latest；上游更新了也先别动）",
+  "(pin the version: do not install anything newer and do not use latest - leave it alone even if upstream ships one)"
+ ],
+ [
+  "（本助手适配的版本，请勿替换成别的版本）",
+  "(the version this helper supports; do not substitute another one)"
+ ],
+ [
+  "允许的动作：读已装包的 METADATA 与 default.yaml、必要时把**目标版本**的 wheel 下载到临时目录解包对比、读 config/ 与日志。不要去看上游有没有更新的版本。",
+  "Allowed: read the installed package's METADATA and default.yaml; if needed, download the **target version** wheel to a temp dir and unpack it for comparison; read config/ and the logs. Do not go looking for newer upstream versions."
+ ],
+ [
+  "1. 版本与来源：当前 → 目标（目标必须正好是上面那个 ==版本，不要自己换一个）",
+  "1. Version and source: current -> target (the target must be exactly the == version above; do not pick your own)"
+ ],
+ [
+  "用同一个 extra 升级到锁定版本：",
+  "Upgrade to the pinned version with the same extra: "
+ ],
+ [
+  "必须带 ==版本号：不带的话 pip 会去拿最新的，那正是本提示词要避免的事。",
+  "It must carry the ==version. Without it pip fetches the newest one, which is exactly what this prompt exists to prevent."
+ ],
+ [
+  "- 版本只能是上面那个 ==锁定版本；不要装更新的版本，也不要用 latest",
+  "- The version must be the pinned ==version above; do not install anything newer and do not use latest"
+ ],
+ [
+  "，本助手尚未适配，不要升级到它）",
+  ", which this helper does not support yet - do not upgrade to it)"
+ ],
+ [
+  "（上游已有 ",
+  " (upstream already has "
+ ],
+ [
+  "，本助手适配 ",
+  ", but this helper supports "
+ ],
+ [
+  "，建议升级到 ",
+  "; recommended upgrade target: "
+ ],
+ [
+  "右键「复制 ReMe 更新步骤（交给 AI 执行）」",
+  "Right-click \"Copy ReMe update steps (for an AI to run)\""
+ ],
+ [
+  " **高于**本助手适配的 ",
+  " is **newer** than the version this helper supports ("
+ ],
+ [
+  "检测到 ReMe ",
+  "Found ReMe "
+ ],
+ [
+  "：未适配的组合可能生成不出可用配置，建议装回 ",
+  "): an unsupported combination may fail to generate usable configs; install "
+ ],
+ [
+  "ReMe 已是最新适配版本 ",
+  "ReMe is at the latest supported version "
+ ],
+ [
+  "未检测到 ReMe。先安装（Python 3.13 建 venv → pip install \"",
+  "No ReMe detected. Install it first (Python 3.13 venv -> pip install \""
+ ],
+ [
+  "，本助手只适配它。",
+  ", which is the only version this helper supports."
+ ],
+ [
+  "版本要正好是 ",
+  "The version must be exactly "
+ ],
+ [
+  "（可升级到 ",
+  " (can upgrade to "
+ ],
+ [
+  "，未适配）",
+  ", not supported)"
+ ],
+ [
+  "（高于适配版本 ",
+  " (newer than the supported version "
+ ],
+ [
+  "（已是最新适配版本）",
+  " (latest supported version)"
  ]
 ]

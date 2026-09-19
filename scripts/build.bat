@@ -205,6 +205,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] ReMe supported-version pin (four states + prompts) ...
+"%PY%" tests\test_reme_version_pin.py
+if errorlevel 1 (
+  echo [ERROR] ReMe version pin test failed - check that SUPPORTED_REME_VERSION is the
+  echo         single source in appconfig and that both prompts pin ==that version.
+  if not defined NOPAUSE pause
+  exit /b 1
+)
+
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
 echo [BUILD] icon ...

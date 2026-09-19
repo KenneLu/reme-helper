@@ -27,7 +27,7 @@ from tkinter import filedialog, ttk
 from tkinter import messagebox as _raw_messagebox
 import guide
 from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
-from modules.appconfig import APP_NAME, APP_ID   # noqa: F402
+from modules.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
 from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.2：named logger + 闭包）
 from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.3：四区 + _CONFIG/_DATA_DIR env）
@@ -1432,7 +1432,8 @@ def reme_install_prompt(root_hint: str = DEFAULT_REME_ROOT) -> str:
         "请按官方方式安装（PowerShell）：\n"
         f"1) 建目录与虚拟环境：mkdir \"{root_hint}\"；用 Python 3.11+（推荐 3.13）执行 "
         f"python -m venv \"{root_hint}\\venv\"\n"
-        f"2) 安装：\"{root_hint}\\venv\\Scripts\\python.exe\" -m pip install -U \"reme-ai[core]\"\n"
+        f"2) 安装：\"{root_hint}\\venv\\Scripts\\python.exe\" -m pip install -U \"{reme_pip_spec()}\""
+        + t("（版本必须锁死，不要装更高版本、也不要写 latest；上游更新了也先别动）") + "\n"
         f"3) 启动服务：\"{root_hint}\\venv\\Scripts\\reme.exe\" start service.backend=http"
         "（默认 http://127.0.0.1:2333/，Studio 也在同一个地址）\n"
         f"4) 验证：请求 http://127.0.0.1:2333/health_check 应返回正常；浏览器打开 "
@@ -1455,15 +1456,19 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
 
     关键设计：不允许 AI 照着步骤直接升级。升级会牵动配置、依赖与配套工具，必须先让它
     读一遍目标版本、评估风险、把决策点摆出来；用户确认后才执行。
+
+    目标版本**恒为** `SUPPORTED_REME_VERSION`（用户 2026-09-19 定）。以前这里写
+    "以你自己在 PyPI 上查到的最新版为准"——等于把升级目标交给 AI 现场决定，上游一发
+    新版就会把用户推到助手没适配过的组合上。`latest` / `REME_UPDATE_STATE` 现在只用于
+    附注"上游更新了但尚未适配"。
     """
     root = root_hint or str(CFG.get("reme_root") or DEFAULT_REME_ROOT)
     versions = reme_versions()
     installed = current or versions.get("reme-ai", "") or "未知"
-    # 目标版本可能还不知道（用户没点过「检查更新」）：那就直说，别写「未知」再跟一句括注，
-    # 那样读起来自相矛盾。
-    target = latest or REME_UPDATE_STATE.get("latest", "")
-    target_hint = (t("（PyPI 最新稳定版；以你自己查到的为准）") if target
-                   else t("还没查过，请自行查 PyPI 上的最新稳定版"))
+    target = reme_upgrade_target()
+    upstream = latest or str(REME_UPDATE_STATE.get("latest") or "")
+    target_hint = t("（本助手适配的版本，请勿替换成别的版本）")
+    upstream_note = reme_upstream_note(upstream)
     running = "运行中" if service_is_healthy() else "已停止"
     return "\n".join([
         t("请帮我升级这台机器上的 ReMe（本地优先的长期记忆服务）。"),
@@ -1472,15 +1477,15 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         t("## 现状"),
         f"- {t('安装根目录：')}{root}{t('（venv 在同一目录下）')}",
         f"- {t('当前版本：')}reme-ai {installed}{t('，pip 安装，extra 是 [core]')}",
-        f"- {t('目标版本：')}{target or t('（待确认）')}{target_hint}",
+        f"- {t('目标版本：')}reme-ai=={target}{target_hint}{upstream_note}",
         f"- {t('服务地址：')}http://127.0.0.1:2333{t('，当前')}{t(running)}",
         f"- {t('配套工具：')}{helper_location()}{t('，负责生成配置、启停服务、VM 隧道')}",
         "",
         t("## 第一阶段：只分析，不动手"),
-        t("允许的动作：查 PyPI、把新版 wheel 下载到临时目录解包对比、读 config/ 与日志、读包的 METADATA。"),
+        t("允许的动作：读已装包的 METADATA 与 default.yaml、必要时把**目标版本**的 wheel 下载到临时目录解包对比、读 config/ 与日志。不要去看上游有没有更新的版本。"),
         t("在我说「执行」之前：不要运行任何 pip 安装命令、不要停启服务、不要改任何配置文件。"),
         t("请按这个格式回报："),
-        t("1. 版本与来源：当前 → 目标，数据从哪来"),
+        t("1. 版本与来源：当前 → 目标（目标必须正好是上面那个 ==版本，不要自己换一个）"),
         t("2. 会影响什么：新版 default.yaml 的 job 表差异（新增 / 删除 / 改名了哪些）；"
           "依赖变化，尤其是 agentscope 的 pin（现在是 ==2.0.7.post1）"),
         t("3. 需要联动 ReMe 助手的地方：升级后要用它重新生成三份配置（app.yaml / app-full.yaml / "
@@ -1493,13 +1498,15 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         t("## 第二阶段：我说「执行」之后"),
         t("1. 先备份：完整复制 workspace（我的记忆本体），再备份 config\\ 与 .env。备份是复制，不是移动。"),
         t("2. 确认服务已停止（本机由 ReMe 助手的托盘菜单启停）。"),
-        f"3. {t('用同一个 extra 升级：')}\"{root}\\venv\\Scripts\\python.exe\" -m pip install -U \"reme-ai[core]\"",
+        f"3. {t('用同一个 extra 升级到锁定版本：')}\"{root}\\venv\\Scripts\\python.exe\" -m pip install -U \"{reme_pip_spec()}\"",
+        t("必须带 ==版本号：不带的话 pip 会去拿最新的，那正是本提示词要避免的事。"),
         t("4. 打开 ReMe 助手控制台，逐项核对后点「验证并保存」，重新生成配置。"),
         t("5. 起服务验证：health_check、Studio 页面、reme version；"
           "再用助手跑一次「测试连接」确认 LLM / Embedding 仍可用。"),
         t("6. 回报新版本号，以及第 2 项里预判的差异是否属实。"),
         "",
         t("## 硬约束"),
+        t("- 版本只能是上面那个 ==锁定版本；不要装更新的版本，也不要用 latest"),
         t("- 不要改动 .env 与 workspace 的内容（只备份）"),
         t("- 不要用 --no-deps「图省事」"),
         t("- 保持 [core] extra，否则会丢掉 agentscope 与 reme_studio"),
@@ -1675,7 +1682,11 @@ def pick_latest_stable(data: dict) -> str:
 
 
 def fetch_latest_reme_version(timeout: float = 8.0) -> tuple[bool, str]:
-    """查 PyPI 上 reme-ai 的最新稳定版。返回 ``(ok, 版本号或错误说明)``。"""
+    """查 PyPI 上 reme-ai 当前发布的版本号。返回 ``(ok, 版本号或错误说明)``。
+
+    注意这**不是升级目标**（目标恒为 `SUPPORTED_REME_VERSION`）：这个值只用来判断
+    "上游已经有比适配版本更新的东西了"，然后提示用户**先别升**。
+    """
     request = urllib.request.Request(
         PYPI_REME_JSON, headers={"User-Agent": f"{APP_ID}/{VERSION}"})
     try:
@@ -1691,20 +1702,78 @@ def fetch_latest_reme_version(timeout: float = 8.0) -> tuple[bool, str]:
     return True, latest
 
 
-def check_reme_update() -> tuple[bool, str]:
-    """托盘「检查 ReMe 更新」：只提示，不升级。run_action 会把返回值弹成气泡。"""
-    current = reme_versions().get("reme-ai", "")
+# 本机已装 ReMe 相对**适配版本**（`SUPPORTED_REME_VERSION`）的四种状态，全家族一套判据。
+REME_PIN_UNKNOWN = "unknown"
+REME_PIN_OUTDATED = "outdated"
+REME_PIN_OK = "ok"
+REME_PIN_AHEAD = "ahead"
+
+
+def reme_pin_state(installed: str = "") -> str:
+    """四象限：本机 ReMe 相对**适配版本**的判定（用户 2026-09-19 定）。
+
+      * `outdated` —— 本机 < pin：提示升级，且**只升到 pin**（``==<pin>``）；
+      * `ok`       —— 本机 == pin：已是最新适配版本；
+      * `ahead`    —— 本机 > pin：**越界**，本助手未适配，给出警告而不是升级引导；
+      * `unknown`  —— 没检测到 ReMe。
+
+    **与 PyPI 无关**：上游有没有更新版本只影响一句"尚未适配"的附注（见
+    `reme_upstream_note`），永远不改变升级目标。旧实现拿"PyPI 上查到的最新版"当目标，
+    上游一发版就把用户推到未验证的组合上。
+    """
+    current = installed or reme_versions().get("reme-ai", "")
     if not current:
+        return REME_PIN_UNKNOWN
+    if version_is_newer(SUPPORTED_REME_VERSION, current):
+        return REME_PIN_OUTDATED
+    if version_is_newer(current, SUPPORTED_REME_VERSION):
+        return REME_PIN_AHEAD
+    return REME_PIN_OK
+
+
+def reme_upgrade_target() -> str:
+    """升级目标**单点**：恒为适配版本，不吃"上游最新"。"""
+    return SUPPORTED_REME_VERSION
+
+
+def reme_pip_spec() -> str:
+    """pip 的目标串，提示词与界面提示共用一处，避免有人只改一半。"""
+    return f"reme-ai[core]=={SUPPORTED_REME_VERSION}"
+
+
+def reme_upstream_note(latest: str = "") -> str:
+    """上游比适配版本新时的**附注**：只说"尚未适配"，绝不引导升级。"""
+    latest = latest or str(REME_UPDATE_STATE.get("latest") or "")
+    if latest and version_is_newer(latest, SUPPORTED_REME_VERSION):
+        return t("（上游已有 ") + latest + t("，本助手尚未适配，不要升级到它）")
+    return ""
+
+
+def check_reme_update() -> tuple[bool, str]:
+    """托盘「检查 ReMe 更新」：只提示，不升级。run_action 会把返回值弹成气泡。
+
+    结论以**适配版本**为准；PyPI 只用来补一句"上游已更新但尚未适配"。
+    网络不通**不再**算失败——判定一个离线也成立的 pin 状态不需要网络。
+    """
+    current = reme_versions().get("reme-ai", "")
+    state = reme_pin_state(current)
+    if state == REME_PIN_UNKNOWN:
         return False, "没检测到 ReMe，先安装再检查更新"
+    if state == REME_PIN_OUTDATED:
+        return True, (t("检测到 ReMe ") + current + t("，本助手适配 ") + SUPPORTED_REME_VERSION
+                      + t("，建议升级到 ") + SUPPORTED_REME_VERSION
+                      + t("（") + reme_pip_spec() + t("）") + t("。")
+                      + t("右键「复制 ReMe 更新步骤（交给 AI 执行）」"))
+    if state == REME_PIN_AHEAD:
+        return True, (t("检测到 ReMe ") + current + t(" **高于**本助手适配的 ")
+                      + SUPPORTED_REME_VERSION
+                      + t("：未适配的组合可能生成不出可用配置，建议装回 ")
+                      + SUPPORTED_REME_VERSION + t("（") + reme_pip_spec() + t("）"))
     ok, detail = fetch_latest_reme_version()
-    if not ok:
-        REME_UPDATE_STATE.update(checked_for=current, latest="", at=time.time(), error=detail)
-        return False, f"检查更新失败：{detail}（离线，或者 PyPI 被代理拦了？）"
-    REME_UPDATE_STATE.update(checked_for=current, latest=detail, at=time.time(), error="")
-    if version_is_newer(detail, current):
-        return True, (f"ReMe 有新版本 {detail}（本机 {current}）。"
-                      "右键「复制 ReMe 更新步骤（交给 AI 执行）」")
-    return True, f"ReMe 已是最新版本 {current}"
+    REME_UPDATE_STATE.update(checked_for=current, latest=detail if ok else "",
+                             at=time.time(), error="" if ok else detail)
+    return True, (t("ReMe 已是最新适配版本 ") + SUPPORTED_REME_VERSION
+                  + t("（本机 ") + current + t("）") + reme_upstream_note())
 
 
 def read_env_values() -> dict[str, str]:
@@ -5614,8 +5683,10 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                         foreground=THEME["warn"])
                 else:
                     install_note.configure(
-                        text=(t("未检测到 ReMe。先安装（Python 3.13 建 venv → pip install \"reme-ai[core]\" → ")
-                              + t("reme start service.backend=http），或点“复制安装提示词”把它交给 DSH / Codex 安装。")),
+                        text=(t("未检测到 ReMe。先安装（Python 3.13 建 venv → pip install \"")
+                              + reme_pip_spec() + t("\" → ")
+                              + t("reme start service.backend=http），或点“复制安装提示词”把它交给 DSH / Codex 安装。")
+                              + t("版本要正好是 ") + SUPPORTED_REME_VERSION + t("，本助手只适配它。")),
                         foreground=THEME["warn"])
             pipe_hint.configure(text=t(
                 "立即整理一次（auto_dream）：调用模型把 daily 沉淀为 digest，产生 token 费用。"
@@ -6224,19 +6295,25 @@ def warn_tray_registration_failed(error: int) -> None:
 
 
 def reme_version_text(_item=None) -> str:
-    """ReMe（服务）版本行。只反映 ReMe **自己**的更新结论。"""
+    """ReMe（服务）版本行：相对**适配版本**的结论（不再跟 PyPI 最新比）。
+
+    以前这里是"（有新版 0.4.2.0）"——那个"新版"是 PyPI 上的，助手并未适配，等于在
+    菜单里催用户升级到一个没验证过的版本。现在只报四象限：可升级到 pin / 已是最新
+    适配版本 / 高于适配版本（未适配）。
+    """
     version = reme_versions().get("reme-ai", "")
     if not version:
         return t("ReMe版本：") + t("未安装")
     text = t("ReMe版本：") + version
-    if REME_UPDATE_STATE.get("checked_for") != version:
-        return text
-    if REME_UPDATE_STATE.get("error"):
-        return text + t("（检查更新失败）")
-    latest = str(REME_UPDATE_STATE.get("latest") or "")
-    if latest and version_is_newer(latest, version):
-        return text + t("（有新版 ") + latest + "）"
-    return text + t("（已是最新）")
+    state = reme_pin_state(version)
+    if state == REME_PIN_OUTDATED:
+        return text + t("（可升级到 ") + SUPPORTED_REME_VERSION + t("）")
+    if state == REME_PIN_AHEAD:
+        return text + t("（高于适配版本 ") + SUPPORTED_REME_VERSION + t("，未适配）")
+    note = ""
+    if REME_UPDATE_STATE.get("checked_for") == version:
+        note = reme_upstream_note()
+    return text + t("（已是最新适配版本）") + note
 
 
 def helper_version_text(_item=None) -> str:
@@ -6256,23 +6333,22 @@ def tray_check_reme_update() -> None:
     def work() -> None:
         current = reme_versions().get("reme-ai", "")
         ok, detail = check_reme_update()
+        state = reme_pin_state(current)
         if not ok:
-            ui_dialog(t("检查 ReMe 更新"), detail,
-                      [(t("复制 ReMe 更新步骤（交给 AI 执行）"), copy_upgrade_prompt_from_tray),
-                       (t("关闭"), None)])
+            # 未安装：这里不挂"复制升级提示词"——那是升级用的，没有 ReMe 时该走的是
+            # 设置窗口里的"复制安装提示词"。
+            ui_dialog(t("检查 ReMe 更新"), detail, [(t("好"), None)])
             return
-        latest = str(REME_UPDATE_STATE.get("latest") or "")
-        if latest and version_is_newer(latest, current):
+        if state == REME_PIN_OUTDATED:
             ui_dialog(t("检查 ReMe 更新"),
-                      t("ReMe 有新版本 ") + latest + t("（本机 ") + current + t("）。") + "\n\n"
+                      detail + "\n\n"
                       + t("更新 ReMe 会动配置、依赖与配套工具，所以由 AI 按步骤执行："
                           "点下面的按钮复制提示词，粘贴给 AI 即可。"),
                       [(t("复制 ReMe 更新步骤（交给 AI 执行）"), copy_upgrade_prompt_from_tray),
                        (t("稍后"), None)])
         else:
-            ui_dialog(t("检查 ReMe 更新"),
-                      t("ReMe 已是最新版本（") + current + t("）。"),
-                      [(t("好"), None)])
+            # ok / ahead 都不引导升级：ahead 是"你比适配版本还新"，正解是装回 pin。
+            ui_dialog(t("检查 ReMe 更新"), detail, [(t("好"), None)])
 
     threading.Thread(target=work, daemon=True).start()
 
@@ -7565,6 +7641,11 @@ def smoke() -> int:
         # 这条断言真正要打的故障是"名字非法 ⇒ 守卫静默 fail-open"（SINGLE-01 的 l-s2t 教训）。
         check("single-instance name valid",
               mutex_name_is_valid(APP_ID, mutex_name=SINGLE_INSTANCE_NAME))
+        # ReMe 适配版本必须随包分发且非空（用户 2026-09-19 定：不再跟随 PyPI 最新）。
+        # 升级/安装提示词与四象限判定全靠它；冻结环境里取不到 = 没有升级目标。
+        check("ReMe pin present",
+              bool(SUPPORTED_REME_VERSION)
+              and SUPPORTED_REME_VERSION == appconfig.SUPPORTED_REME_VERSION)
         failed = [name for name, ok in checks if not ok]
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报

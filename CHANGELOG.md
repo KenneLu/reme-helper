@@ -14,6 +14,20 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **ReMe 版本固定：不再跟随 PyPI 最新（用户 2026-09-19 直接需求）**：
+  新增 `SUPPORTED_REME_VERSION`（唯一写在 `modules/appconfig/appconfig.py`，T1 参数区）＝本助手
+  **适配**的 ReMe 版本。助手要生成三份配置、内省思考强度档位、核对 MCP 工具白名单，这些都
+  依赖目标版本 `default.yaml` 的 job 表与依赖 pin——上游一发新版就引导升级，等于让这些在
+  未验证的组合上跑。**升级/安装目标恒为它**，PyPI 上的新版本只作为一句"尚未适配"的附注。
+  四象限文案（`reme_pin_state`）：本机 < pin → 提示升级到 `==<pin>`；== pin → 已是最新适配
+  版本；> pin → **越界警告**（未适配，建议装回 pin，**不**给升级引导）；上游 > pin → 只提示
+  "尚未适配，不要升级到它"。安装与升级两份 AI 提示词的 pip 目标都改成
+  `reme-ai[core]==<pin>`，并显式禁止写 `latest`；设置窗口的"未检测到 ReMe"提示同样带上 pin。
+  检查更新**不再因网络失败而失败**（pin 判定离线也成立）。新增
+  `tests/test_reme_version_pin.py`（build.bat 门禁）：单点定义、四象限文案、提示词含 `==<pin>`
+  且**不含**"最新稳定版"、上游更新时 pip 目标仍是 pin；`--smoke` 加一条"pin 随包分发且非空"
+  （负对照：清空 pin → `FAIL missing=ReMe pin present`）。
+
 - **tray_kit 追平模板 2.2.0，连带修掉一个"静默失去单实例保护"的隐患**：
   模板 2.2.0 把互斥体名的合法性收成**一份判据** `mutex_name_ok()`（非空 + `Local\` 前缀 +
   前缀后无第二个反斜杠），守卫、探针、`single_instance_free` 共用；同时新增
