@@ -3,7 +3,11 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
-## Unreleased
+## v1.2.6
+
+> 版本档位：**补丁级 +0.0.1**（用户裁定口径）。本轮是行为等价的模板对齐——托盘菜单重画、
+> 退出确认弹窗等用户可见形态**未改**（仍是 reme 自己的实现，只是 tray_kit 模块升到 2.0.2），
+> 默认数据路径也不变；新增的只是工具链用的 `_DATA_DIR` / `_CONFIG` env 契约与构建隔离。
 
 - **模板件收敛（W-g）**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
   `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §E4 许可保留）。
