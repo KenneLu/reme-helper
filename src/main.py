@@ -7162,13 +7162,18 @@ HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
 HELPER_UPDATE_SNAPSHOT = USER_DATA_DIR / "_backup.pre"
 # 更新器失败时留的 marker：主程序下次启动读到就通知用户并删除（托盘已不在，只能下次说）。
 HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
-# 等旧进程退出的上限：120 个**等待节拍**。一个节拍 = 一句真正的 Start-Sleep 1000ms
-# （**不是** `ping -n 2`：丢 loopback ICMP 的机器上一拍实测 9.0 秒，见 C-33），
-# 再加 PowerShell 自身的启动开销。**实测**（本机 2026-09-19）：一拍 1.66s
-# （1.000s 睡眠 + 0.66s 启动），所以 120 拍的墙钟约 3.3 分钟而不是 2 分钟。
-# :giveup 的文案因此只报**节拍数**、不报秒数——报了秒数就是日志说谎，
-# 而"名义 vs 实际差 9 倍"正是 ping 当节拍被判硬违规的原因。
-HELPER_UPDATE_WAIT = 120
+# 等旧进程退出的预算：**两个常量别合并**——`LIMIT` 是**轮询次数**、`TICK_MS` 是
+# **每拍毫秒**；`BUDGET_S` 由两者现算，是**下界**（真墙钟更大，见下）。
+# 一个节拍 = 一句真正的 Start-Sleep（**不是** `ping -n 2`：丢 loopback ICMP 的机器上
+# 一拍实测 9.0 秒，见 C-33），再加 PowerShell 自身的启动开销。
+# **实测**：本机 2026-09-19 一拍 **1.66s**（1.000s 睡眠 + 0.66s 启动）⇒ 120 拍墙钟约
+# 3.3 分钟；模板侧记录的是其机器上的 **1.29s**（PS 启动 ~0.29s）。两个都是**测量值**，
+# 差在 PS 冷启动与机器负载——所以预算按 `limit × tick_ms` 算，日志只报这个**下界**。
+# ⚠️ **别把次数当秒**：:giveup 报"拍数 × 每拍毫秒 + 名义预算"，不报一个没人量过的秒数
+# ——"名义 vs 实际差 9 倍"正是 ping 当节拍被判硬违规的原因（日志说谎）。
+HELPER_UPDATE_LIMIT = 120
+HELPER_UPDATE_TICK_MS = 1000
+HELPER_UPDATE_BUDGET_S = HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000
 
 # ReMe 助手自己的更新状态。**必须与 REME_UPDATE_STATE 分开**：这两个字典以前都叫
 # UPDATE_STATE，后者在模块加载时把前者覆盖掉，于是两个检查共用一份 `latest`——
@@ -7229,7 +7234,7 @@ rem 120s budget became ~18 minutes while the abort line still announced seconds.
 rem (C-33: never use ping as a clock.) `timeout` and `choice` are NOT alternatives:
 rem this script runs DETACHED with no console, and both fail instantly there.
 rem Absolute path for the same PATH reason as every other command above.
-%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 1000"
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds {tick_ms}"
 goto wait
 :gone
 rem Pre-check the SOURCE before touching anything at all. An EXISTING BUT EMPTY stage dir
@@ -7305,11 +7310,11 @@ start "" "%INSTALL%\{exe}"
 goto cleanup_keep
 :giveup
 rem Wait limit hit: the old process never exited. Do not replace anything.
-rem Report TICKS, not seconds: the budget is {limit} sleep ticks and wall-clock time is
-rem strictly larger (PowerShell startup per tick). Printing "{limit}s" here would be the
-rem exact lie C-33 exists to stop.
-echo [{stamp}] aborted: {exe} still running after {limit} wait ticks >> "%LOG%"
-> "%FAILED%" echo update aborted {stamp}: {exe} still running after {limit} wait ticks
+rem Report the MEASURED semantics: polls x ms per tick, plus the nominal budget as a
+rem LOWER BOUND. Wall-clock is strictly larger (PowerShell startup per tick), so printing
+rem a plain "Ns" here would be the exact lie C-33 exists to stop.
+echo [{stamp}] aborted: {exe} still running after %tries% polls x {tick_ms}ms (nominal budget {budget_s}s, lower bound) >> "%LOG%"
+> "%FAILED%" echo update aborted {stamp}: {exe} still running after %tries% polls x {tick_ms}ms (nominal budget {budget_s}s, lower bound)
 goto cleanup
 :cleanup
 if exist "%WORK%" rmdir /s /q "%WORK%"
@@ -7503,7 +7508,13 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
         install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP, snapshot=HELPER_UPDATE_SNAPSHOT,
         failed=HELPER_UPDATE_FAILED,
         log=HELPER_UPDATE_LOG, exe=HELPER_EXE,
-        limit=HELPER_UPDATE_WAIT, stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+        # 名义预算**由同一次渲染的 limit × tick_ms 现算**，不直接传模块常量：测试会用
+        # limit=1/2 保持等待短，若预算来自常量就会渲染出"1 拍 × 1000ms（名义预算 120s）"
+        # ——两个数自相矛盾（l-s2t 那条 `2 拍写成 120s` 的同族形态）。HELPER_UPDATE_BUDGET_S
+        # 只是**默认那一对**的取值，供人读，不供渲染。
+        limit=HELPER_UPDATE_LIMIT, tick_ms=HELPER_UPDATE_TICK_MS,
+        budget_s=HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000,
+        stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
     )
     script = Path(tempfile.gettempdir()) / f"{APP_ID}-update.bat"
     try:

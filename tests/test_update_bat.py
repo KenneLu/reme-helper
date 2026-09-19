@@ -197,6 +197,10 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
         install=paths["install"], stage=paths["stage"], work=paths["work"],
         backup=paths["backup"], snapshot=paths["snapshot"], failed=paths["failed"],
         log=paths["log"], exe=exe, limit=limit, stamp="test",
+        # 预算与 limit/tick **同源**（模块常量是默认那一对的值，直接传它会让 limit=1 的
+        # 渲染印出"名义预算 120s"——判据里那条"日志里的数必须是被测过的数"）。
+        tick_ms=main.HELPER_UPDATE_TICK_MS,
+        budget_s=limit * main.HELPER_UPDATE_TICK_MS // 1000,
     )
     bat = root / "updater.bat"
     bat.write_text(text, encoding="ascii", newline="")
@@ -228,7 +232,9 @@ def _static_checks() -> None:
     rendered = main.HELPER_UPDATE_BAT.format(
         install=r"C:\i", stage=r"C:\s", work=r"C:\w", backup=r"C:\b",
         snapshot=r"C:\b.pre", failed=r"C:\f", log=r"C:\l", exe="probe.vbs",
-        limit=2, stamp="static")
+        limit=2, stamp="static",
+        tick_ms=main.HELPER_UPDATE_TICK_MS,
+        budget_s=2 * main.HELPER_UPDATE_TICK_MS // 1000)
     lines = rendered.splitlines()
     labels = {l.strip()[1:] for l in lines if l.startswith(":")}
     gotos = set(re.findall(r"goto (\w+)", rendered))
@@ -368,7 +374,12 @@ def main_test() -> int:
             _run_bat(root, paths, exe=running, limit=1)
             elapsed = time.time() - started
             giveup_log = _read(paths["log"])
-            expect = "aborted: %s still running after 1 wait ticks" % running
+            # 文案报**实测语义**：轮询次数 × 每拍毫秒 + 名义预算（下界）。
+            # limit=1 ⇒ "after 1 polls x 1000ms (nominal budget 1s, lower bound)"——两个数
+            # 同源，不会出现"1 拍却写 120 秒"那种自相矛盾。
+            expect = ("aborted: %s still running after 1 polls x %dms "
+                      "(nominal budget 1s, lower bound)"
+                      % (running, main.HELPER_UPDATE_TICK_MS))
             check("giveup: log records the abort line", expect in giveup_log,
                   " | ".join(giveup_log.splitlines()[-3:]))
             check("giveup: marker written", paths["failed"].exists()
