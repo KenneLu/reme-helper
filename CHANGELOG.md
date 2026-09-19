@@ -11,6 +11,13 @@
 > `open_log_dir`），按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；
 > 其余新增面是工具链用的 `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+> **本机没有 1.2.6 产物（预期状态，CONFORMANCE §4.1.11）**：为自证 D1-02/C-11
+> 运行检测闸，构建前删除了 `release\reme-helper-1.2.6\`；闸门修好后，只要常驻托盘在跑，
+> 构建就会被正确拒绝（`[ERROR] reme-helper is running.`、exit 1），本机因此无法再生成
+> 1.2.6。**本地重建的前置动作：先从托盘退出常驻实例**；发布物由 CI 从干净检出构建（G3）。
+> 被删产物（13:37）早于 13:39 的 i18n 改动，但该改动仅新增一行 `TEMPLATE-LOCAL-OVERRIDE`
+> 注释、无逻辑变更，不影响产物内容。
+
 - **模板件收敛（W-g）**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
   `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §E4 许可保留）。
   - `paths.py` → 模板 1.1.3 正本：dev 态 `APP_DIR` 改由「向上找 main.py 的仓库根」锚定，

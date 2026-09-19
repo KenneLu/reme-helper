@@ -1,6 +1,6 @@
 # reme-helper
 
-[English](README.md) | 简体中文
+[English](README.md) | **简体中文**
 
 把 ReMe 配好、把 Agent 接上，让多台机器共用同一份记忆。
 
@@ -109,6 +109,10 @@ release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 `src/` 是应用源码，`tests/` 是测试脚本（全部是构建门禁），`scripts/` 是构建脚本与发布配置生成器，`doc/` 是应用运行时读取的文档。
 版本号只写在 `src/main.py` 的 `VERSION` 里——应用、发布目录名、git 标签都从它来；**推一个 `v*` 标签就是发布**。
 历次改动见 [CHANGELOG.md](CHANGELOG.md)。
+
+**本地构建**：只要有 `reme-helper.exe` 在跑，构建闸就会拒绝（D1-02：文件被锁、两个托盘会抢
+同一份配置）。对 24/7 常驻的托盘工具，这意味着**先从托盘退出**；正式发布物由 CI 从干净检出
+构建，所以"本机没有当前版本的 release 目录"是预期状态，不是产物丢失（CONFORMANCE §4.1.11）。
 
 **待办（已知）**：三个家族机制件仍内联在 `src/main.py`（`autostart` / `icons` /
 `update_helper`）——它们与模板接口不同构（注册表键名与自愈语义不同、运行态着色 vs 构建期

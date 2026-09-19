@@ -1,6 +1,6 @@
 # reme-helper
 
-English | [简体中文](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md)
 
 Set up ReMe, connect your agents to it, and keep one memory across machines.
 
@@ -127,6 +127,12 @@ release.bat        :: tag v<version> and push; CI publishes the zip
 the release-config generator, and `doc/` the documentation the app reads at runtime. The version lives in
 `src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
 a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+
+**Building locally.** The build gate refuses to run while any `reme-helper.exe` is
+running (D1-02: files would be locked and two trays would fight over the same config).
+For a 24/7 tray tool that means **exit the tray first**; releases come from CI on a clean
+checkout, so "no local release folder for the current version" is an expected state, not
+a lost artifact (CONFORMANCE §4.1.11).
 
 **Known follow-ups.** Three family mechanism modules are still inline in `src/main.py`
 (`autostart`, `icons`, `update_helper`): their family-template interfaces are not
