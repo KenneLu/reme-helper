@@ -6452,7 +6452,9 @@ def tray_signature() -> tuple:
                     if target.get("enabled", True) and TUNNEL_STATE.get(target_key(target)))
     return (state.get("phase"), bool(state.get("healthy")), connected, len(targets),
             reme_installed(), reme_versions().get("reme-ai", ""), theme_name(), ui_lang(),
-            bool(CFG.get("start_tunnels_with_reme")), bool(CFG.get("start_on_launch")))
+            bool(CFG.get("start_tunnels_with_reme")), bool(CFG.get("start_on_launch")),
+            # 更新状态必须进签名：否则后台查到新版后，「下载并更新」要等别的状态变化才亮
+            bool(HELPER_UPDATE_STATE.get("newer")), str(HELPER_UPDATE_STATE.get("latest") or ""))
 
 
 def build_menu() -> pystray.Menu:
@@ -7070,6 +7072,11 @@ HELPER_UPDATE_LOG = USER_DATA_DIR / "update.log"
 #   * 安装目录那份要用 robocopy /purge 清掉上一版的残留文件，备份若在里面就会被一起删；
 #   * 而且备份若在 install 下，`robocopy install install\_backup /e` 会扫到自己的输出。
 HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
+# 替换前的现场快照：只在**替换成功之后**才轮转为 BACKUP，因此任何时刻都有一份可回退的
+# 上一版本；失败时它被保留，供人工恢复。
+HELPER_UPDATE_SNAPSHOT = USER_DATA_DIR / "_backup.pre"
+# 更新器失败时留的 marker：主程序下次启动读到就通知用户并删除（托盘已不在，只能下次说）。
+HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
 # 等旧进程退出的上限：120 次 × 约 1 秒（`ping -n 2` 的节奏）
 HELPER_UPDATE_WAIT = 120
 
@@ -7094,6 +7101,8 @@ set "INSTALL={install}"
 set "STAGE={stage}"
 set "WORK={work}"
 set "BACKUP={backup}"
+set "SNAPSHOT={snapshot}"
+set "FAILED={failed}"
 set "LOG={log}"
 echo [{stamp}] start install=%INSTALL% backup=%BACKUP% >> "%LOG%"
 set "POLL=%LOG%.poll"
@@ -7115,24 +7124,40 @@ if %tries% geq {limit} goto giveup
 ping -n 2 127.0.0.1 >nul
 goto wait
 :gone
-if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
-robocopy "%INSTALL%" "%BACKUP%" /e /njh /njs /nfl /ndl >nul
-rem /purge also removes files the previous version left behind. The backup is
-rem deliberately outside INSTALL, otherwise /purge would delete it too.
+rem Snapshot the CURRENT install first. The previous BACKUP is NOT deleted here: it is the
+rem rollback source and is only rotated AFTER a copy that succeeded.
+if exist "%SNAPSHOT%" rmdir /s /q "%SNAPSHOT%"
+robocopy "%INSTALL%" "%SNAPSHOT%" /e /njh /njs /nfl /ndl >nul
+echo [{stamp}] snapshot rc=%ERRORLEVEL% >> "%LOG%"
 robocopy "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
-echo [{stamp}] copied rc=%ERRORLEVEL% >> "%LOG%"
+set "RC=%ERRORLEVEL%"
+echo [{stamp}] copied rc=%RC% >> "%LOG%"
+if %RC% geq 8 goto install_failed
+if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
+move /y "%SNAPSHOT%" "%BACKUP%" >nul 2>nul
 start "" "%INSTALL%\{exe}"
 echo [{stamp}] done >> "%LOG%"
 goto cleanup
-:giveup
-echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
+:install_failed
+rem robocopy: 0-7 = success, >=8 = failure. On failure NEVER start the new exe; restore the
+rem previous version from the snapshot so the tool comes back, and leave a marker for the app.
+> "%FAILED%" echo update failed {stamp}: install rc=%RC%
+echo [{stamp}] INSTALL FAILED rc=%RC% - restoring from snapshot >> "%LOG%"
+robocopy "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+if errorlevel 8 goto install_dead
+echo [{stamp}] restored - starting previous version >> "%LOG%"
+start "" "%INSTALL%\{exe}"
+goto cleanup_keep
+:install_dead
+echo [{stamp}] RESTORE FAILED - not starting; snapshot kept at %SNAPSHOT% >> "%LOG%"
+goto cleanup_keep
 :cleanup
-rem Delete the staging directory (the downloaded zip plus the extracted package).
-rem This script is the last thing that knows where it is, and it is about to delete
-rem itself - without this the whole package stays in %TEMP% forever (measured at
-rem ~50 MB per update). It sits in :cleanup, not on the success branch, so the
-rem "gave up waiting for the old process" path is covered too.
 if exist "%WORK%" rmdir /s /q "%WORK%"
+goto cleanup_tail
+:cleanup_keep
+rem Keep WORK and SNAPSHOT for manual recovery; the marker makes the app notify next start.
+goto cleanup_tail
+:cleanup_tail
 del "%POLL%" >nul 2>nul
 (goto) 2>nul & del "%~f0"
 """
@@ -7200,14 +7225,45 @@ def check_helper_update() -> tuple[bool, str]:
     return True, t("已是最新版本") + f"（{VERSION}）"
 
 
+def _report_failed_previous_update() -> None:
+    """上一次自动更新失败时更新器留了 marker：读一次、通知用户、删掉。"""
+    if not HELPER_UPDATE_FAILED.exists():
+        return
+    try:
+        detail = HELPER_UPDATE_FAILED.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        detail = ""
+    try:
+        HELPER_UPDATE_FAILED.unlink()
+    except OSError:
+        pass
+    log(f"previous update failed: {detail}")
+    notify(t("上次自动更新失败，已回退到原版本并保留现场；详见 update.log"))
+
+
 def startup_helper_update_check() -> None:
     """Check once after every interactive startup without blocking or opening a dialog."""
     if STOP_EVENT.is_set() or SHUTDOWN_STARTED.is_set():
         return
+    _report_failed_previous_update()
     ok, detail = check_helper_update()
     log(f"startup update check: ok={ok} detail={detail}")
+    # 状态进签名了，但得有人触发一次重画——否则要等别的状态变化才亮。
+    refresh_tray_menu()
     if ok and HELPER_UPDATE_STATE.get("newer") and not STOP_EVENT.is_set():
         notify(detail)
+
+
+def verify_zip_sha256(zip_path, sha_text) -> tuple[bool, str]:
+    """校验下载包。**期望值缺失也算失败**——绝不静默放行（安全缺口）。"""
+    wanted = str(sha_text or "").strip()
+    if not wanted:
+        return False, t("校验更新包失败：sha256 为空")
+    wanted = wanted.split()[0].strip().lower()
+    actual = hashlib.sha256(Path(zip_path).read_bytes()).hexdigest()
+    if wanted != actual:
+        return False, t("更新包校验失败：sha256 对不上")
+    return True, ""
 
 
 def download_and_apply_helper_update() -> tuple[bool, str]:
@@ -7219,6 +7275,8 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
         latest = helper_latest_release()
     except Exception as exc:  # noqa: BLE001
         return False, t("检查更新失败：") + str(exc)
+    if not latest["sha256"]:
+        return False, t("发布页缺少 .sha256 校验文件，已中止更新（无法校验完整性）")
     work = Path(tempfile.mkdtemp(prefix=f"{APP_ID}-update-"))
     zip_path = work / f"{APP_ID}{HELPER_ASSET_SUFFIX}"
     try:
@@ -7228,14 +7286,12 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
             shutil.copyfileobj(response, out)
     except Exception as exc:  # noqa: BLE001
         return False, t("下载更新包失败：") + str(exc)
-    if latest["sha256"]:
-        try:
-            wanted = _http_text(latest["sha256"]).split()[0].strip().lower()
-            actual = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-        except Exception as exc:  # noqa: BLE001
-            return False, t("校验更新包失败：") + str(exc)
-        if wanted != actual:
-            return False, t("更新包校验失败：sha256 对不上")
+    try:
+        ok, detail = verify_zip_sha256(zip_path, _http_text(latest["sha256"]))
+    except Exception as exc:  # noqa: BLE001
+        return False, t("校验更新包失败：") + str(exc)
+    if not ok:
+        return False, detail
     stage = work / "stage"
     try:
         with zipfile.ZipFile(zip_path) as archive:
@@ -7245,7 +7301,8 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     if not (stage / HELPER_EXE).is_file():
         return False, t("更新包里没有 ") + HELPER_EXE
     text = HELPER_UPDATE_BAT.format(
-        install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP,
+        install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP, snapshot=HELPER_UPDATE_SNAPSHOT,
+        failed=HELPER_UPDATE_FAILED,
         log=HELPER_UPDATE_LOG, exe=HELPER_EXE,
         limit=HELPER_UPDATE_WAIT, stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
     )

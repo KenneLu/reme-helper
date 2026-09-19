@@ -617,6 +617,14 @@ try:
     main.helper_latest_release = lambda: {"tag": "v99.0.0", "zip": "x", "sha256": ""}
     main.startup_helper_update_check()
     assert len(_update_messages) == 1 and "v99.0.0" in _update_messages[0], _update_messages
+    # 更新状态必须进菜单签名：否则后台查到新版后「下载并更新」要等别的状态变化才亮
+    # （与 i18n 那次「状态不在签名里 ⇒ 菜单不刷新」同源）。
+    _sig_newer = main.tray_signature()
+    main.HELPER_UPDATE_STATE["newer"] = False
+    assert _sig_newer != main.tray_signature(), "更新状态必须参与 tray_signature 比较"
+    # sha256 期望值缺失必须**中止**，不得静默跳过校验（安全缺口，2026-09-19 修）。
+    _ok, _detail = main.download_and_apply_helper_update()
+    assert _ok is False and "sha256" in _detail, (_ok, _detail)
     _update_messages.clear()
     main.helper_latest_release = lambda: {"tag": f"v{main.VERSION}", "zip": "x", "sha256": ""}
     main.startup_helper_update_check()
@@ -626,6 +634,16 @@ finally:
     main.notify = _saved_update_notify
     main.HELPER_UPDATE_STATE.clear()
     main.HELPER_UPDATE_STATE.update(_saved_update_state)
+
+# sha256 校验：匹配通过（含 "哈希  文件名" 两列格式）、不匹配失败、空值失败
+import hashlib as _hashlib  # noqa: E402
+with tempfile.TemporaryDirectory(prefix="reme-sha-") as _sha_dir:
+    _pkg = Path(_sha_dir) / "pkg.zip"
+    _pkg.write_bytes(b"payload")
+    _good = _hashlib.sha256(b"payload").hexdigest()
+    assert main.verify_zip_sha256(_pkg, _good + "  pkg.zip")[0] is True
+    assert main.verify_zip_sha256(_pkg, "0" * 64)[0] is False
+    assert main.verify_zip_sha256(_pkg, "   ")[0] is False
 
 # 16) 标题随语言切换（弹窗标题早就翻了，窗口标题/托盘提示以前没有）
 _lang = main.CFG.get("ui_lang")

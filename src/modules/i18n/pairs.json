@@ -3302,5 +3302,17 @@
  [
   "ReMe 助手已在运行：请使用托盘里的那个实例（本次启动已忽略）。",
   "ReMe Helper is already running: use the instance in the tray (this launch was ignored)."
+ ],
+ [
+  "校验更新包失败：sha256 为空",
+  "Update package check failed: sha256 is empty"
+ ],
+ [
+  "发布页缺少 .sha256 校验文件，已中止更新（无法校验完整性）",
+  "The release page has no .sha256 checksum file; update aborted (integrity cannot be verified)"
+ ],
+ [
+  "上次自动更新失败，已回退到原版本并保留现场；详见 update.log",
+  "The previous auto-update failed; the previous version was restored and the scene kept. See update.log"
  ]
 ]
