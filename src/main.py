@@ -7563,6 +7563,39 @@ def copy_helper_upgrade_prompt_from_tray() -> None:
     ui_post(work)   # 剪贴板要一个活着的 Tk 窗口 → 只能在 UI 线程里做
 
 
+def ident_line() -> str:
+    """R-EVID（2026-09-19 全员规则）：取证必须**自带时点**。
+
+    不带修订号的证据是不可反驳的——分不清"它错了"与"它取得更早"，而这两种情况的处置
+    完全不同（前者要改、后者只要重取）。所以每份会被贴进对话的诊断日志，第一行都写清：
+    版本号 / 源码修订号 / 工作区是否脏 / `main.py` 的 sha256。
+
+    为什么要 sha256：**冻结包和没有 git 的机器上取不到修订号**，而"这份输出是哪份代码"
+    必须有个可比的锚点——行号与日期都会漂，内容哈希不会。
+    """
+    import hashlib
+
+    parts = [f"app={APP_ID}", f"ver={VERSION}", f"frozen={getattr(sys, 'frozen', False)}"]
+    try:
+        parts.append("main.sha256=" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16])
+    except OSError:
+        parts.append("main.sha256=?")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        rev = subprocess.run(["git", "-C", str(APP_DIR), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=5, creationflags=flags)
+        if rev.returncode == 0 and rev.stdout.strip():
+            dirty = subprocess.run(["git", "-C", str(APP_DIR), "status", "--porcelain"],
+                                   capture_output=True, text=True, timeout=5, creationflags=flags)
+            parts.append("rev=" + rev.stdout.strip())
+            parts.append("dirty=" + ("yes" if dirty.stdout.strip() else "no"))
+        else:
+            parts.append("rev=(no git)")
+    except Exception:  # noqa: BLE001 - 身份行绝不能成为诊断失败的原因
+        parts.append("rev=(no git)")
+    return " ".join(parts)
+
+
 def smoke() -> int:
     output = DIAG_LOG_DIR / "smoke.log"
     output.parent.mkdir(parents=True, exist_ok=True)   # 发布包里没有 log/，必须自建
@@ -7674,7 +7707,7 @@ def smoke() -> int:
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报
         detail = f"FAIL {type(exc).__name__}: {exc}"
-    output.write_text(f"reme-helper smoke: {detail}\n", encoding="utf-8")
+    output.write_text(ident_line() + "\n" + f"reme-helper smoke: {detail}\n", encoding="utf-8")
     # 同时打到 stdout：CI 上这个日志文件会随 runner 一起消失，只写盘的失败
     # 等于没人看得见。release_check 一直这么做，smoke 之前漏了。
     print(f"reme-helper smoke: {detail}")
@@ -7726,7 +7759,7 @@ def release_check() -> int:
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报
         detail = f"FAIL {type(exc).__name__}: {exc}"
-    output.write_text(f"reme-helper release: {detail}\n", encoding="utf-8")
+    output.write_text(ident_line() + "\n" + f"reme-helper release: {detail}\n", encoding="utf-8")
     print(f"reme-helper release: {detail}")
     return 0 if detail == "PASS" else 1
 
@@ -7791,10 +7824,10 @@ def ui_check() -> int:
         errors = list(UI_ERRORS)
         ok = appeared and not errors
         detail = "PASS" if ok else ("FAIL window=%s errors=%s" % (appeared, errors[:3]))
-        output.write_text(f"reme-helper ui-check: {detail}\n", encoding="utf-8")
+        output.write_text(ident_line() + "\n" + f"reme-helper ui-check: {detail}\n", encoding="utf-8")
         return 0 if ok else 1
     except Exception as exc:  # noqa: BLE001 - reported through the log file
-        output.write_text(f"reme-helper ui-check: FAIL {type(exc).__name__}: {exc}\n", encoding="utf-8")
+        output.write_text(ident_line() + "\n" + f"reme-helper ui-check: FAIL {type(exc).__name__}: {exc}\n", encoding="utf-8")
         return 1
 
 

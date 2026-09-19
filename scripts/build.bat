@@ -37,6 +37,21 @@ for %%a in (%BUILD_ARGS%) do (
 )
 :args_done
 
+rem ---------------------------------------------------------------------------
+rem IDENT line (R-EVID, team-wide 2026-09-19): evidence must carry its own revision.
+rem Everything below goes into a log people paste into chat, and without this line a log
+rem cannot say WHEN it was taken - "it is wrong" and "it was taken before your fix" are
+rem indistinguishable, and the two need opposite responses. Prints first, before anything
+rem can fail, and degrades instead of aborting when git or PowerShell is unavailable.
+rem ---------------------------------------------------------------------------
+set "IDENT_REV=(no git)"
+for /f "usebackq delims=" %%r in (`git -C "%CD%" rev-parse --short HEAD 2^>nul`) do set "IDENT_REV=%%r"
+set "IDENT_DIRTY=no"
+for /f "usebackq delims=" %%s in (`git -C "%CD%" status --porcelain 2^>nul`) do set "IDENT_DIRTY=yes"
+set "IDENT_SHA=?"
+for /f "usebackq delims=" %%h in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 src\main.py).Hash" 2^>nul`) do set "IDENT_SHA=%%h"
+echo [IDENT] rev=%IDENT_REV% dirty=%IDENT_DIRTY% src\main.py sha256=%IDENT_SHA%
+
 rem Interpreter: fixed local path first, otherwise fall back to PATH python
 set PY=H:\Tools\Python\Python313\python.exe
 if not exist "%PY%" set PY=python
