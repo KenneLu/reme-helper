@@ -29,7 +29,7 @@ import guide
 from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
 from modules.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
-from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.2：named logger + 闭包）
+from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.3：四区 + _CONFIG/_DATA_DIR env）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH)
