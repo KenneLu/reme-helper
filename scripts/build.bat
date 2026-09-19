@@ -47,9 +47,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Version: read it from main.py so the script and the app cannot drift apart
+rem Version: read from main.py so the script and the app cannot drift apart.
+rem Robust parse: take everything after '=', drop quotes, then keep the FIRST
+rem space-delimited token. A trailing comment on the VERSION line can therefore
+rem never leak into the version string / release path (same fix in the template).
 set VERSION=
-for /f "tokens=1,2,*" %%a in ('findstr /b /c:"VERSION = " src\main.py') do set VERSION=%%~c
+for /f "tokens=2 delims==" %%a in ('findstr /b /c:"VERSION = " src\main.py') do set VERSION=%%a
+for /f "tokens=1" %%a in ("%VERSION:"=%") do set VERSION=%%a
 if not defined VERSION (
   echo [ERROR] Cannot read VERSION from src\main.py.
   if not defined NOPAUSE pause
