@@ -128,6 +128,14 @@ the release-config generator, and `doc/` the documentation the app reads at runt
 `src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
 a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
+**Known follow-ups.** Three family mechanism modules are still inline in `src/main.py`
+(`autostart`, `icons`, `update_helper`): their family-template interfaces are not
+isomorphic (different registry-key/self-heal semantics, runtime state colouring vs
+build-time `ICON_DRAW`, different update target/`PENDING_CMD` shape), so extraction is a
+separate, higher-risk wave. Everything under `src/modules/` is kept byte-identical to
+`my-diy-tool-template` (README + `__init__.py` + code); the heavy-form `i18n` is the only
+declared `TEMPLATE-LOCAL-OVERRIDE`.
+
 ## License
 
 [MIT](LICENSE) © 2026 KenneLu

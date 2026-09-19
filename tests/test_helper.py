@@ -546,9 +546,13 @@ assert any("控制台" in text for text in menu_texts), menu_texts
 assert any("打开 workspace" in text for text in menu_texts), menu_texts
 assert any("打开指引" in text for text in menu_texts), menu_texts
 assert any("状态刷新间隔" in text for text in menu_texts), menu_texts
-# 「打开…」已经收敛：本地配置文件不再各占一个菜单项
-for gone in ("打开ReMe目录", "打开官方default配置", "打开当前配置", "打开日志目录", "打开 .env（凭据）"):
+# 「打开…」已经收敛：本地配置文件不再各占一个菜单项。**例外**：本工具自己的日志目录
+# 按 D13/C-15 必须在托盘「打开区」单独留一项（模板 log_kit 的 open_log_dir），且是立即
+# 执行动作，按 E2 命名五规则②不带「…」。
+for gone in ("打开ReMe目录", "打开官方default配置", "打开当前配置", "打开 .env（凭据）"):
     assert not any(gone in text for text in menu_texts), (gone, menu_texts)
+assert any(text == "打开日志目录" for text in menu_texts), menu_texts
+assert not any("打开日志目录" in text and text.endswith("…") for text in menu_texts), menu_texts
 # 分区与排序：至少 6 个分隔段，且安装提示只在缺 ReMe 时出现
 separators = sum(1 for item in _walk_items(main.build_menu()) if item is None)
 assert separators >= 6, separators

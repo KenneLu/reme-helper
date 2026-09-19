@@ -110,6 +110,12 @@ release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 版本号只写在 `src/main.py` 的 `VERSION` 里——应用、发布目录名、git 标签都从它来；**推一个 `v*` 标签就是发布**。
 历次改动见 [CHANGELOG.md](CHANGELOG.md)。
 
+**待办（已知）**：三个家族机制件仍内联在 `src/main.py`（`autostart` / `icons` /
+`update_helper`）——它们与模板接口不同构（注册表键名与自愈语义不同、运行态着色 vs 构建期
+`ICON_DRAW`、更新目标目录与 `PENDING_CMD` 形态不同），抽件属独立且风险更高的一波，本轮有意保留。
+`src/modules/` 下的一切与 `my-diy-tool-template` 逐字节一致（README + `__init__.py` + 代码）；
+重形态 `i18n` 是唯一申报的 `TEMPLATE-LOCAL-OVERRIDE`。
+
 ## 许可证
 
 [MIT](LICENSE) © 2026 KenneLu

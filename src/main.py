@@ -814,9 +814,8 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
 
 
 # T12：1MB×3 滚动 + 升级窗口回退 FileHandler（模板 make_logger 内部完成，含 mkdir）。
-# open_log_dir 是模板给「打开日志目录」菜单项的闭包：reme 的托盘项尚缺（CONFORMANCE
-# C-15，接线待办），这里先接住不丢。
-log, _open_log_dir = make_logger(LOG_DIR)
+# open_log_dir 是模板给的「打开日志目录」闭包，已接到托盘「打开区」（CONFORMANCE C-15）。
+log, open_log_dir = make_logger(LOG_DIR)
 
 
 def write_log_file(name: str, text: str) -> Path:
@@ -6501,6 +6500,9 @@ def build_menu() -> pystray.Menu:
         # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
         # 其余（目录 / .env / 官方 default / 当前配置 / 日志 / 说明）收进「打开指引」。
         pystray.MenuItem(menu_text("打开 workspace"), lambda _icon, _item: open_path(reme_root() / "workspace")),
+        # D13/C-15：本工具自己的日志目录（%LOCALAPPDATA%\reme-helper\log）。立即执行，按
+        # E2 命名五规则②不加「…」；模板 log_kit 的 open_log_dir 闭包（含 mkdir）直接用。
+        pystray.MenuItem(menu_text("打开日志目录"), lambda _icon, _item: open_log_dir()),
         pystray.MenuItem(menu_text("打开指引（文件在哪）…"), lambda _icon, _item: show_path_guide()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("深色模式"), toggle_theme, checked=lambda _item: theme_name() == "dark"),
