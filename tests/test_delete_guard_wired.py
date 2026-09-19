@@ -83,13 +83,26 @@ class _FakePystray:
 
 M.pystray = _FakePystray
 
+_CRASH = None
 try:
     M.main()
 except _StopBeforeTray:
     pass
 except BaseException as exc:                     # noqa: BLE001 - 顺序断言不依赖退出方式
+    _CRASH = exc
     print("  (main() raised %s before reaching the tray - 继续按已记录的顺序判定)"
           % type(exc).__name__, flush=True)
+
+# ⚠️ 与"顺序"**分开**的一条断言（verifier 2026-09-19 复核提出，我采纳）：
+# 上面那条 `except BaseException` 只打印、不进 FAILS，于是「`tray` 标记之后抛出的
+# 意外异常」会走完打印、FAILS 仍为空、`sys.exit(0)`——**全绿**。窗口很窄（托盘构造
+# 那一刻附近），顺序断言本身判别力没坏（删调用 / 挪到 run() 之后都会红）。
+# 但"main() 能干净地走到托盘"这件事，本仓**没有别的门禁接住**（全 tests 只有本文件
+# 会跑 main()），所以必须在这里单独列一条。
+# 为什么**不**并进 ORDER 那条：合并会重犯"一个红代表多种病因"的老账——顺序错
+# 与"崩了"是两回事，读报的人需要一眼分清。
+check("main() reached the tray without an unexpected exception", _CRASH is None,
+      repr(_CRASH) if _CRASH else "")
 
 check("instance guard ran", "instance-guard" in ORDER, str(ORDER))
 check("exe delete-guard ran", "exe-guard" in ORDER, str(ORDER))
