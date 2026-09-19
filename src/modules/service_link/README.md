@@ -3,7 +3,8 @@
 > 规范出处：STANDARDS.md **§G4.2**（2026-09-18 新增条款，本模块是其参考实现）。
 > 蓝本：reme-helper 的 `service_up / matching_reme_processes / SERVICE_PROCESS` 语义
 > （探测优先 + managed 区分）+ dsh-helper 的"接管已运行服务"设计；
-> 反例教训：opencodex-helper 的退出签名击杀（G4.2 条款 3 的反面教材）。
+> 历史反例（已修）：opencodex-helper 早期用"退出签名击杀"关闭服务
+> （G4.2 条款 3 的反面教材）；现改为**勾选制、默认不勾**，退出不再主动击杀。
 
 ## 定位
 

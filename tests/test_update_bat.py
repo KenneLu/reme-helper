@@ -284,10 +284,11 @@ def _static_checks() -> None:
     # ③ 外部命令必须走绝对路径。理由是本轮实测出来的：这台机器 PATH 上
     #    H:\Tools\Git\usr\bin\find.exe 排在 System32 前面，而 GNU find 把 "smss.exe"
     #    当**文件名**，恒返回 1 —— 等待循环于是永远判"旧进程已经退出"，直接去覆盖一个
-    #    还在运行的 exe（文件被锁 → robocopy 反复重试）。ping 同理（GNU 的 -n 是
-    #    "numeric"，不是次数）。裸名一律判红，防的是"换个 shell 启动就变了语义"。
+    #    还在运行的 exe（文件被锁 → robocopy 反复重试）。裸名一律判红，防的是
+    #    "换个 shell 启动就变了语义"。`powershell` 也在这个名单里：它现在是等待节拍
+    #    的唯一实现（`ping -n` 已被 C-33 换成真正的 Start-Sleep）。
     bare = [i + 1 for i, line in enumerate(lines)
-            if re.match(r"\s*(tasklist|find|ping|robocopy|findstr)\b", line)]
+            if re.match(r"\s*(tasklist|find|ping|robocopy|findstr|powershell)\b", line)]
     check("bat: external commands use absolute System32 paths", not bare,
           "bare invocations at lines %s" % bare)
 
@@ -367,7 +368,7 @@ def main_test() -> int:
             _run_bat(root, paths, exe=running, limit=1)
             elapsed = time.time() - started
             giveup_log = _read(paths["log"])
-            expect = "aborted: %s still running after 1s" % running
+            expect = "aborted: %s still running after 1 wait ticks" % running
             check("giveup: log records the abort line", expect in giveup_log,
                   " | ".join(giveup_log.splitlines()[-3:]))
             check("giveup: marker written", paths["failed"].exists()

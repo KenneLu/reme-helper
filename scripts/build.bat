@@ -488,10 +488,15 @@ rem     within about six seconds - so the directory is gone and nothing is left;
 rem   * app still up - nobody else was running - rmdir fails and that directory
 rem     now belongs to the running app, not to the build. Deleting it underneath
 rem     a live instance would be worse than leaving it.
+rem The wait below is a REAL sleep, not `ping -n 9`: ping's "one second" only holds
+rem while loopback ICMP answers, and where it is dropped every packet waits out the
+rem timeout - measured 9.0s per tick instead of 1s (C-33). `timeout`/`choice` are
+rem not alternatives: they need a console this build may not have. Absolute path
+rem for the same PATH reason as everywhere else in this file.
 if defined RUN_AFTER (
   echo [RUN] starting %APPNAME%.exe ...
   start "" "%FROZEN_EXE%"
-  ping -n 9 127.0.0.1 >nul
+  %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 8000"
   call :drop_data_dir
   if exist "%REME_HELPER_DATA_DIR%" echo [INFO] %APPNAME%.exe is still running - the data dir belongs to it now.
 )

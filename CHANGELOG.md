@@ -14,6 +14,31 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **C-30：`%TEMP%` 的清理不许静默失败（生产代码那一半）**。`download_and_apply_helper_update`
+  的失败早退路径此前是 `rmtree(work, ignore_errors=True)`——`work` 正是 `mkdtemp` 的根目录，
+  Windows 上偶发句柄未释放时这一拍删不掉，失败被吞掉后 %TEMP% 里留一个半删的壳，而调用方
+  拿到的仍是"已清理"。现改为 `_rmtree_verified()`：**删不掉至少记一行日志**（`cleanup FAILED`）
+  + **删后回读**（还在即返回 False），失败时把提示拼进给用户的消息里。同一课顺手补在
+  `sweep_stale_update_dirs` 上——它此前无论删成没删成都打印 "removed stale update dir"，
+  是同一族里的**假成功日志**。
+  **双向对照**（`_verify-scratch/c30-probe.py`，从 `main.py` 抽**真源码**执行，不是重写一遍）：
+  普通目录 → True 且真被删、无日志；**本进程打开着文件的目录** → False、目录仍在、恰好一行
+  `cleanup FAILED`；路径本就不存在 → True 且不报错（"没东西可删"不是失败）。
+  验收：`conformance_check.py --roots reme-helper --only C-30` → `[ok]`。
+
+- **C-33：等待节拍不许用 `ping`**。更新器 bat 里那句 `ping -n 2 127.0.0.1` 不是"睡 1 秒"，
+  而是"发两个 ICMP 等回包"：丢 loopback ICMP 的机器上实测 **9.0s/拍**，名义 120 拍的预算
+  变成 ~18 分钟，而 `:giveup` 仍打印 "{limit}s"——**日志说谎**。改用真正的
+  `…\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 1000"`
+  （绝对路径，理由同上一条的 PATH 判据）；`timeout` / `choice` 不能替代：更新器是 DETACHED、
+  没有 console，两者立刻失败。`scripts/build.bat` 里那句 `ping -n 9` 同因同改。
+  **文案跟着改**：`:giveup` 现在报**节拍数**（`still running after {limit} wait ticks`），
+  不报秒数——实测一拍 **1.66s**（1.000s 睡眠 + 0.66s PowerShell 启动），120 拍约 3.3 分钟，
+  继续报 "{limit}s" 就是换了个来源的同一句谎。测试同步：`test_update_bat.py` 的期望串改成
+  tick 文案，静态判据的裸名黑名单加入 `powershell`。
+  **实证**：用 `limit=2`（逼出**恰好一拍**，`limit=1` 在睡之前就跳走了、证明不了这一行）实测
+  `elapsed=1.66s`；`--roots reme-helper --only C-33` → `[ok]`。
+
 - **行序成为判据：回退源必须在检查之后才准搬走**。空 STAGE 那条缺陷（`571c83d` 修）的根因
   不是任何单行的内容，而是**顺序**：复制 → 判 rc → `move SNAPSHOT→BACKUP` → 才检查 install
   里有没有 exe ⇒ `:start_missing` 从**已被搬空的 SNAPSHOT** 回铺，必然失败、install 留空。
@@ -46,10 +71,11 @@
   Git-for-Windows / MSYS 时 `H:\Tools\Git\usr\bin\find.exe` 排在 `System32` 前面，而
   **GNU find 把 `smss.exe` 当文件名**，恒返回 1 ⇒ 等待循环**每次都判"旧进程已经退出"**，
   直接去覆盖一个仍在运行的 exe（文件被锁 → robocopy 按默认 100 万次重试）。
-  本机实测 `where find` → `H:\Tools\Git\usr\bin\find.exe` 第一位。`ping` 同理（GNU 的 `-n`
-  是"numeric"而不是次数）。修法：`tasklist` / `find` / `ping` / `Robocopy` **四处全改
-  `%SystemRoot%\System32\…` 绝对路径**，脚本不再随"谁启动它"改变语义；并加静态判据
-  （裸名即红；负对照：逐个换回裸名 → 第 33 / 37 / 51,53,72,106 行被点名）。
+  本机实测 `where find` → `H:\Tools\Git\usr\bin\find.exe` 第一位。修法：`tasklist` / `find` /
+  `Robocopy` **全部改 `%SystemRoot%\System32\…` 绝对路径**，脚本不再随"谁启动它"改变语义；
+  并加静态判据（裸名即红；负对照：逐个换回裸名 → 第 33 / 37 / 51,53,72,106 行被点名）。
+  当时同批改的 `ping` 后来被**整个换掉**（不是换路径）：见下面 C-33 那条——`ping -n` 的
+  "1 秒"是拿网络配置当计时器，绝对路径只修了"哪个 ping"，没修"它根本不是时钟"。
 
 - **退出路径的失败方向（#44 A 项）+ 打包 Tcl/Tk 断言（B 项）**：
   - **A 项：现状已是"链路不可用即放行"，本轮把它钉成机械判据。** `quit_app` 的降级链是

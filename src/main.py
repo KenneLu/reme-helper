@@ -7162,7 +7162,12 @@ HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
 HELPER_UPDATE_SNAPSHOT = USER_DATA_DIR / "_backup.pre"
 # 更新器失败时留的 marker：主程序下次启动读到就通知用户并删除（托盘已不在，只能下次说）。
 HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
-# 等旧进程退出的上限：120 次 × 约 1 秒（`ping -n 2` 的节奏）
+# 等旧进程退出的上限：120 个**等待节拍**。一个节拍 = 一句真正的 Start-Sleep 1000ms
+# （**不是** `ping -n 2`：丢 loopback ICMP 的机器上一拍实测 9.0 秒，见 C-33），
+# 再加 PowerShell 自身的启动开销。**实测**（本机 2026-09-19）：一拍 1.66s
+# （1.000s 睡眠 + 0.66s 启动），所以 120 拍的墙钟约 3.3 分钟而不是 2 分钟。
+# :giveup 的文案因此只报**节拍数**、不报秒数——报了秒数就是日志说谎，
+# 而"名义 vs 实际差 9 倍"正是 ping 当节拍被判硬违规的原因。
 HELPER_UPDATE_WAIT = 120
 
 # ReMe 助手自己的更新状态。**必须与 REME_UPDATE_STATE 分开**：这两个字典以前都叫
@@ -7208,15 +7213,23 @@ rem H:\...\Git\usr\bin\find.exe ahead of the Windows one, and GNU find reads
 rem "smss.exe" as a FILE NAME, so it always exits 1. The wait loop then always
 rem concludes "the old process is already gone" and copies over a binary that is
 rem still running (locked files -> robocopy retries, no /R limit set). Measured
-rem here: `where find` -> H:\Tools\Git\usr\bin\find.exe first. Same trap applies
-rem to ping, whose -n means "numeric" to iputils. Absolute paths make the script
-rem independent of whoever launched it.
+rem here: `where find` -> H:\Tools\Git\usr\bin\find.exe first. (The bare `ping`
+rem this script used as a wait tick hit the same trap from the other side - iputils
+rem reads -n as "numeric", not a count - and it is gone regardless, see below.)
+rem Absolute paths make the script independent of whoever launched it.
 %SystemRoot%\System32\tasklist.exe /fi "imagename eq {exe}" /nh > "%POLL%" 2>nul
 %SystemRoot%\System32\find.exe /i "{exe}" "%POLL%" >nul
 if errorlevel 1 goto gone
 set /a tries+=1
 if %tries% geq {limit} goto giveup
-%SystemRoot%\System32\ping.exe -n 2 127.0.0.1 >nul
+rem Wait tick: a REAL sleep. `ping -n 2 127.0.0.1` used to sit on this line, and its
+rem "one second" only holds while loopback ICMP answers. On a machine that drops it
+rem every packet waits out the timeout - measured 9.0s per tick - so the nominally
+rem 120s budget became ~18 minutes while the abort line still announced seconds.
+rem (C-33: never use ping as a clock.) `timeout` and `choice` are NOT alternatives:
+rem this script runs DETACHED with no console, and both fail instantly there.
+rem Absolute path for the same PATH reason as every other command above.
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 1000"
 goto wait
 :gone
 rem Pre-check the SOURCE before touching anything at all. An EXISTING BUT EMPTY stage dir
@@ -7292,8 +7305,11 @@ start "" "%INSTALL%\{exe}"
 goto cleanup_keep
 :giveup
 rem Wait limit hit: the old process never exited. Do not replace anything.
-echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
-> "%FAILED%" echo update aborted {stamp}: {exe} still running after {limit}s
+rem Report TICKS, not seconds: the budget is {limit} sleep ticks and wall-clock time is
+rem strictly larger (PowerShell startup per tick). Printing "{limit}s" here would be the
+rem exact lie C-33 exists to stop.
+echo [{stamp}] aborted: {exe} still running after {limit} wait ticks >> "%LOG%"
+> "%FAILED%" echo update aborted {stamp}: {exe} still running after {limit} wait ticks
 goto cleanup
 :cleanup
 if exist "%WORK%" rmdir /s /q "%WORK%"
@@ -7415,6 +7431,31 @@ def verify_zip_sha256(zip_path, sha_text) -> tuple[bool, str]:
     return True, ""
 
 
+def _rmtree_verified(path, what: str = "temp dir") -> bool:
+    """删目录并**回读确认**——删不掉不许静默（C-30）。
+
+    这里以前直接调 rmtree 并传 ignore_errors：Windows 上偶发句柄未释放时
+    只是**这一次**删不掉，失败被吞掉之后 %TEMP% 里就留一个空壳，
+    而调用方拿到的仍是一个"成功"的返回值——"清理跑过了"被当成了"清理成功了"。
+    现在：失败**至少留一行日志**，并且删后**回读**（还在即失败），返回值可供调用方判断。
+    """
+    target = Path(path)
+    if not target.exists():
+        return True
+    last = ""
+    for attempt in range(3):
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            last = str(exc)
+        if not target.exists():
+            return True
+        if attempt < 2:
+            time.sleep(0.2)
+    log(f"cleanup FAILED ({what}): {target} still exists: {last}")
+    return False
+
+
 def download_and_apply_helper_update() -> tuple[bool, str]:
     """托盘「下载并更新」：下载 → 校验 sha256 → 解压 → 起 updater。
 
@@ -7429,8 +7470,12 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     work = Path(tempfile.mkdtemp(prefix=f"{APP_ID}-update-"))
 
     def _fail(message: str):
-        """失败早退：先把暂存目录清掉，别在 %TEMP% 里留空壳（2026-09-19 实测到过）。"""
-        shutil.rmtree(work, ignore_errors=True)
+        """失败早退：先把暂存目录清掉，别在 %TEMP% 里留空壳（2026-09-19 实测到过）。
+
+        清理走 `_rmtree_verified`：删不掉会留下日志并回读确认，不再静默（C-30）。
+        """
+        if not _rmtree_verified(work, "helper update download"):
+            message += t("（提示：临时目录未能删除，见日志）")
         return False, message
     zip_path = work / f"{APP_ID}{HELPER_ASSET_SUFFIX}"
     try:
@@ -7490,8 +7535,9 @@ def sweep_stale_update_dirs() -> None:
         for path in Path(tempfile.gettempdir()).glob(f"{APP_ID}-update-*"):
             try:
                 if path.is_dir() and path.stat().st_mtime < cutoff:
-                    shutil.rmtree(path, ignore_errors=True)
-                    log(f"removed stale update dir: {path}")
+                    # 同一课：删除必须可验证，日志不许在失败时照样宣称"已清理"（C-30）。
+                    if _rmtree_verified(path, "stale update sweep"):
+                        log(f"removed stale update dir: {path}")
             except OSError:
                 continue
     except Exception as exc:  # noqa: BLE001 - 清扫失败不该拦住启动
