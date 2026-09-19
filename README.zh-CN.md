@@ -118,7 +118,9 @@ release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 `update_helper`）——它们与模板接口不同构（注册表键名与自愈语义不同、运行态着色 vs 构建期
 `ICON_DRAW`、更新目标目录与 `PENDING_CMD` 形态不同），抽件属独立且风险更高的一波，本轮有意保留。
 `src/modules/` 下的一切与 `my-diy-tool-template` 逐字节一致（README + `__init__.py` + 代码）；
-重形态 `i18n` 是唯一申报的 `TEMPLATE-LOCAL-OVERRIDE`。
+重形态 `i18n` 是唯一申报的 `TEMPLATE-LOCAL-OVERRIDE`。**本机当前没有 1.2.6 产物**：
+新的托盘项与构建闸修复只经过 **dev 态**验证（8 套件 + `--smoke` + 隔离启动探针），
+**尚未经过冻结构建**；推 `v*` 标签后由 `release.yml` 从干净检出构建发布物。
 
 ## 许可证
 
