@@ -140,9 +140,11 @@ isomorphic (different registry-key/self-heal semantics, runtime state colouring 
 build-time `ICON_DRAW`, different update target/`PENDING_CMD` shape), so extraction is a
 separate, higher-risk wave. Everything under `src/modules/` is kept byte-identical to
 `my-diy-tool-template` (README + `__init__.py` + code); the heavy-form `i18n` is the only
-declared `TEMPLATE-LOCAL-OVERRIDE`. No local 1.2.6 build exists yet: the tray item and
-the build-gate fix are verified in dev only (8 suites + `--smoke` + isolated-start probe),
-not through a frozen build; tagging `v*` lets `release.yml` build from a clean checkout.
+declared `TEMPLATE-LOCAL-OVERRIDE`. Unreleased work has no local build: `VERSION` stays at
+the last published `1.2.5` until a release (dev-time rule), and the D1-02 gate blocks build
+runs while the resident tray is up. The tray item and the build-gate fix are verified in dev
+only (8 suites + `--smoke` + isolated-start probe), not through a frozen build; tagging `v*`
+lets `release.yml` build from a clean checkout.
 
 ## License
 
