@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import math
 import os
 import queue
@@ -30,7 +29,7 @@ import guide
 from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
 from modules.appconfig import APP_NAME, APP_ID   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
-from modules.log_kit import configure_logging, log  # noqa: F402
+from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.2：named logger + 闭包）
 from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.2：APP_DIR/RUN_DIR/USER_DATA_DIR）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH)
@@ -813,8 +812,10 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
     draft["expose"] = deep_copy(base["expose"])
 
 
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-configure_logging(LOG_PATH)   # T12：1MB×3 滚动 + 升级窗口回退 FileHandler（modules/log_kit）
+# T12：1MB×3 滚动 + 升级窗口回退 FileHandler（模板 make_logger 内部完成，含 mkdir）。
+# open_log_dir 是模板给「打开日志目录」菜单项的闭包：reme 的托盘项尚缺（CONFORMANCE
+# C-15，接线待办），这里先接住不丢。
+log, _open_log_dir = make_logger(LOG_DIR)
 
 
 def write_log_file(name: str, text: str) -> Path:
@@ -7964,7 +7965,7 @@ if __name__ == "__main__":
     try:
         exit_code = main()
     except Exception:
-        logging.exception("fatal application error")
+        log("fatal application error:\n" + traceback.format_exc())
         exit_code = 1
     # Flush by hand, and do it before os._exit for a reason that is easy to miss:
     # os._exit skips the interpreter's normal finalization, so it does not flush

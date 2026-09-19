@@ -1,33 +1,63 @@
 # -*- coding: utf-8 -*-
 # TEMPLATE-FROM: my-diy-tool-template/modules/log_kit/log_kit.py | TEMPLATE-VER: 1.0.2
-# TEMPLATE-LOCAL-OVERRIDE: root-logger 模式（main.py 全文 logging.info 直用）+ 显式
-#   configure_logging() 装配函数；named-logger 的 get_logger/make_logger 形态见模板。
-"""T12｜运行日志（reme-helper 形态）：root logger 单文件 1MB、保留 3 份滚存。
+"""T12｜运行日志：RotatingFileHandler 单文件 1MB、保留 3 个滚存（总量 ~4MB 封顶）。
 
-滚动在 Windows 上的坑：另一进程还开着日志文件时改不了名。正常情况下单实例守卫保证
-只有一个托盘，但升级期间新旧版本可能同时在跑；这种情况退回普通 FileHandler，
-宁可这次不滚，也不要因为日志装不上而启动失败。任何日志失败都不能把主流程弄死。
+参数与 reme-helper 的日志方案一致（house 标准 D13）：日志跟数据区走
+%LOCALAPPDATA%\\<工具名>\\log\\，托盘「打开日志目录」一键到达。
+任何日志失败都静默——日志永远不能把主流程弄死。
 """
-import logging
+import os
+
+from modules.appconfig import APP_ID
+
+LOG_MAX_BYTES = 1 << 20      # 1 MB per file
+LOG_BACKUPS = 3              # <app>.log.1 ... .3
+
+_logger = None
 
 
-def configure_logging(log_path, max_bytes=1 << 20, backups=3) -> None:
-    """装一个会自转的日志处理器到 root logger（main.py 模块级调用一次）。"""
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    handler: logging.Handler
-    try:
+def get_logger(log_dir):
+    global _logger
+    if _logger is None:
+        import logging
         from logging.handlers import RotatingFileHandler
 
-        handler = RotatingFileHandler(log_path, maxBytes=max_bytes,
-                                      backupCount=backups, encoding="utf-8")
-    except Exception:  # noqa: BLE001 - 装不上日志不该拦住启动
-        handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(formatter)
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers.clear()
-    root.addHandler(handler)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        lg = logging.getLogger(APP_ID)
+        if not lg.handlers:
+            try:
+                handler = RotatingFileHandler(
+                    log_dir / (APP_ID + ".log"),
+                    maxBytes=LOG_MAX_BYTES,
+                    backupCount=LOG_BACKUPS,
+                    encoding="utf-8",
+                )
+            except Exception:
+                # 升级窗口期另一实例还开着日志文件时改名会失败（Windows）：
+                # 宁可这一轮不滚，也不要因为日志装不上而启动失败（reme-helper 语义，1.0.2 沉淀）
+                handler = logging.FileHandler(
+                    log_dir / (APP_ID + ".log"), encoding="utf-8")
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            lg.addHandler(handler)
+            lg.setLevel(logging.INFO)
+            lg.propagate = False
+        _logger = lg
+    return _logger
 
 
-def log(message: str) -> None:
-    logging.info(message)
+def make_logger(log_dir):
+    """返回 (log, open_log_dir) 两个闭包；工具初始化时调用一次。"""
+    logger = get_logger(log_dir)
+
+    def log(message):
+        try:
+            logger.info(message)
+        except Exception:
+            pass
+
+    def open_log_dir():
+        log_dir.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(log_dir))  # noqa: S606
+
+    return log, open_log_dir
