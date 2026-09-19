@@ -14,6 +14,20 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **退出三态：与 dsh/ocx 的 `_decide_quit()` 形态等价，差异只在三态的表达方式**（lead 2026-09-19
+  裁定"不必逐字镜像，核对三态可分即可"）。reme 的 `quit_app()` 用**两个不同的值**区分：
+  * **链路不可用** → `confirmed` **保持初值 `True`**（`except` 分支只 `log`、**不赋值**）⇒ 照常退出；
+    富框抛后原生框也抛是同一处理（第二个 `except` 同样不赋值）。这是"失败方向为**打开**"（D3.2）。
+  * **用户取消** → `confirmed = False`（富框 `go=False` / 原生框答否则返回 False）⇒ `if not confirmed: return`，
+    **不退出**。两条来源各自独立，不共用"取反"判据。
+  与 dsh/ocx 的差别仅在**表达**：他们把"不可用"做成 `_confirm` 显式返回 `None`，reme 用**未赋值即初值**。
+  语义等价、判别力相同，`tests/test_quit_failopen.py` 逐态钉住（`cancel → no exit`、
+  `rich raises + native No → no exit`、`rich raises + native raises → exit anyway`＋日志、
+  `confirm → exit`、失败开放时沿用已持久化的清理勾选、`claim_shutdown` 只放行一次）。
+  将来统一到 `tray_kit` 时，按本条说明做等价替换即可（显式 `None` 更便于 grep，但**不需要为形态而改**）。
+  另一处**有意偏离**（lead 已批准）：链路不可用时的清理选项按**用户已存配置**走，而非硬编码 `False`
+  ——那是用户自己保存的选择，抹掉它才是越权。
+
 - **工具链同族的第二处：构建的隔离数据根就在 `%TEMP%` 里，而删它是**不可验证**的**。
   `scripts/build.bat:22` 把 `REME_HELPER_DATA_DIR` 钉到 `%TEMP%\reme-helper-builddata`（固定名，
   落在 `%TEMP%` 正是 F11 要的隔离位），可 `:drop_data_dir` 的实现是
