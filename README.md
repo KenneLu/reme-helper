@@ -112,6 +112,7 @@ it started.
 
 - **The process is running but its tray icon has not appeared yet:** Windows Explorer can delay removing a stale icon. The helper retries in the background for about five minutes; if the first three retries fail, it also shows an explanatory dialog. Search for `tray: registration` in `%LOCALAPPDATA%\reme-helper\log\reme-helper.log`.
 - **Quit without the tray UI:** run `reme-helper.exe --quit`. It uses the same cleanup path as **Quit** in the tray menu.
+- **The quit confirmation cannot be shown at all** (damaged package: the Tcl/Tk runtime is gone, so no dialog can be created): the helper logs one line and exits anyway, keeping the cleanup options from your saved configuration. The alternative would be trapping you in an app you cannot close. Cancelling in either dialog still means "do not quit". *Absorption note: this fail-open shape is meant to move into the shared `tray_kit` module; until it does, it lives in `quit_app` here.*
 - **Roll back an update:** the previous build is in `%LOCALAPPDATA%\reme-helper\_backup`; quit the current instance before restoring it.
 
 ## Development

@@ -240,6 +240,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
+"%PY%" tests\test_quit_failopen.py
+if errorlevel 1 (
+  echo [ERROR] Quit fail-open test failed - a broken dialog chain must NOT trap the user.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
 echo [BUILD] icon ...
@@ -345,6 +354,31 @@ rem stay in step. If they ever drift, robocopy copies nothing and still returns
 rem below 8, so the zip would ship with the exe and no runtime at all.
 if not exist "%RELEASE_DIR%\_internal\base_library.zip" (
   echo [ERROR] _internal has no runtime - the package is incomplete.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+rem Tcl/Tk runtime (D2-02 / C-31). No smoke check can see this: nothing in smoke()
+rem creates a Tk object, and Tcl is only read on the FIRST tkinter.Tk() - so a package
+rem missing tcl can pass every gate and still die in the user's hands with
+rem "Can't find a usable init.tcl". These three files are what the user saw missing
+rem once the package had been damaged (a stray rm -rf took the whole _internal with
+rem it), so the check exists to catch a damaged/incomplete package, not to fix a
+rem packaging omission - all four tools ship them today.
+if not exist "%RELEASE_DIR%\_internal\_tkinter.pyd" (
+  echo [ERROR] Tk runtime missing: _internal\_tkinter.pyd
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+if not exist "%RELEASE_DIR%\_internal\tcl86t.dll" (
+  echo [ERROR] Tk runtime missing: _internal\tcl86t.dll
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+if not exist "%RELEASE_DIR%\_internal\_tcl_data" (
+  echo [ERROR] Tk runtime missing: _internal\_tcl_data
   if not defined NOPAUSE pause
   call :drop_data_dir
   exit /b 1
