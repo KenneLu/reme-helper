@@ -14,6 +14,16 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **行序成为判据：回退源必须在检查之后才准搬走**。空 STAGE 那条缺陷（`571c83d` 修）的根因
+  不是任何单行的内容，而是**顺序**：复制 → 判 rc → `move SNAPSHOT→BACKUP` → 才检查 install
+  里有没有 exe ⇒ `:start_missing` 从**已被搬空的 SNAPSHOT** 回铺，必然失败、install 留空。
+  修完只证明了修好，**没把"顺序"本身钉住**；现补三条静态判据：
+  ① `goto stage_bad`（源前置校验）在第一次 `Robocopy STAGE` 之前；
+  ② `if not exist "%INSTALL%\{exe}"` 在 `move /y "%SNAPSHOT%"` 之前（判别力在 `exe=60 < rotate=62`）；
+  ③ `:install_dead` 的**发出行**用 `%KEPT%` 而不是 `%SNAPSHOT%`（判据只读 `echo` 行——`rem`
+     注释里为解释历史确实引用了旧文案，把注释也算进来等于判据读错对象）。
+  **负对照**：把 exe 检查那行挪回 `move` 之后 → ②立刻红（`exe=62 rotate=61`）。
+
 - **清理判据自己的双向自证（"故意让清理失败一次"）**：`test_update_bat.py` 里那条"本次 root
   必须删掉"的断言，此前**没有证明过它会红**——现加 `_cleanup_verdict_selftest()`：
   ① 普通目录 → `_rmtree_retry` 返回 True 且目录消失（能绿）；② 目录里放一个**本进程打开着的

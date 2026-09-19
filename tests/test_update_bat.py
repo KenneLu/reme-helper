@@ -230,6 +230,37 @@ def _static_checks() -> None:
             unguarded.append(i + 1)
     check("bat: every start is guarded by an existence check", not unguarded,
           "unguarded at lines %s" % unguarded)
+    # ④ **行序**。2026-09-19 那个"安装目录被清空且回不来"的缺陷，根因不是任何单行的
+    #    内容，而是**顺序**：复制 → 判 rc → 轮转 SNAPSHOT 成 BACKUP → 才检查 install
+    #    里有没有 exe ⇒ `:start_missing` 从**已被搬空的 SNAPSHOT** 回铺，必然失败。
+    #    行为用例也抓得到（拿掉源前置校验，rc=0 用例立刻出现 RESTORE FAILED），但
+    #    "回退源在检查之前就被搬走"值得一条**直接**判据——否则以后有人把三行换个位置，
+    #    只有在恰好构造出空 install 时才会红。
+    def _idx(pred) -> int:
+        for i, line in enumerate(lines):
+            if pred(line):
+                return i
+        return -1
+
+    stage_bad_at = _idx(lambda l: "goto stage_bad" in l)
+    first_copy = _idx(lambda l: "Robocopy.exe" in l and "%STAGE%" in l)
+    exe_check = _idx(lambda l: l.strip().startswith('if not exist "%INSTALL%'))
+    rotate = _idx(lambda l: l.strip().startswith("move /y"))
+    check("bat: the STAGE pre-check comes before any copy",
+          0 <= stage_bad_at < first_copy,
+          "stage_bad=%s first_copy=%s" % (stage_bad_at, first_copy))
+    check("bat: the install-exe check comes BEFORE the snapshot is rotated away",
+          0 <= exe_check < rotate, "exe_check=%s rotate=%s" % (exe_check, rotate))
+    # ⑤ 最后手段的文案必须指向**真实存在**的位置：那时材料在 %BACKUP%（或 SNAPSHOT），
+    #    旧写法恒定打印 `kept at %SNAPSHOT%`，而那条路径早就不存在了。
+    dead_at = _idx(lambda l: l.strip() == ":install_dead")
+    kept_at = _idx(lambda l: l.strip().startswith("echo") and "rollback copies kept at" in l)
+    # 判据落在**发出的那行**上，不是整个渲染文本：`rem` 注释里为解释历史确实引用了旧文案，
+    # 那是文档，不是消息。把注释也算进来，等于判据自己读错对象。
+    check("bat: the last-resort message names only locations that exist",
+          dead_at > 0 and kept_at > dead_at and "%KEPT%" in lines[kept_at]
+          and "%SNAPSHOT%" not in lines[kept_at],
+          "dead=%s echo=%s" % (dead_at, kept_at))
     # ③ 外部命令必须走绝对路径。理由是本轮实测出来的：这台机器 PATH 上
     #    H:\Tools\Git\usr\bin\find.exe 排在 System32 前面，而 GNU find 把 "smss.exe"
     #    当**文件名**，恒返回 1 —— 等待循环于是永远判"旧进程已经退出"，直接去覆盖一个
