@@ -264,6 +264,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] C-2 exe delete-guard wired in the right window ...
+"%PY%" tests\test_delete_guard_wired.py
+if errorlevel 1 (
+  echo [ERROR] exe delete-guard is not wired between the single-instance guard and the tray
+  echo [ERROR] - the window is the only legal position; see the test docstring.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 if exist "%STAGING%" rmdir /s /q "%STAGING%"
 
 echo [BUILD] icon ...

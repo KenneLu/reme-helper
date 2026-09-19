@@ -30,9 +30,9 @@ from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块�
 from modules.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
 from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
-from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.3：四区 + _CONFIG/_DATA_DIR env）
+from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
-    LOG_DIR, LOG_PATH)
+    LOG_DIR, LOG_PATH, hold_exe_delete_guard)
 
 # reme 专有派生：模板 paths.py 只出四区正本与稳定安装位，下面这些由四区派生，不进模板件。
 DIAG_LOG_DIR = RUN_DIR / "log"        # 诊断输出跟「这次跑的那个包」走（构建脚本在这里读/清）
@@ -8261,6 +8261,15 @@ def main() -> int:
     if not acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log):
         warn_duplicate_instance()
         return 0
+    # C-2：活实例对自己的 exe 持一个不含 FILE_SHARE_DELETE 的句柄 ⇒ 删除/改名由**内核**拒绝。
+    # 位置是**唯一合法窗口**，三面都有理由，挪哪边都错：
+    #   * 必须在上面那批**无头 CLI 分支之后**——`--helper-update` 走 os._exit(0) 后要靠
+    #     更新器**整目录替换 exe**，提前持句柄等于让那次更新自己把自己钉住；
+    #   * 必须在**单实例守卫通过之后**——放前面的话，第二个实例会去持第一个实例的 exe 句柄，
+    #     语义完全错位；
+    #   * 必须在 pystray.Icon 构造**之前**——晚了就等于"窗口还没建"那段时间没有保护。
+    # 句柄持有到进程结束（故意不 close）；拿不到只记日志放行（D3.2）；dev 态跳过。
+    hold_exe_delete_guard(log=log)
     sync_autostart_path()
     sweep_stale_update_dirs()
     # 这两个是**快**的：本地健康探测与读配置。它们决定图标首帧和 setup() 里的
