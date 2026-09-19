@@ -45,8 +45,8 @@ ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
 TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
 TRAY_HICON_PIXELS = 32
-from modules.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 三件）
-    acquire_single_instance, single_instance_free)
+from modules.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）
+    acquire_single_instance, mutex_name_is_valid, single_instance_free)
 
 import psutil
 import pystray
@@ -7530,6 +7530,13 @@ def smoke() -> int:
         check("doc has codex+mcp", "codex exec" in doc_text and "mcp_servers.reme" in doc_text)
         check("doc has capture.mjs", "capture.mjs" in doc_text)
         check("doc has capture_cc.mjs", "capture_cc.mjs" in doc_text)
+        # 守卫覆盖探针（tray_kit 2.2.0 / D3.1 / C-10）：名字**形状合法且内核收得下**。
+        # 不占锁、不弹窗；`ERROR_ALREADY_EXISTS` 也算合法（名字被占用恰恰证明内核接受它），
+        # 故用户常驻实例在跑时这条依然为真——**不能用 single_instance_free()**：那个问的是
+        # "此刻别处有没有实例在跑"，用户实例在跑时必假，冒烟会假红。
+        # 这条断言真正要打的故障是"名字非法 ⇒ 守卫静默 fail-open"（SINGLE-01 的 l-s2t 教训）。
+        check("single-instance name valid",
+              mutex_name_is_valid(APP_ID, mutex_name=SINGLE_INSTANCE_NAME))
         failed = [name for name, ok in checks if not ok]
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报
@@ -7659,13 +7666,18 @@ def ui_check() -> int:
 
 
 # 互斥体名**显式传入**，不吃模板默认的 `Local\<app_id>-single-instance`：
-#   ① 历史行为：自首个版本起就是这个名字，不带版本号——升级期间新旧版本必须互斥，
-#      否则会出现两个托盘抢同一份配置；
+#   ① 历史行为：自首个版本起就叫 `reme-helper-tray`，不带版本号——升级期间新旧版本
+#      必须互斥，否则会出现两个托盘抢同一份配置；
 #   ② 改名等于换一个内核对象（`reme-helper-tray` 与 `Local\reme-helper-single-instance`
 #      互不相斥），会让「升级期间新旧版本互斥」的既有保护失效；
-#   ③ 名字本身合法：命名空间前缀之后没有第二个反斜杠（SINGLE-01 的 l-s2t 教训）。
-# 模板 2.0.1 的 acquire_single_instance(app_id, mutex_name=None, ...) 明确支持显式名。
-SINGLE_INSTANCE_NAME = APP_ID + "-tray"
+#   ③ **必须带 `Local\` 前缀**（2.2.0 起 `mutex_name_ok()` 的硬判据）。历史名是裸名，
+#      裸名按 Win32 语义落在会话命名空间里，`Local\<同名>` 指的就是**同一个内核对象**
+#      （已实测：持有裸名时对 `Local\` 前缀名调用 CreateMutexW 同样返回 183），
+#      所以补前缀是**显式化**而不是改名——①②两条保护原样保留。
+#   ④ 前缀之后不得再有第二个反斜杠（SINGLE-01 的 l-s2t 教训）。
+# 若还留裸名：2.2.0 的守卫会判其非法并**放行**（D3.2 失败方向），单实例保护会静默消失——
+# 这正是构建期 `--smoke` 探针要打红的东西（D3.3）。
+SINGLE_INSTANCE_NAME = "Local\\" + APP_ID + "-tray"
 
 
 def warn_duplicate_instance() -> None:
