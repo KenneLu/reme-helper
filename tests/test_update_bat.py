@@ -112,7 +112,8 @@ def _observe_started(marker: Path, what: str) -> None:
 
 
 def _stage_root(root: Path, stage_missing: bool = False, stage_empty: bool = False,
-                install_exe: bool = True, install_as_file: bool = False) -> dict:
+                install_exe: bool = True, install_as_file: bool = False,
+                install_empty: bool = False) -> dict:
     """布置 install/stage/work 三区；返回给 bat 模板的路径参数。
 
     stage_missing：STAGE 路径**不存在**（robocopy rc=16）。
@@ -120,6 +121,9 @@ def _stage_root(root: Path, stage_missing: bool = False, stage_empty: bool = Fal
                    也正是 2026-09-19 修复的注入形态（见文件头）。
     install_as_file：INSTALL 被一个**同名文件**占住（"安装目录不可用"），用来把
                    robocopy 确定性地打成 rc≥8，走到 :install_failed / :install_dead。
+    install_empty：INSTALL 建成**完全空的目录**（连 data-old.txt 都没有）。配合
+                   stage_empty 就是那条 **rc=0** 的形态：空源 + 空目标，
+                   robocopy 返回 0（"没复制任何文件、也没出错"），落在 0-7 的成功区间。
     """
     install = root / "install"
     stage = root / "stage"
@@ -143,7 +147,7 @@ def _stage_root(root: Path, stage_missing: bool = False, stage_empty: bool = Fal
                 pass
     if install_as_file:
         install.write_text("not a directory", encoding="utf-8")
-    else:
+    elif not install_empty:
         if install_exe:
             (install / "probe.vbs").write_text(
                 _probe_script(install / "started-old.txt", note="old"),
@@ -299,6 +303,30 @@ def main_test() -> int:
             check("giveup: script returned (did not block)", elapsed < 30, "%.1fs" % elapsed)
             _observe_started(paths["install"] / "started-old.txt",
                              "previous version (aborted before touching anything)")
+
+        # ---------- rc=0 那条"看起来成功、实则什么都没铺"的路径 ----------
+        # 实测（见文件头/CHANGELOG）：空源 -> 空目标 robocopy 返回 **0**；空源 -> 有文件的
+        # 目标返回 **2**（目标被 /purge 清空）。两个都落在 0-7 的"成功"区间，所以"判 rc"
+        # 这一层**挡不住**它们——这正是必须在动手之前校验源、并在 start 之前校验 exe 的理由。
+        # 本用例造的就是最危险那一态：install 与 stage **都是空的**（rc=0），旧脚本会走到
+        # `start "" "%INSTALL%\probe.vbs"` 指向不存在的文件 → 模态框 → 永久阻塞。
+        paths = _stage_root(root, stage_empty=True, install_empty=True)
+        elapsed = time.time()
+        _run_bat(root, paths)
+        elapsed = time.time() - elapsed
+        rc0_log = _read(paths["log"])
+        check("rc=0 shape: install stays empty", not any(paths["install"].iterdir()),
+              sorted(p.name for p in paths["install"].iterdir()))
+        check("rc=0 shape: marker written", paths["failed"].exists()
+              and "stage" in _read(paths["failed"]), _read(paths["failed"]))
+        # 关键：**没有**走到 rc 判定/回铺分支，说明源前置校验在 robocopy 之前就拦下了。
+        check("rc=0 shape: the source pre-check fired before any robocopy",
+              "INSTALL FAILED" not in rc0_log and "RESTORE FAILED" not in rc0_log
+              and not paths["snapshot"].exists(),
+              " | ".join(rc0_log.splitlines()[-2:]))
+        check("rc=0 shape: never reported done", "[test] done" not in rc0_log)
+        check("rc=0 shape: nothing was started (no modal, no hang)",
+              not any(paths["install"].iterdir()) and elapsed < 30, "%.1fs" % elapsed)
 
         # ---------- 成功路径 ----------
         paths = _stage_root(root)
