@@ -114,9 +114,9 @@ release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 同一份配置）。对 24/7 常驻的托盘工具，这意味着**先从托盘退出**；正式发布物由 CI 从干净检出
 构建，所以"本机没有当前版本的 release 目录"是预期状态，不是产物丢失（CONFORMANCE §4.1.11）。
 
-**待办（已知）**：三个家族机制件仍内联在 `src/main.py`（`autostart` / `icons` /
-`update_helper`）——它们与模板接口不同构（注册表键名与自愈语义不同、运行态着色 vs 构建期
-`ICON_DRAW`、更新目标目录与 `PENDING_CMD` 形态不同），抽件属独立且风险更高的一波，本轮有意保留。
+**已知缺口（不是"允许的差异"）**：模板已有 `autostart` 1.1.1 / `icons` 2.0.0 /
+`update_helper` 1.0.1，reme 未采纳（内联在 `src/main.py`）；`service_link` 已整文件夹采纳但
+**未接线**。**"没有功能"是必须补齐的缺口，不是可以容忍的冲突；排期不等于许可。**
 `src/modules/` 下的一切与 `my-diy-tool-template` 逐字节一致（README + `__init__.py` + 代码）；
 重形态 `i18n` 是唯一申报的 `TEMPLATE-LOCAL-OVERRIDE`。**未发版的改动在本机没有构建产物**：
 开发期不动版本号（`VERSION` 停在最后已发布的 `1.2.5`），且 D1-02 闸门在常驻托盘运行时

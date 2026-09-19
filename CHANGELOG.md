@@ -41,10 +41,12 @@
   - `service_link` 散文件 → 整文件夹（README + `__init__.py` + `service_link.py`）。
     **现状：模块预置、未接线**——全仓库无 import；G4.2 的 ADOPTED 优雅关闭分支仍待接
     （REVIEW 发现 #8）。不要按"已接入"理解。
-- **抽件评估（本轮只评估不改）**：`autostart`（~21 处引用；键名 + 自愈语义与模板不同）、
-  `icons`（~59 处引用 + 13 处测试引用；运行态着色 vs 模板构建期 `ICON_DRAW`，接口不同构）、
-  `update_helper`（~52 处引用 + 5 处测试引用；目标目录 + `PENDING_CMD`/`UPDATE_READY`
-  形态不同）继续内联。抽件需同步改菜单 5 处与更新链退出路径，风险高，排后续轮次。
+- **三个内联件是「缺失」，不是「有意保留」**：模板已有 `autostart` 1.1.1 / `icons` 2.0.0 /
+  `update_helper` 1.0.1，reme 未采纳（内联在 `main.py`）——按允许不一致的两条前提，这属
+  **缺失，必须补齐**（排期是时间安排，不是许可）。工作量/风险：`autostart`（~21 处引用）中/高
+  （键名迁移 + 稳定位前置）；`icons`（~59 处引用 + 13 处测试引用）高/中（运行态着色与构建期
+  `ICON_DRAW` 拆分）；`update_helper`（~52 处引用 + 5 处测试引用）高/高（自更新关键路径）。
+  另 `service_link` 已整文件夹采纳但**未接线**（全仓库无 import），同属缺失。
 - **i18n 重形态正式申报**：`i18n.py` / `__init__.py` / `README.md` 三处加
   `TEMPLATE-LOCAL-OVERRIDE`（对照模板 2.1.0），sync_check 由 `[NOHDR]` 永久隐身转为
   `[decl]` 已申报；`pairs.json` 是模板没有的数据文件，不需要申报。
