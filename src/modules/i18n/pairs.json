@@ -3308,6 +3308,10 @@
   "The previous auto-update failed; the previous version was restored and the scene kept. See update.log"
  ],
  [
+  "（提示：临时目录未能删除，见日志）",
+  "(note: the temp directory could not be removed - see the log)"
+ ],
+ [
   "（版本必须锁死，不要装更高版本、也不要写 latest；上游更新了也先别动）",
   "(pin the version: do not install anything newer and do not use latest - leave it alone even if upstream ships one)"
  ],

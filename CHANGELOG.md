@@ -14,6 +14,31 @@
 > 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
+- **工具链同族的第二处：构建的隔离数据根就在 `%TEMP%` 里，而删它是**不可验证**的**。
+  `scripts/build.bat:22` 把 `REME_HELPER_DATA_DIR` 钉到 `%TEMP%\reme-helper-builddata`（固定名，
+  落在 `%TEMP%` 正是 F11 要的隔离位），可 `:drop_data_dir` 的实现是
+  `if exist ... rmdir /s /q ... 2>nul`：**没有回读、没有报告**，"删掉了"和"还在"输出一模一样
+  （都是什么都不输出）。实测：那个目录里 `reme-helper\config.json` 的 mtime 是 **16:31**，
+  即当天某次运行之后它**一直躺在 %TEMP% 里**，而所有门禁都不吭一声。
+  现改为：删 → **回读** → 还在就 `echo [WARN] ... survived the delete` 并置 `DROP_DATA_FAILED=1`；
+  **无 `RUN_AFTER` 的出口**看到该标记即 `[ERROR]` + `exit /b 1`。RUN_AFTER 那条分支里"存活"是
+  **设计内**的（被启动的实例继承了同一个 env，会立刻重建目录），那里由既有 INFO 行解释并清标记——
+  不这样做的话默认构建（RUN_AFTER=1）会次次变红。
+  **三态实证**（`_verify-scratch/reme-drop-datadir.py`，抽 `build.bat` 的**真文本**执行）：
+  干净目录 → 真被删且无标记；**本进程打开着目录内文件** → 目录仍在 + 标记=1 + 有 WARN；
+  目录本不存在 → 无标记、无 WARN。**顺带两条更正**：① `attrib +R` 加在**目录**上**挡不住**
+  `rmdir /s /q`（照样删掉），要构造"删不掉"必须用真实机制（打开句柄）；② 探针第一版把标签块
+  写在 `call` **之前**，脚本从顶部顺序执行就**落进子程序**，里面 `goto :eof` 在主上下文里等于
+  结束整个脚本 ⇒ `call` 与 echo 从未执行，解析器把"缺行"当空串，A/C 两态**因为错误的原因变绿**。
+  判据自己假绿，是本家族最忌的形态；这次是靠 B 态那处不一致（WARN 印了、flag 读不到）暴露的。
+- **泄漏口径的覆盖缺口（上报 tpl-keeper）**：C-30 腿 B 的签名是"顶层或其一层子目录里有
+  `config.json` **且**顶层下至少一个 `*.log`"。上述目录在 16:31–18:22 之间只有
+  `reme-helper\config.json`（还没有 log），于是**两条腿都看不见它**——
+  "有配置、还没写日志"是当前签名的盲区。
+- **门禁在同一轮抓到了我自己的改动**：新增的 `_rmtree_verified` 带了一句新中文文案，
+  没进词表，`tests/test_i18n.py` 立刻报 `main.py:7478` 红；补 `pairs.json` 一条后 23/23。
+  这是"改完必须跑整轮门禁"的正面样本。
+
 - **C-30：`%TEMP%` 的清理不许静默失败（生产代码那一半）**。`download_and_apply_helper_update`
   的失败早退路径此前是 `rmtree(work, ignore_errors=True)`——`work` 正是 `mkdtemp` 的根目录，
   Windows 上偶发句柄未释放时这一拍删不掉，失败被吞掉后 %TEMP% 里留一个半删的壳，而调用方

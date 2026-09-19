@@ -499,6 +499,17 @@ if defined RUN_AFTER (
   %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 8000"
   call :drop_data_dir
   if exist "%REME_HELPER_DATA_DIR%" echo [INFO] %APPNAME%.exe is still running - the data dir belongs to it now.
+  rem Explained above, so do not let the subroutine's WARN turn the build red: here a
+  rem survivor is the documented, intended outcome.
+  set "DROP_DATA_FAILED="
+)
+rem With no launched instance nothing can legitimately hold this directory open, so a
+rem survivor is a real leftover - red, not a warning (harness rule: after a run, zero
+rem family-signature temp dirs, empty ones included).
+if not defined RUN_AFTER if defined DROP_DATA_FAILED (
+  echo [ERROR] %REME_HELPER_DATA_DIR% could not be removed - leftover temp dir.
+  if not defined NOPAUSE pause
+  exit /b 1
 )
 if not defined NOPAUSE pause
 exit /b 0
@@ -513,7 +524,21 @@ rem in %TEMP% - a leak by the harness rule (after a run: zero family-signature
 rem temp dirs, empty ones included). Called on the way out of every exit path.
 rem ---------------------------------------------------------------------------
 :drop_data_dir
-if exist "%REME_HELPER_DATA_DIR%" rmdir /s /q "%REME_HELPER_DATA_DIR%" 2>nul
+rem Read back AFTER deleting. The old body was `rmdir /s /q ... 2>nul` with no check at
+rem all, so "the directory survived" and "the directory was removed" produced the same
+rem output: nothing. That is the exact gap C-30 names - cleanup that ran vs cleanup that
+rem succeeded - and this root sits in %TEMP%, where a survivor stays forever.
+rem Not fatal inside this subroutine on purpose: in the RUN_AFTER flow the launched app
+rem owns the directory by design (it inherits the env var and rewrites its log), and the
+rem caller states that. Every other path reports it.
+if not exist "%REME_HELPER_DATA_DIR%" goto drop_data_dir_clean
+rmdir /s /q "%REME_HELPER_DATA_DIR%" 2>nul
+if not exist "%REME_HELPER_DATA_DIR%" goto drop_data_dir_clean
+echo [WARN] %REME_HELPER_DATA_DIR% survived the delete (open handle or a live instance?).
+set "DROP_DATA_FAILED=1"
+goto :eof
+:drop_data_dir_clean
+set "DROP_DATA_FAILED="
 goto :eof
 
 rem ---------------------------------------------------------------------------
