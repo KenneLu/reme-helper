@@ -24,7 +24,7 @@ if /i "%~1"=="--dry-run" set DRY_RUN=1
 
 rem Version is read from src\main.py - the app and the tag can never disagree.
 set VERSION=
-for /f "tokens=1,2,*" %%a in ('findstr /b /c:"VERSION = " src\main.py') do set VERSION=%%~c
+for /f "tokens=1,2,*" %%a in ('%SystemRoot%\System32\findstr.exe /b /c:"VERSION = " src\main.py') do set VERSION=%%~c
 if not defined VERSION (
   echo [ERROR] Cannot read VERSION from src\main.py.
   exit /b 1

@@ -68,7 +68,7 @@ rem Robust parse: take everything after '=', drop quotes, then keep the FIRST
 rem space-delimited token. A trailing comment on the VERSION line can therefore
 rem never leak into the version string / release path (same fix in the template).
 set VERSION=
-for /f "tokens=2 delims==" %%a in ('findstr /b /c:"VERSION = " src\main.py') do set VERSION=%%a
+for /f "tokens=2 delims==" %%a in ('%SystemRoot%\System32\findstr.exe /b /c:"VERSION = " src\main.py') do set VERSION=%%a
 for /f "tokens=1" %%a in ("%VERSION:"=%") do set VERSION=%%a
 if not defined VERSION (
   echo [ERROR] Cannot read VERSION from src\main.py.
@@ -139,7 +139,7 @@ if defined RUNNING_DIR if /i "%RUNNING_DIR%"=="%TARGET_DIR%" (
 )
 if defined RUNNING_DIR echo [INFO] %APPNAME% running from "%RUNNING_DIR%" - not the target dir, build continues.
 if not defined RUNNING_EXE (
-  tasklist /fo csv 2>nul | findstr /i /c:"%APPNAME%.exe" >nul
+  %SystemRoot%\System32\tasklist.exe /fo csv 2>nul | %SystemRoot%\System32\findstr.exe /i /c:"%APPNAME%.exe" >nul
   if not errorlevel 1 echo [WARN] %APPNAME%.exe is running but its path could not be read; target dir not verified.
 )
 
@@ -356,7 +356,7 @@ if errorlevel 1 (
 
 echo [PACK] assembling %RELEASE_DIR% ...
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
-robocopy "%STAGING%\%APPNAME%" "%RELEASE_DIR%" /E /R:1 /W:1 /NFL /NDL /NP >nul
+%SystemRoot%\System32\Robocopy.exe "%STAGING%\%APPNAME%" "%RELEASE_DIR%" /E /R:1 /W:1 /NFL /NDL /NP >nul
 if errorlevel 8 (
   echo [ERROR] Package copy failed.
   if not defined NOPAUSE pause
