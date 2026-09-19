@@ -16,6 +16,11 @@ rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0.."
 
+rem F11/D12: build and test instances must never share the resident tray data
+rem root (config / log / quit.request). Redirect the whole data root to a temp
+rem folder so a build can never disturb or be disturbed by the running app.
+set "REME_HELPER_DATA_DIR=%TEMP%\reme-helper-builddata"
+
 set RUN_AFTER=1
 set NOPAUSE=
 set CLEAN_ONLY=

@@ -31,10 +31,23 @@ from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块�
 from modules.appconfig import APP_NAME, APP_ID   # noqa: F402
 from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
 from modules.log_kit import configure_logging, log  # noqa: F402
-from modules.paths import (  # noqa: F402  T2 路径与数据区（四区定义住 modules/paths）
-    APP_DIR, PACKAGE_DIR, RUN_DIR, LOCAL_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
-    DIAG_LOG_DIR, RUN_LOG_DIR, APP_LOG_DIR, LOG_DIR, LOG_PATH, QUIT_REQUEST_PATH,
-    ICON_PATH, ICON_SIZES, TASKBAR_ICON_PATH, TASKBAR_ICON_SIZES, TRAY_HICON_PIXELS)
+from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.2：APP_DIR/RUN_DIR/USER_DATA_DIR）
+    APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
+    LOG_DIR, LOG_PATH)
+
+# reme 专有派生：模板 paths.py 只出四区正本与稳定安装位，下面这些由四区派生，不进模板件。
+DIAG_LOG_DIR = RUN_DIR / "log"        # 诊断输出跟「这次跑的那个包」走（构建脚本在这里读/清）
+QUIT_REQUEST_PATH = USER_DATA_DIR / "quit.request"   # --quit 请求文件（与 tray_kit 契约同形）
+# `<APP>_CONFIG` 显式钉配置（STANDARDS F1/B3）：模板 paths 1.1.2 尚未实现该 env 覆盖
+# （见 CONFORMANCE §4.1.5），先在这里接管；模板补上后本段即可删除。
+if os.environ.get("REME_HELPER_CONFIG"):
+    CONFIG_PATH = Path(os.environ["REME_HELPER_CONFIG"]).expanduser()
+# 图标资产与多帧渲染参数（reme 专有：运行态着色 + 任务栏高 DPI 帧表，G5）
+ICON_PATH = RUN_DIR / f"{APP_ID}.ico"
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
+TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
+TRAY_HICON_PIXELS = 32
 from modules.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 三件）
     acquire_single_instance, single_instance_free)
 
@@ -814,8 +827,8 @@ def write_log_file(name: str, text: str) -> Path:
     注意别用 LOG_DIR（那是应用自己的日志目录，在 %LOCALAPPDATA% 下）：诊断输出要跟着
     这次运行的那个包走，构建脚本才找得到、也才清得掉。
     """
-    RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    path = RUN_LOG_DIR / name
+    DIAG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = DIAG_LOG_DIR / name
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -3209,9 +3222,9 @@ SETUP_GUIDE_MIN_CHARS = 20000
 def doc_file_dir() -> Path:
     """随工具分发的文档目录（``doc/``）；打包后随 ``_internal`` 一起走。
 
-    开发态在仓库根（``PACKAGE_DIR``），打包态在 exe 目录（``APP_DIR``）。
+    开发态在仓库根（``APP_DIR``，模板 1.1.2 起四区同一锚点），打包态在 exe 目录。
     """
-    for candidate in (APP_DIR / "doc", APP_DIR / "_internal" / "doc", PACKAGE_DIR / "doc"):
+    for candidate in (APP_DIR / "doc", APP_DIR / "_internal" / "doc"):
         if candidate.is_dir():
             return candidate
     return APP_DIR / "doc"
@@ -3915,7 +3928,7 @@ def indicator_image_name(interpreter, kind: str, state: str, palette_name: str) 
     （实测设置窗口用例就是卡在这里不退）。只留在 Tcl 里，解释器销毁时随 UI 线程一起收。
     """
     name = f"reme_indicator_{kind}_{state}_{palette_name}"
-    directory = LOCAL_DATA_DIR / "ui-icons"
+    directory = USER_DATA_DIR / "ui-icons"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{kind}-{state}-{palette_name}.png"
     draw_indicator(kind, state, THEME).save(path)
@@ -7048,11 +7061,11 @@ def quit_app(icon, _item) -> None:
 HELPER_RELEASES_API = f"https://api.github.com/repos/{appconfig.REPO_OWNER}/{appconfig.REPO_NAME}/releases/latest"
 HELPER_ASSET_SUFFIX = "-windows-x64.zip"
 HELPER_EXE = f"{APP_ID}.exe"
-HELPER_UPDATE_LOG = LOCAL_DATA_DIR / "update.log"
+HELPER_UPDATE_LOG = USER_DATA_DIR / "update.log"
 # 旧版本备份放**用户数据目录**，不放安装目录里：
 #   * 安装目录那份要用 robocopy /purge 清掉上一版的残留文件，备份若在里面就会被一起删；
 #   * 而且备份若在 install 下，`robocopy install install\_backup /e` 会扫到自己的输出。
-HELPER_UPDATE_BACKUP = LOCAL_DATA_DIR / "_backup"
+HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
 # 等旧进程退出的上限：120 次 × 约 1 秒（`ping -n 2` 的节奏）
 HELPER_UPDATE_WAIT = 120
 
@@ -7873,8 +7886,8 @@ def main() -> int:
             return 1
     if "--smoke" in sys.argv:
         # 冻结环境里排障用：这些路径决定了诊断文件写到哪里，出问题时先看它们。
-        print(f"app_dir={APP_DIR} package_dir={PACKAGE_DIR} run_dir={RUN_DIR}")
-        print(f"diag_log_dir={DIAG_LOG_DIR} app_log_dir={APP_LOG_DIR} frozen={getattr(sys, 'frozen', False)}")
+        print(f"app_dir={APP_DIR} run_dir={RUN_DIR} user_data_dir={USER_DATA_DIR}")
+        print(f"diag_log_dir={DIAG_LOG_DIR} app_log_dir={LOG_DIR} frozen={getattr(sys, 'frozen', False)}")
         return smoke()
     if "--ui-check" in sys.argv:
         return ui_check()
