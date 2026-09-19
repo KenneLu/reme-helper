@@ -7278,6 +7278,11 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     if not latest["sha256"]:
         return False, t("发布页缺少 .sha256 校验文件，已中止更新（无法校验完整性）")
     work = Path(tempfile.mkdtemp(prefix=f"{APP_ID}-update-"))
+
+    def _fail(message: str):
+        """失败早退：先把暂存目录清掉，别在 %TEMP% 里留空壳（2026-09-19 实测到过）。"""
+        shutil.rmtree(work, ignore_errors=True)
+        return False, message
     zip_path = work / f"{APP_ID}{HELPER_ASSET_SUFFIX}"
     try:
         request = urllib.request.Request(latest["zip"],
@@ -7285,21 +7290,21 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
         with urllib.request.urlopen(request, timeout=60.0) as response, zip_path.open("wb") as out:
             shutil.copyfileobj(response, out)
     except Exception as exc:  # noqa: BLE001
-        return False, t("下载更新包失败：") + str(exc)
+        return _fail(t("下载更新包失败：") + str(exc))
     try:
         ok, detail = verify_zip_sha256(zip_path, _http_text(latest["sha256"]))
     except Exception as exc:  # noqa: BLE001
-        return False, t("校验更新包失败：") + str(exc)
+        return _fail(t("校验更新包失败：") + str(exc))
     if not ok:
-        return False, detail
+        return _fail(detail)
     stage = work / "stage"
     try:
         with zipfile.ZipFile(zip_path) as archive:
             archive.extractall(stage)
     except Exception as exc:  # noqa: BLE001
-        return False, t("解压更新包失败：") + str(exc)
+        return _fail(t("解压更新包失败：") + str(exc))
     if not (stage / HELPER_EXE).is_file():
-        return False, t("更新包里没有 ") + HELPER_EXE
+        return _fail(t("更新包里没有 ") + HELPER_EXE)
     text = HELPER_UPDATE_BAT.format(
         install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP, snapshot=HELPER_UPDATE_SNAPSHOT,
         failed=HELPER_UPDATE_FAILED,
@@ -7316,7 +7321,7 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
     try:
         subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=flags, close_fds=True)
     except OSError as exc:
-        return False, t("启动更新程序失败：") + str(exc)
+        return _fail(t("启动更新程序失败：") + str(exc))
     log(f"update staged: {stage} -> {APP_DIR} (tag {latest['tag']}, bat {script})")
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
 

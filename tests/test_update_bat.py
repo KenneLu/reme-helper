@@ -55,6 +55,20 @@ def _probe_script(marker: Path) -> str:
             % str(marker))
 
 
+def _rmtree_retry(path: Path, attempts: int = 10, delay: float = 0.3) -> bool:
+    """删除临时目录，失败重试：刚 start 的进程可能还占着 cwd（Windows 会拒绝删除）。
+
+    一次性 `rmtree(ignore_errors=True)` 会把失败吞掉并**静默留下空壳**——本轮实测
+    在 %TEMP% 里留了三个 `reme-update-bat-*`，所以这里重试并返回是否真的删掉。
+    """
+    for _ in range(attempts):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return True
+        time.sleep(delay)
+    return False
+
+
 def _wait_for(path: Path, seconds: float = 10.0) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -137,7 +151,12 @@ def main_test() -> int:
         check("failure: log records the failed rc", "INSTALL FAILED rc=" in log_text,
               log_text[-120:].replace("\n", " | "))
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree_retry(root)
+
+    # 「不留垃圾」要变成机械判据：本轮实测到过空壳目录（窗口/进程的 cwd 还占着，
+    # 一次性 rmtree 会静默失败并留在 %TEMP%），所以这里断言而不是"希望它删掉了"。
+    leftovers = sorted(p.name for p in Path(tempfile.gettempdir()).glob("reme-update-bat-*"))
+    check("no temp leftovers from this test", not leftovers, ", ".join(leftovers))
 
     print("UPDATE BAT TEST " + ("FAILED: " + ",".join(FAILS) if FAILS else "OK"), flush=True)
     return 1 if FAILS else 0
