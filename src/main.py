@@ -56,11 +56,14 @@ import yaml
 from PIL import Image, ImageDraw, ImageFont
 
 
-# 模板化状态（W-f，执行文档-20260918 §四.9）：
-#   appconfig/paths/log_kit/tray_kit/i18n/service_link 已住 src/modules/<模块>/；
-#   autostart / update_helper / icons 三件**申报留痕**（TEMPLATE-LOCAL-OVERRIDE）：
+# 模板化状态（W-f/W-g，执行文档-20260918 §四.9）：
+#   paths 1.1.2 / log_kit 1.0.2 / tray_kit 2.0.1 / service_link 0.1.0 已是模板正本拷贝
+#     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
+#     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
+#   autostart / update_helper / icons 三件仍**内联**（申报留痕）：
 #     自启键名 APP_ID + sync_autostart_path 修复语义、更新链 bat+备份目录、运行态图标着色
-#     ——与模板接口不同构，强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板。
+#     ——与模板接口不同构，强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板；
+#     抽件评估见 CHANGELOG Unreleased。
 VERSION = "1.2.5"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
@@ -7572,7 +7575,14 @@ def ui_check() -> int:
         return 1
 
 
-SINGLE_INSTANCE_NAME = APP_ID + "-tray"   # 全局命名空间互斥体，名字不带版本号（历史行为）
+# 互斥体名**显式传入**，不吃模板默认的 `Local\<app_id>-single-instance`：
+#   ① 历史行为：自首个版本起就是这个名字，不带版本号——升级期间新旧版本必须互斥，
+#      否则会出现两个托盘抢同一份配置；
+#   ② 改名等于换一个内核对象（`reme-helper-tray` 与 `Local\reme-helper-single-instance`
+#      互不相斥），会让「升级期间新旧版本互斥」的既有保护失效；
+#   ③ 名字本身合法：命名空间前缀之后没有第二个反斜杠（SINGLE-01 的 l-s2t 教训）。
+# 模板 2.0.1 的 acquire_single_instance(app_id, mutex_name=None, ...) 明确支持显式名。
+SINGLE_INSTANCE_NAME = APP_ID + "-tray"
 
 
 def warn_duplicate_instance() -> None:
@@ -7917,7 +7927,7 @@ def main() -> int:
         sys.stdout.flush()
         time.sleep(1.5)
         os._exit(0)
-    if not acquire_single_instance(SINGLE_INSTANCE_NAME, log=log):
+    if not acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log):
         warn_duplicate_instance()
         return 0
     sync_autostart_path()
