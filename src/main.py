@@ -4599,6 +4599,15 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
 
         task_results: queue.Queue = queue.Queue()
 
+        # 必须先占位再定义 pump()：pump 在窗口还没建完时就被调用了（下面 pump() 一行），
+        # 而它引用的 theme_button 要到本函数靠后处才创建。Python 把 theme_button 当作
+        # **闭包变量**，未赋值时读取直接 NameError（不是 None）——实测：托盘线程在构建
+        # 期间切主题会让 PENDING_THEME 变脏，下一次 pump 走到 configure 就抛
+        # "cannot access free variable 'theme_button'"，异常从 ui() 冒到 UI 线程的
+        # mainloop 之外把线程打死：之后窗口引用永远清不掉、控制台再也打不开。
+        # 占位成 None 后，脏标记那一支会安全跳过；按钮随后按**当时的**主题创建，文案不会错。
+        theme_button = None
+
         def submit(work, done) -> None:
             def worker():
                 try:
