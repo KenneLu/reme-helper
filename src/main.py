@@ -55,7 +55,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 # 模板化状态（W-f/W-g，执行文档-20260918 §四.9）：
-#   paths 1.1.3 / log_kit 1.0.2 / tray_kit 2.0.2 / service_link 0.1.0 已是模板正本拷贝
+#   paths 1.1.3 / log_kit 1.0.3 / tray_kit 2.2.0 / service_link 0.1.0 已是模板正本拷贝
 #     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
 #     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
 #   autostart / update_helper / icons 三件仍**内联**（申报留痕）：
