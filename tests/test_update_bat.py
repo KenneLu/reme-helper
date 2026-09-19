@@ -6,13 +6,18 @@
 （磁盘满/文件被占/源缺失），会留下**半铺的安装目录**却报 done；而 `_backup` 不是
 回滚源，且下一次更新开头还会把它删掉（唯一手工回退材料也没了）。
 
-本测试**真跑** `main.HELPER_UPDATE_BAT` 渲染出的脚本（不 mock），用假 exe（probe.bat）
+本测试**真跑** `main.HELPER_UPDATE_BAT` 渲染出的脚本（不 mock），用假 exe（probe.vbs）
 观察"到底启动了哪个版本"，断言：
   成功：新版本被启动、安装目录已更新、快照轮转成 BACKUP；
   失败注入（STAGE 不存在 ⇒ robocopy rc=16）：**不启动新版本**、回退后启动旧版本、
           留下 update.failed marker、快照保留可人工恢复。
 
-实例隔离：全部在临时目录里跑；probe.bat 写绝对路径的 marker，避免 cwd 影响。
+**桌面无扰**：假 exe 用 `.vbs`（`wscript`，无控制台）而不是 `.bat`——更新器用
+`start "" <exe>` 启动目标，启动 .bat 会弹出一个可见控制台窗口，构建期就会在用户桌面上
+闪一下。产品本身启动的是 `--noconsole` 的 GUI exe，所以这里保持"什么都看不见"才是忠实的；
+本测试自身跑 cmd 也带 `CREATE_NO_WINDOW`。
+
+实例隔离：全部在临时目录里跑；probe.vbs 写绝对路径的 marker，避免 cwd 影响。
 """
 from __future__ import annotations
 
@@ -37,9 +42,17 @@ def check(name, ok, detail=""):
         FAILS.append(name)
 
 
-def _probe_bat(marker_name: str) -> str:
-    """一个"假 exe"：被 start 时写一个 marker 文件（绝对路径）。"""
-    return '@echo off\r\necho started > "%~dp0' + marker_name + '"\r\n'
+def _probe_script(marker: Path) -> str:
+    """The fake "exe": when started, it writes the marker file (absolute path).
+
+    Deliberately a **.vbs**, not a .bat: the updater starts it with `start "" <exe>`, and
+    starting a .bat pops a visible console window - during a build gate that is a window
+    flashing on the user's desktop. `wscript` runs .vbs with no console at all. The real
+    product starts a `--noconsole` GUI exe, so this keeps the probe faithful in the one
+    way that matters (nothing visible) without touching the production line.
+    """
+    return ('CreateObject("Scripting.FileSystemObject").CreateTextFile("%s", True).Write "x"\r\n'
+            % str(marker))
 
 
 def _wait_for(path: Path, seconds: float = 10.0) -> bool:
@@ -60,10 +73,13 @@ def _stage_root(root: Path, stage_missing: bool = False) -> dict:
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True)
-    (install / "probe.bat").write_text(_probe_bat("started-old.txt"), encoding="ascii")
+    (install / "probe.vbs").write_text(_probe_script(install / "started-old.txt"),
+                                       encoding="ascii")
     (install / "data-old.txt").write_text("old", encoding="utf-8")
     if not stage_missing:
-        (stage / "probe.bat").write_text(_probe_bat("started-new.txt"), encoding="ascii")
+        # 新版一旦被铺进 install，就从 install 运行 → 它的 marker 也写在 install 下
+        (stage / "probe.vbs").write_text(_probe_script(install / "started-new.txt"),
+                                         encoding="ascii")
         (stage / "data-new.txt").write_text("new", encoding="utf-8")
     return {
         "install": install,
@@ -80,11 +96,12 @@ def _run_bat(root: Path, paths: dict) -> None:
     text = main.HELPER_UPDATE_BAT.format(
         install=paths["install"], stage=paths["stage"], work=paths["work"],
         backup=paths["backup"], snapshot=paths["snapshot"], failed=paths["failed"],
-        log=paths["log"], exe="probe.bat", limit=2, stamp="test",
+        log=paths["log"], exe="probe.vbs", limit=2, stamp="test",
     )
     bat = root / "updater.bat"
     bat.write_text(text, encoding="ascii", newline="")
     subprocess.run(["cmd.exe", "/c", str(bat)], cwd=str(root), timeout=60,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

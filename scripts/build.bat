@@ -198,7 +198,7 @@ if errorlevel 1 (
 if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-lifecycle-test.log"
 
 echo [TEST] update bat success/failure injection ...
-"%PY%" tests	est_update_bat.py
+"%PY%" tests\test_update_bat.py
 if errorlevel 1 (
   echo [ERROR] update bat test failed.
   if not defined NOPAUSE pause
