@@ -83,15 +83,37 @@ if exist "%RELEASE_DIR%" (
   exit /b 1
 )
 
-rem No reme-helper of any version may run: files would be locked and two trays
-rem would fight over the same config, service and tunnels
-tasklist /fo csv 2>nul | findstr /i /c:"%APPNAME%" >nul
-if not errorlevel 1 (
-  echo [ERROR] reme-helper is running. Exit it from the tray before building.
+rem ---------------------------------------------------------------------------
+rem Running-instance guard (D1-02, refined 2026-09-19).
+rem History: this gate used to refuse whenever ANY instance was running. Because
+rem D1-01 (same-version release dir already exists) is checked FIRST, that form's
+rem only real effect was blocking harmless builds of OTHER versions. What is
+rem actually unsafe is deleting/overwriting the directory a live instance runs
+rem from - so the judgement is directory equality, not 'is an instance running'.
+rem NOTE: the 'block' branch below is belt-and-braces - D1-01 already rejects in
+rem exactly the case where a live instance could be inside the target dir.
+rem The same guard must precede any manual rm/rmdir of a release dir.
+rem ---------------------------------------------------------------------------
+set "RUNNING_EXE="
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "(Get-Process -Name %APPNAME% -ErrorAction SilentlyContinue).Path | Select-Object -First 1"`) do set "RUNNING_EXE=%%p"
+set "RUNNING_DIR="
+if defined RUNNING_EXE for %%d in ("%RUNNING_EXE%") do set "RUNNING_DIR=%%~dpd"
+if defined RUNNING_DIR if "%RUNNING_DIR:~-1%"=="\" set "RUNNING_DIR=%RUNNING_DIR:~0,-1%"
+set "TARGET_DIR="
+for %%d in ("%CD%\%RELEASE_DIR%") do set "TARGET_DIR=%%~fd"
+if defined RUNNING_DIR if /i "%RUNNING_DIR%"=="%TARGET_DIR%" (
+  echo [ERROR] A %APPNAME% instance is running FROM %RELEASE_DIR%.
+  echo [ERROR] Exit it from the tray before building that directory.
   if not defined NOPAUSE pause
   exit /b 1
 )
+if defined RUNNING_DIR echo [INFO] %APPNAME% running from "%RUNNING_DIR%" - not the target dir, build continues.
+if not defined RUNNING_EXE (
+  tasklist /fo csv 2>nul | findstr /i /c:"%APPNAME%.exe" >nul
+  if not errorlevel 1 echo [WARN] %APPNAME%.exe is running but its path could not be read; target dir not verified.
+)
 
+rem ---------------------------------------------------------------------------
 call :mktools
 if errorlevel 1 (
   if not defined NOPAUSE pause

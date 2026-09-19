@@ -128,11 +128,12 @@ the release-config generator, and `doc/` the documentation the app reads at runt
 `src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
 a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
-**Building locally.** The build gate refuses to run while any `reme-helper.exe` is
-running (D1-02: files would be locked and two trays would fight over the same config).
-For a 24/7 tray tool that means **exit the tray first**; releases come from CI on a clean
-checkout, so "no local release folder for the current version" is an expected state, not
-a lost artifact (CONFORMANCE §4.1.11).
+**Building locally.** The running-instance gate (D1-02, refined) refuses only when the build's
+target folder **is the folder the live instance runs from** - building a *different* version
+folder is allowed. Locally that still means no new artifact: `VERSION` stays at the published
+`1.2.5` during development, so the target folder exists and the earlier D1-01 check stops the
+build first. Releases come from CI on a clean checkout, so "no local release folder for this
+work" is an expected state, not a lost artifact (CONFORMANCE §4.1.11).
 
 **Known gaps (not "allowed differences").** Three family mechanism modules already exist
 in the template (`autostart` 1.1.1, `icons` 2.0.0, `update_helper` 1.0.1) but reme has not
