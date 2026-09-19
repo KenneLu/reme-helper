@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -78,7 +79,22 @@ def _wait_for(path: Path, seconds: float = 10.0) -> bool:
     return False
 
 
-def _stage_root(root: Path, stage_missing: bool = False) -> dict:
+def _observe_started(marker: Path, what: str) -> None:
+    """观察（但**不作为判据**）被 `start` 拉起的进程是否写下 marker。
+
+    `start ""` 是异步的，且门禁连续跑时 Windows 可能拒绝新建进程/控制台（桌面堆压力；
+    用户此前用 .bat 假 exe 时正是 1/3 概率撞上）。**启动决策**用确定性证据断言（安装目录
+    里的文件内容 + 日志分支），**守卫本身**用静态检查断言；marker 缺失只记录不判失败。
+    """
+    if _wait_for(marker, 5.0):
+        print("  ok   observed: %s process wrote its marker" % what, flush=True)
+    else:
+        print("  ..   observation skipped: %s marker absent (start may be refused under "
+              "repeated runs; the replacement/decision checks above are deterministic)"
+              % what, flush=True)
+
+
+def _stage_root(root: Path, stage_missing: bool = False, install_exe: bool = True) -> dict:
     """布置 install/stage/work 三区；返回给 bat 模板的路径参数。"""
     install = root / "install"
     stage = root / "stage"
@@ -87,8 +103,19 @@ def _stage_root(root: Path, stage_missing: bool = False) -> dict:
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True)
-    (install / "probe.vbs").write_text(_probe_script(install / "started-old.txt"),
-                                       encoding="ascii")
+    # 每个用例从干净的 log/marker 开始：bat 是**追加**日志的，否则上一个用例的
+    # "done"/失败内容会串进下一个用例的断言（实测踩到：成功用例的 done 让
+    # "failure: never reported done" 假红）。
+    for leftover in (root / "update.log", root / "update.failed"):
+        leftovers = [leftover, *(root.glob(leftover.name + ".*"))]
+        for f in leftovers:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+    if install_exe:
+        (install / "probe.vbs").write_text(_probe_script(install / "started-old.txt"),
+                                           encoding="ascii")
     (install / "data-old.txt").write_text("old", encoding="utf-8")
     if not stage_missing:
         # 新版一旦被铺进 install，就从 install 运行 → 它的 marker 也写在 install 下
@@ -119,14 +146,53 @@ def _run_bat(root: Path, paths: dict) -> None:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _static_checks() -> None:
+    """渲染出的 bat 的机械卫生（不依赖运行）：
+
+    ① 每个 `goto X` 都要有 `:X`——2026-09-19 真实回归：重写尾部时把 `:giveup`
+       删了而循环仍在 `goto giveup`，超时路径会跳到不存在的标签（脚本直接中止）。
+    ② 每个 `start ""` 前必须紧邻 `if not exist` 守卫——`start` 一个不存在的 exe 会
+       弹**无法关闭**的模态错误框，而更新器是 detached 的，会永久挂住（模板 1.4.0 的
+       同款教训）。
+    """
+    rendered = main.HELPER_UPDATE_BAT.format(
+        install=r"C:\i", stage=r"C:\s", work=r"C:\w", backup=r"C:\b",
+        snapshot=r"C:\b.pre", failed=r"C:\f", log=r"C:\l", exe="probe.vbs",
+        limit=2, stamp="static")
+    lines = rendered.splitlines()
+    labels = {l.strip()[1:] for l in lines if l.startswith(":")}
+    gotos = set(re.findall(r"goto (\w+)", rendered))
+    check("bat: every goto target has a matching label", not (gotos - labels),
+          "unresolved: %s" % ", ".join(sorted(gotos - labels)))
+    # 守卫不必与 start 紧邻，但必须落在**同一个标签块内**（中间可能夹一段日志 echo）。
+    unguarded = []
+    for i, line in enumerate(lines):
+        if not line.startswith('start ""'):
+            continue
+        guarded = False
+        for j in range(i - 1, max(-1, i - 7), -1):
+            if lines[j].startswith(":"):
+                break
+            if lines[j].lstrip().startswith("if not exist") and "probe.vbs" in lines[j]:
+                guarded = True
+                break
+        if not guarded:
+            unguarded.append(i + 1)
+    check("bat: every start is guarded by an existence check", not unguarded,
+          "unguarded at lines %s" % unguarded)
+
+
 def main_test() -> int:
     root = Path(tempfile.mkdtemp(prefix="reme-update-bat-"))
     try:
+        _static_checks()
+
         # ---------- 成功路径 ----------
         paths = _stage_root(root)
         _run_bat(root, paths)
-        check("success: new version started",
-              _wait_for(paths["install"] / "started-new.txt"))
+        check("success: install carries the NEW version",
+              "started-new.txt" in (paths["install"] / "probe.vbs").read_text(
+                  encoding="ascii", errors="replace"))
         check("success: install updated",
               (paths["install"] / "data-new.txt").exists())
         check("success: old snapshot rotated into BACKUP",
@@ -134,22 +200,38 @@ def main_test() -> int:
               and not paths["snapshot"].exists())
         check("success: no failure marker", not paths["failed"].exists())
         check("success: work cleaned", not paths["work"].exists())
+        _observe_started(paths["install"] / "started-new.txt", "new version")
 
         # ---------- 失败注入：STAGE 不存在 ⇒ robocopy rc=16 ----------
         paths = _stage_root(root, stage_missing=True)
         _run_bat(root, paths)
-        check("failure: new version NOT started",
-              not _wait_for(paths["install"] / "started-new.txt", 3.0))
-        check("failure: previous version was started after restore",
-              _wait_for(paths["install"] / "started-old.txt"))
+        log_text = paths["log"].read_text(encoding="utf-8", errors="replace")
+        check("failure: install still carries the OLD version",
+              "started-old.txt" in (paths["install"] / "probe.vbs").read_text(
+                  encoding="ascii", errors="replace"))
         check("failure: install still has the old payload",
               (paths["install"] / "data-old.txt").exists()
               and not (paths["install"] / "data-new.txt").exists())
         check("failure: marker written", paths["failed"].exists())
         check("failure: snapshot kept for manual recovery", paths["snapshot"].exists())
-        log_text = paths["log"].read_text(encoding="utf-8", errors="replace")
-        check("failure: log records the failed rc", "INSTALL FAILED rc=" in log_text,
+        check("failure: log records the failed rc", "INSTALL FAILED rc=16" in log_text,
               log_text[-120:].replace("\n", " | "))
+        # 决策级证据（确定性）：失败分支**从未**走到 "done"（那是替换成功才有的行）
+        check("failure: never reported done", "[test] done" not in log_text)
+        _observe_started(paths["install"] / "started-old.txt", "previous version")
+
+        # ---------- 最后手段：安装目录不可用且快照也还原不出 exe ----------
+        # 期望：什么都不启动（start 一个不存在的 exe 会弹无法关闭的模态框），
+        # 快照保留，marker 留下让下次手动启动能告诉用户。
+        paths = _stage_root(root, stage_missing=True, install_exe=False)
+        _run_bat(root, paths)
+        dead_log = paths["log"].read_text(encoding="utf-8", errors="replace")
+        check("last resort: install still has no exe",
+              not (paths["install"] / "probe.vbs").exists())
+        check("last resort: marker written", paths["failed"].exists())
+        check("last resort: snapshot kept", paths["snapshot"].exists())
+        check("last resort: log records restore failure", "RESTORE FAILED" in dead_log,
+              dead_log[-120:].replace("\n", " | "))
     finally:
         _rmtree_retry(root)
 

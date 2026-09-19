@@ -7135,6 +7135,7 @@ echo [{stamp}] copied rc=%RC% >> "%LOG%"
 if %RC% geq 8 goto install_failed
 if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
 move /y "%SNAPSHOT%" "%BACKUP%" >nul 2>nul
+if not exist "%INSTALL%\{exe}" goto start_missing
 start "" "%INSTALL%\{exe}"
 echo [{stamp}] done >> "%LOG%"
 goto cleanup
@@ -7146,11 +7147,31 @@ echo [{stamp}] INSTALL FAILED rc=%RC% - restoring from snapshot >> "%LOG%"
 robocopy "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
 if errorlevel 8 goto install_dead
 echo [{stamp}] restored - starting previous version >> "%LOG%"
+if not exist "%INSTALL%\{exe}" goto install_dead
 start "" "%INSTALL%\{exe}"
 goto cleanup_keep
 :install_dead
+rem Last resort: the install dir is unusable and the snapshot could not be restored.
+rem Start nothing (a missing exe would open an undismissable modal box); leave the
+rem marker so the next manual launch can tell the user what happened.
 echo [{stamp}] RESTORE FAILED - not starting; snapshot kept at %SNAPSHOT% >> "%LOG%"
+> "%FAILED%" echo update failed {stamp}: restore failed, no exe started
 goto cleanup_keep
+:start_missing
+rem Never `start` a missing exe: the modal error box cannot be dismissed and this
+rem script runs detached, so the update would hang forever. Restore + report instead.
+echo [{stamp}] exe missing at "%INSTALL%\{exe}" - restoring >> "%LOG%"
+> "%FAILED%" echo update failed {stamp}: exe missing after copy
+robocopy "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
+if not exist "%INSTALL%\{exe}" goto install_dead
+echo [{stamp}] restored - starting previous version >> "%LOG%"
+start "" "%INSTALL%\{exe}"
+goto cleanup_keep
+:giveup
+rem Wait limit hit: the old process never exited. Do not replace anything.
+echo [{stamp}] aborted: {exe} still running after {limit}s >> "%LOG%"
+> "%FAILED%" echo update aborted {stamp}: {exe} still running after {limit}s
+goto cleanup
 :cleanup
 if exist "%WORK%" rmdir /s /q "%WORK%"
 goto cleanup_tail
