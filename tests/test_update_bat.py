@@ -214,7 +214,16 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
         budget_s=limit * main.HELPER_UPDATE_TICK_MS // 1000,
     )
     bat = root / "updater.bat"
-    bat.write_text(text, encoding="ascii", newline="")
+    # 行尾**必须与产品落盘的字节一致**：`main.py` 用 `script.write_text(text, encoding="mbcs")`
+    # （不传 `newline`）⇒ Windows 文本模式把 `\n` 翻成 `\r\n`。旧写法 `newline=""` 关掉了那次
+    # 翻译，于是测试喂给 cmd 的是一个 **LF-only 的 bat，而产品永远不会产生这种文件**。
+    # 代价（l-s2t 实测，2026-09-20）：cmd.exe 对 LF-only 批处理的 `goto` 标签查找**与字节相位
+    # 有关** —— 同一渲染器下逐长度扫描 47 个根路径长度，root 长度 79..85 时 `goto <label>` 报
+    # "The system cannot find the batch label specified"，78 与 86+ 正常；CI 的 scratch 根
+    # 正好 79 字节 ⇒ "CI 红、本机全绿"，两轮发版被挡住。改成 CRLF 后 47 个长度 0 失败。
+    # 本仓今天只是**恰好**没落在坏相位（scratch 根长度不在 79..85），并不是没有这颗雷。
+    # 登记：模板仓 CONFORMANCE §4.1.62。
+    bat.write_text(text, encoding="ascii", newline="\r\n")
     try:
         subprocess.run(["cmd.exe", "/c", str(bat)], cwd=str(root), timeout=60,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
