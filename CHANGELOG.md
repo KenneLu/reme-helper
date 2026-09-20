@@ -3,7 +3,12 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
-## Unreleased
+## 1.2.6
+- **`--quit` no longer inherits the persisted cleanup checkbox** (2026-09-20, C-51). `--quit` is the headless entry used by external tools - nobody is asked anything - yet quit_watch_loop called shutdown_tray(ICON) without keyword arguments, leaving stop_reme/stop_tunnels as None, which the function then fills in from CFG["quit_stop_*"] . A user who had once ticked "stop the service on exit" would therefore have the service silently stopped by an external `--quit`. This is exactly the shape C-41 forbids: a preference saved in the presence of a confirmation dialog must not drive an action nobody confirmed. The tray menu path is unaffected - it goes through quit_app, where the user really is asked. Guard: template criterion C-51.
+- **The exit dialog is localised** (task T3): the six hard-coded Chinese strings in the quit confirmation window (title, body, two checkboxes, two buttons) now go through app_title() and one translate_tree(win) pass - they are built from Tk widgets, which never pass through the messagebox shim, so both available localisation paths had been bypassed. Guard: template criterion C-48.
+- **Startup self-identification** (C-38): the startup line is followed by the resolved data root and config path; the update-check line no longer starts with startup, so the criterion anchor lands on the real startup marker instead of on an update check.
+- **Registered, not implemented** (REVIEW #8): the graceful-shutdown API this tool's exit path would prefer does not exist on the service side - ReMe 0.4.1.11 exposes 32 routes, all POST /<job>, with no /shutdown, /stop, /quit or /exit, and its CLI has no stop action. The only graceful channel would be a console Ctrl+C. Recorded rather than faked; wiring it waits for that endpoint.
+- **VERSION 1.2.5 -> 1.2.6.**
 
 > 开发期纪律（用户 2026-09-19 定）：**只本地 commit，不动版本号**；`VERSION` 停在最后
 > 已发布版本 `1.2.5`，版本号只在发版时改。因此本节改动**没有任何本地构建产物**——
