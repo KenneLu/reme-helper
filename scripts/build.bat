@@ -93,12 +93,14 @@ echo [VERSION] %VERSION%  release: %RELEASE_DIR%
 
 if defined CLEAN_ONLY goto :clean
 
+rem G1 RELAXED (2026-09-19, C2): target-dir existence is INFO, not a refusal.
+rem Refusal is the running-instance guard below (D1-02); safety comes from C2 - the
+rem live instance holds its own exe (no FILE_SHARE_DELETE), so the kernel rejects
+rem deleting it with winerror 32 rather than emptying it silently.
+rem CLEANLINESS IS NOT RELAXED: the old dir is removed right after that guard, so
+rem the build always assembles from scratch and never reuses a stale file.
 if exist "%RELEASE_DIR%" (
-  echo [ERROR] %RELEASE_DIR% already exists. Run "build.bat clean --force" first.
-  echo         One folder per version keeps releases reproducible.
-  if not defined NOPAUSE pause
-  call :drop_data_dir
-  exit /b 1
+  echo [INFO] %RELEASE_DIR% exists - will be removed and rebuilt from scratch.
 )
 
 rem ---------------------------------------------------------------------------
@@ -108,8 +110,8 @@ rem D1-01 (same-version release dir already exists) is checked FIRST, that form'
 rem only real effect was blocking harmless builds of OTHER versions. What is
 rem actually unsafe is deleting/overwriting the directory a live instance runs
 rem from - so the judgement is directory equality, not 'is an instance running'.
-rem NOTE: the 'block' branch below is belt-and-braces - D1-01 already rejects in
-rem exactly the case where a live instance could be inside the target dir.
+rem Since G1 was relaxed (2026-09-19, C2), THIS guard is the sole refusal: the block
+rem branch below is no longer belt-and-braces, it is load-bearing.
 rem The same guard must precede any manual rm/rmdir of a release dir.
 rem ---------------------------------------------------------------------------
 set "RUNNING_EXE="
@@ -141,6 +143,20 @@ if defined RUNNING_DIR echo [INFO] %APPNAME% running from "%RUNNING_DIR%" - not 
 if not defined RUNNING_EXE (
   %SystemRoot%\System32\tasklist.exe /fo csv 2>nul | %SystemRoot%\System32\findstr.exe /i /c:"%APPNAME%.exe" >nul
   if not errorlevel 1 echo [WARN] %APPNAME%.exe is running but its path could not be read; target dir not verified.
+)
+
+rem G1 relaxed: remove the existing same-version dir NOW (after the guard) so the
+rem assembly below starts from zero. A live instance would have been refused above;
+rem any other lock makes rmdir fail loudly right here instead of silently reusing.
+if exist "%RELEASE_DIR%" (
+  echo [INFO] removing %RELEASE_DIR% - rebuild from scratch ...
+  rmdir /s /q "%RELEASE_DIR%"
+)
+if exist "%RELEASE_DIR%" (
+  echo [ERROR] could not remove %RELEASE_DIR% - it is locked, possibly by a live instance.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
 )
 
 rem ---------------------------------------------------------------------------
