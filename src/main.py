@@ -6866,7 +6866,15 @@ def quit_watch_loop() -> None:
             continue
         log("quit requested via --quit")
         if TRAY_ICON is not None:
-            shutdown_tray(TRAY_ICON)
+            # ⚠ `--quit` 是**无 UI 的外部入口**（外部工具/脚本在用，见 `--quit` 的发送端
+            # 与本函数 docstring）：**没有任何人**被问过。
+            # ⇒ 不得让它沿用"用户在**有确认框**的语境下保存的勾选"去执行破坏性动作
+            #   （停服务/停隧道）——这正是 §4.1.43 / C-41 禁止的形态，与 dsh/ocx 末级
+            #   `return True, False` 同形：**"没问到"与"用户选了"必须分开**。
+            # 旧实现调 `shutdown_tray(TRAY_ICON)` 不传 kwargs ⇒ `stop_reme/stop_tunnels`
+            # 落 `None` ⇒ 回读 `CFG["quit_stop_*"]` ⇒ **勾过一次的用户会被静默停服务**。
+            # 托盘菜单那条路径不受影响：它走 `quit_app`，用户**确实被问到了**。
+            shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
         return
 
 
