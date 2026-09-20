@@ -58,6 +58,13 @@ jobs:
       - name: Console lifecycle
         run: python tests/test_console_lifecycle.py
 
+      # The update-chain gate was reachable ONLY from scripts/build.bat, i.e. only from the
+      # tag-triggered release workflow - so a fix to the gate itself could not be verified
+      # without cutting a release. It needs no ASR model and no network, so run it here too.
+      # (Same gap, same fix, as local-speak2text's gates 2d-2i.)
+      - name: Update chain (real rendered bat)
+        run: python tests/test_update_bat.py
+
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
 
