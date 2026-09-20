@@ -7445,7 +7445,10 @@ def startup_helper_update_check() -> None:
         return
     _report_failed_previous_update()
     ok, detail = check_helper_update()
-    log(f"startup update check: ok={ok} detail={detail}")
+    # C-38：这行原本写的是 `startup update check:`，于是 C-38 的锚（"第一个以 `startup`
+    # 开头的 log 行"）落在**更新检查**上而不是启动上 —— 语义错位。改掉前缀：它本就是
+    # 更新检查，不是启动标记（真正的启动标记在 `main()` 单实例守卫之后）。
+    log(f"update check: ok={ok} detail={detail}")
     # 状态进签名了，但得有人触发一次重画——否则要等别的状态变化才亮。
     refresh_tray_menu()
     if ok and HELPER_UPDATE_STATE.get("newer") and not STOP_EVENT.is_set():
@@ -8281,6 +8284,14 @@ def main() -> int:
     if not acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log):
         warn_duplicate_instance()
         return 0
+    # C-38（§4.1.38 的**唯一正本样例**，勿自创变体）：启动标记 + 两行**解析后**的数据根/配置。
+    # 位置：单实例守卫**通过之后**（走到这里才叫"本次启动成功"），且在 C-2 持句柄之前
+    # （保持"唯一合法窗口"那段注释的约束不被挪动）。
+    # 为什么值得：`python -c` / heredoc 探针**不落盘**，源码扫描原理上覆盖不到；
+    # 能定死归属的只有**产物自带的这几行**。
+    log(f"startup {APP_NAME} v{VERSION} (pid {os.getpid()})")
+    log("data root: %s" % USER_DATA_DIR)
+    log("config   : %s" % CONFIG_PATH)
     # C-2：活实例对自己的 exe 持一个不含 FILE_SHARE_DELETE 的句柄 ⇒ 删除/改名由**内核**拒绝。
     # 位置是**唯一合法窗口**，三面都有理由，挪哪边都错：
     #   * 必须在上面那批**无头 CLI 分支之后**——`--helper-update` 走 os._exit(0) 后要靠
