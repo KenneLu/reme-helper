@@ -855,5 +855,15 @@
  "punct_service_address": "Service address: ",
  "punct_punct_2": " (",
  "punct_punct_3": ")",
- "punct_punct_4": "). "
+ "punct_punct_4": "). ",
+ "quit": "Quit",
+ "open_logs_folder": "Open logs folder",
+ "check_for_reme_updates_2": "Check for ReMe updates…",
+ "check_for_reme_helper_updates_2": "Check for ReMe Helper updates…",
+ "frag": "Table written to: ",
+ "see_the_log_2": "\n\nSee the log: ",
+ "restored_to_baseline_4": "Restored to baseline (",
+ "running_2": ") Running…",
+ "cost_performance_2": "\n\nCost / performance: ",
+ "auto_dream_off": "Auto Dream Off"
 }

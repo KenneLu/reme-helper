@@ -198,8 +198,11 @@ def audit(paths) -> dict:
                     missing.append((Path(path).name, lineno, value))
         seen = set()
         duplicates = []
+        # 模板内置兜底表（menu_quit/menu_open_logs 两条）与 locales 同值不算重复：
+        # 反查构建时 locales 版 update 覆盖 builtin 版，取值确定、无歧义。
+        builtin_values = {"退出", "打开日志目录"}
         for _, zh in zh_items:
-            if zh in seen:
+            if zh in seen and zh not in builtin_values:
                 duplicates.append(zh)
             seen.add(zh)
         report = {

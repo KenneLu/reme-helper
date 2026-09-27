@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TEMPLATE-MODULE: i18n | TEMPLATE-VER: 2.3.0
+# TEMPLATE-FROM: my-diy-tool-template/template/i18n/i18n.py | TEMPLATE-VER: 2.3.0
 # 2.3.0（W3 前段定稿，Decision 5，用户 2026-09-27 拍板）：轻形态为**唯一家族形态**
 #   （判据：扩展性最强——加语言只加 locales/<lang>.json；可读性由 zh 基准表保底；
 #   配置时只改数据文件）。reme-helper 的重形态（中文即键 + pairs.json）自本版起为

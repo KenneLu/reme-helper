@@ -855,5 +855,15 @@
  "punct_service_address": "服务地址：",
  "punct_punct_2": "（",
  "punct_punct_3": "）",
- "punct_punct_4": "）。"
+ "punct_punct_4": "）。",
+ "quit": "退出",
+ "open_logs_folder": "打开日志目录",
+ "check_for_reme_updates_2": "检查 ReMe 更新…",
+ "check_for_reme_helper_updates_2": "检查 ReMe 助手更新…",
+ "frag": "对照表已生成：",
+ "see_the_log_2": "\n\n详见日志：",
+ "restored_to_baseline_4": "已回到基线（",
+ "running_2": ") 运行中…",
+ "cost_performance_2": "\n\n成本/性能：",
+ "auto_dream_off": "Auto Dream 未启用"
 }
