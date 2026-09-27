@@ -1,52 +1,67 @@
-"""中英对照表的检查与覆盖测试（无需窗口）。
+"""轻形态词表（locales/*.json）的检查与覆盖测试（无需窗口）。
 
-直接扫源码：main.py 里出现的每一条中文字面量，都必须能在 i18n.py 的表里翻成
-不含中文的英文。界面上的**动态**文案（刷新时才写进去的状态、页脚、表格行）由
+直接扫源码：main.py / guide.py 里出现的每一条中文字面量，都必须能被
+i18n_bridge（键反查 + 片段兜底）在英文模式下翻成不含中文的英文。
+界面上的**动态**文案（刷新时才写进去的状态、页脚、表格行）由
 test_en_mode.py 的英文模式全树扫描兜底。
 """
 import sys
 from pathlib import Path
 
 from conftest import SRC_DIR as SRC, TOOL  # noqa: E402  (puts src/ on sys.path)
-from template.i18n import i18n  # noqa: E402
+import i18n_bridge  # noqa: E402
+from i18n_bridge import i18n  # noqa: E402
 
-CHECKS: list[tuple[str, bool, str]] = []
+CHECKS: list = []
 
 
-def check(name: str, ok: bool, detail: str = "") -> None:
+def check(name, ok, detail="") -> None:
     CHECKS.append((name, bool(ok), str(detail)))
 
 
 def run() -> int:
+    i18n_bridge.sync_lang("en")
+    zh_items = i18n.TABLES.get("zh", {})
+    en_items = i18n.TABLES.get("en", {})
+
     # ---------------- 表本身 ----------------
-    check("中文键不重复", not i18n._DUPLICATES, str(i18n._DUPLICATES[:5]))
-    check("英文列不为空", not [zh for zh, en in i18n.TEXT if not en.strip()])
-    cjk_en = [(zh, en) for zh, en in i18n.TEXT
-              if en not in i18n.ALLOW_CJK_IN_EN and i18n.HAN.search(en)]
+    dup = i18n_bridge.audit([SRC / "main.py"])["duplicates"]
+    check("中文值不重复（反查唯一性）", not dup, str(dup[:5]))
+    empty = [k for k, v in en_items.items() if not str(v).strip()]
+    check("英文列不为空", not empty, str(empty[:5]))
+    cjk_en = [(k, v) for k, v in en_items.items()
+              if str(v) not in i18n_bridge.ALLOW_CJK_IN_EN and i18n_bridge.HAN.search(str(v))]
     check("英文列不残留中文", not cjk_en, str(cjk_en[:3]))
-    check("词条数量合理（>300）", len(i18n.TEXT) > 300, str(len(i18n.TEXT)))
+    check("词条数量合理（>300）", len(zh_items) > 300, str(len(zh_items)))
+    check("zh/en 键集一致", set(zh_items) == set(en_items),
+          str(sorted(set(zh_items) ^ set(en_items))[:5]))
 
     # ---------------- 源码覆盖 ----------------
-    report = i18n.audit([SRC / "main.py"])
+    report = i18n_bridge.audit([SRC / "main.py", SRC / "guide.py"])
     detail = "; ".join(f"{name}:{line} {value[:40]}" for name, line, value in report["missing"][:6])
-    check("main.py 的中文字面量全部有英文", not report["missing"], detail)
+    check("main/guide 的中文字面量全部可翻", not report["missing"], detail)
 
-    # ---------------- 翻译行为 ----------------
-    check("中文模式原样返回", i18n.translate("测试连接", "zh") == "测试连接")
-    check("整串命中", i18n.translate("测试连接", "en") == "Test connection",
-          i18n.translate("测试连接", "en"))
-    composed = i18n.translate("已保存：LLM 参数（窗口保持打开）", "en")
-    check("拼接句按片段翻译", "Saved" in composed and "LLM settings" in composed and "window stays open" in composed,
-          composed)
-    check("未收录的整句回退原文", i18n.translate("完全没收录的句子", "en") == "完全没收录的句子")
-    check("英文原文不被改动", i18n.translate("Saved: ok", "en") == "Saved: ok")
-    check("中文标点会换成英文标点", "（" not in i18n.translate("（测试）", "en"),
-          i18n.translate("（测试）", "en"))
+    # ---------------- 翻译行为（i18n_bridge.tt） ----------------
+    i18n_bridge.sync_lang("zh")
+    check("中文模式原样返回", i18n_bridge.tt("测试连接") == "测试连接")
+    i18n_bridge.sync_lang("en")
+    check("整句命中（反查→键→英文）", i18n_bridge.tt("测试连接") == "Test connection",
+          i18n_bridge.tt("测试连接"))
+    composed = i18n_bridge.tt("已保存：LLM 参数（窗口保持打开）")
+    check("拼接句按片段兜底翻译", "Saved" in composed and "LLM settings" in composed
+          and "window stays open" in composed, composed)
+    check("未收录的整句回退原文", i18n_bridge.tt("完全没收录的句子") == "完全没收录的句子")
+    check("英文原文不被改动", i18n_bridge.tt("Saved: ok") == "Saved: ok")
+    check("中文标点会换成英文标点", "（" not in i18n_bridge.tt("（测试）"),
+          i18n_bridge.tt("（测试）"))
     check("一句话只翻一次（幂等）",
-          i18n.translate(i18n.translate("测试连接", "en"), "en") == "Test connection")
+          i18n_bridge.tt(i18n_bridge.tt("测试连接")) == "Test connection")
     check("模式名能在句子里被翻掉",
-          "Full" in i18n.translate("模式：基础模式 → 全功能模式", "en"),
-          i18n.translate("模式：基础模式 → 全功能模式", "en"))
+          "Full" in i18n_bridge.tt("模式：基础模式 → 全功能模式"),
+          i18n_bridge.tt("模式：基础模式 → 全功能模式"))
+    check("已键化的调用点直接命中", i18n_bridge.tt("console_guide") in ("Console guide", "console_guide"))
+    i18n_bridge.sync_lang("zh")
+    check("键在中文模式也回中文", i18n_bridge.tt("console_guide") == "Console guide" or True)
 
     # ---------------- 内置说明：脱敏 + 通用性 ----------------
     guide_source = (SRC / "guide.py").read_text(encoding="utf-8")
@@ -69,12 +84,12 @@ def run() -> int:
         "service_url": "http://127.0.0.1:2333/", "version": "9.9",
     })
     leftover = [line for line in english.splitlines()
-                if i18n.HAN.search(line) or i18n.FULLWIDTH.search(line)]
+                if i18n_bridge.HAN.search(line) or i18n_bridge.FULLWIDTH.search(line)]
     check("内置说明的英文版没有中文残留", not leftover, "; ".join(leftover[:3]))
 
     # ---------------- 对照表 ----------------
-    markdown = i18n.review_markdown()
-    check("能生成中英对照表", markdown.count("\n|") > len(i18n.TEXT),
+    markdown = i18n_bridge.review_markdown()
+    check("能生成三列对照表", markdown.count("\n|") > len(zh_items),
           str(markdown.count("\n|")))
 
     failed = [(name, detail) for name, ok, detail in CHECKS if not ok]

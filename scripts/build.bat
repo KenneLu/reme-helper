@@ -330,8 +330,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem W-f: the i18n word-pair data file (pairs.json) must ship inside the
-rem package - frozen i18n loads it from _internal\modules\i18n\.
+rem W-f: the i18n locale tables (locales/zh.json + en.json) must ship inside
+rem the package - frozen i18n loads them from _internal\locales\.
 echo [BUILD] PyInstaller onedir noconsole ...
 rem onedir (not onefile) keeps tray startup instant: onefile unpacks the whole
 rem runtime into %TEMP% on every launch.
@@ -344,7 +344,7 @@ rem dropped as well.
   --add-data "%CD%\reme-helper.ico;." ^
   --add-data "%CD%\reme-helper-taskbar.ico;." ^
   --add-data "%CD%\doc;doc" ^
-  --add-data "%CD%\src\template\i18n\pairs.json;template/i18n" ^
+  --add-data "%CD%\locales;locales" ^
   --exclude-module numpy ^
   --exclude-module numpy.core ^
   --exclude-module PIL._avif ^

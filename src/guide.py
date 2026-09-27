@@ -120,25 +120,27 @@ GUIDE_LINES: list[str] = [
 
 def guide_markdown(context: dict) -> str:
     """把内置说明渲染成 Markdown；``context`` 里的本机路径现场生成。"""
-    from template.i18n.i18n import translate  # 局部导入：guide 只被 main 用，避免循环依赖
+    import i18n_bridge  # 局部导入：guide 只被 main 用，避免循环依赖
 
     lang = context.get("lang") or "zh"
+    i18n_bridge.sync_lang(lang)
+    tt = i18n_bridge.tt
     rows = [
-        translate("| 项目 | 本机取值 |", lang),
+        tt("| 项目 | 本机取值 |"),
         "|---|---|",
-        f"| {translate('安装目录', lang)} | `{context.get('reme_root', '')}` |",
-        f"| {translate('当前模式', lang)} | {context.get('mode_label', '')} |",
-        f"| {translate('当前配置文件', lang)} | `{context.get('config_path', '')}` |",
-        f"| {translate('记忆数据', lang)} | `{context.get('workspace', '')}` |",
-        f"| {translate('凭据文件', lang)} | `{context.get('env_path', '')}` |",
-        f"| {translate('日志目录', lang)} | `{context.get('logs', '')}` |",
-        f"| {translate('服务地址', lang)} | {context.get('service_url', '')} |",
-        f"| {translate('工具版本', lang)} | {context.get('version', '')} |",
+        f"| {tt('安装目录')} | `{context.get('reme_root', '')}` |",
+        f"| {tt('当前模式')} | {context.get('mode_label', '')} |",
+        f"| {tt('当前配置文件')} | `{context.get('config_path', '')}` |",
+        f"| {tt('记忆数据')} | `{context.get('workspace', '')}` |",
+        f"| {tt('凭据文件')} | `{context.get('env_path', '')}` |",
+        f"| {tt('日志目录')} | `{context.get('logs', '')}` |",
+        f"| {tt('服务地址')} | {context.get('service_url', '')} |",
+        f"| {tt('工具版本')} | {context.get('version', '')} |",
     ]
     out: list[str] = []
     for line in GUIDE_LINES:
         if line == "@@PATHS@@":
             out.extend(rows)
             continue
-        out.append(translate(line, lang) if line else line)
+        out.append(tt(line) if line else line)
     return "\n".join(out) + "\n"

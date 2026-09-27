@@ -10,6 +10,7 @@ import traceback
 from pathlib import Path
 
 from conftest import TOOL  # noqa: E402  (puts src/ on sys.path)
+import i18n_bridge  # noqa: E402
 import main  # noqa: E402
 
 LOG = TOOL / "log" / "tests" / "en-mode-test.log"
@@ -35,9 +36,9 @@ def offenders() -> list[str]:
     """当前控制台里所有含中文的控件文字。"""
     bad = []
     for cls, text in main.console_texts():
-        if not text or text in main.i18n.ALLOW_CJK_IN_EN:
+        if not text or text in i18n_bridge.ALLOW_CJK_IN_EN:
             continue      # 语言按钮在英文模式下就该显示「中文」
-        if main.i18n.HAN.search(text) or main.i18n.FULLWIDTH.search(text):
+        if i18n_bridge.HAN.search(text) or i18n_bridge.FULLWIDTH.search(text):
             bad.append(f"{cls}: {text[:60]}")
     return bad
 
@@ -151,7 +152,7 @@ def main_run() -> int:
         menu = main.build_menu()
         texts = [str(item.text) for item in menu.items]
         chinese = [text for text in texts
-                   if text and text not in main.i18n.ALLOW_CJK_IN_EN and main.i18n.HAN.search(text)]
+                   if text and text not in i18n_bridge.ALLOW_CJK_IN_EN and i18n_bridge.HAN.search(text)]
         check("托盘右键菜单为英文", not chinese, "; ".join(chinese[:5]))
     except Exception:  # noqa: BLE001
         check("托盘右键菜单为英文", False, traceback.format_exc(limit=2))

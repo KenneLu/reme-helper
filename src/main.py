@@ -28,7 +28,8 @@ from tkinter import messagebox as _raw_messagebox
 import guide
 from template import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
 from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
-from template.i18n import i18n   # noqa: F402  i18n 重形态住 template/i18n（词表 pairs.json）
+from template.i18n import i18n   # noqa: F402  T5 轻形态（locales/*.json；R 垫层见 i18n_bridge）
+import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + 语言态同步
 from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
@@ -4200,12 +4201,14 @@ def ui_lang() -> str:
 
 
 def t(text) -> str:
-    """把界面文案换成当前语言（中文模式原样返回，未收录的也原样返回）。
+    """把界面文案换成当前语言（轻形态 T5 + R 垫层；未收录的也原样返回）。
 
-    词表在 i18n.py：一行一条中英对照，拼接出来的句子按最长片段替换。
+    词表在 locales/{zh,en}.json；i18n_bridge 做中文原文→键反查：已键化的调用点
+    传键直接命中，历史中文调用点（迁移期双轨）由反查兜底。
     """
     try:
-        return i18n.translate(text, ui_lang())
+        i18n_bridge.sync_lang(ui_lang())
+        return i18n_bridge.tt(text)
     except Exception:  # noqa: BLE001 - translation must never break the UI
         return str(text)
 
@@ -7877,14 +7880,14 @@ def enable_dpi_awareness() -> None:
 
 
 def lang_audit() -> int:
-    """审查中英对照表：列出没翻的中文，并生成左右对照的 i18n_review.md。"""
-    report = i18n.audit([Path(__file__), Path(__file__).resolve().parent / "guide.py"])
+    """审查轻形态词表（locales/*.json）：列出没翻的中文，并生成三列对照 i18n_review.md。"""
+    report = i18n_bridge.audit([Path(__file__), Path(__file__).resolve().parent / "guide.py"])
     review = DIAG_LOG_DIR / "i18n_review.md"
     review.parent.mkdir(parents=True, exist_ok=True)
-    review.write_text(i18n.review_markdown(), encoding="utf-8")
-    lines = [f"entries={len(i18n.TEXT)} missing={len(report['missing'])} "
-             f"unused={len(report['table_only'])} duplicates={report['duplicates']} "
-             f"empty_en={report['empty_en']} cjk_en={report['cjk_en']}", ""]
+    review.write_text(i18n_bridge.review_markdown(), encoding="utf-8")
+    lines = [f"entries={len(i18n_bridge.i18n.TABLES.get('zh', {}))} missing={len(report['missing'])} "
+             f"unused={len(report['table_only'])} duplicates={len(report['duplicates'])} "
+             f"empty_en={len(report['empty_en'])} cjk_en={len(report['cjk_en'])}", ""]
     lines += ["== 未覆盖 =="] + [f"{name}:{line}: {value}" for name, line, value in report["missing"]]
     lines += ["", "== 表里没被用上 =="] + list(report["table_only"])
     output = DIAG_LOG_DIR / "lang-audit.log"
