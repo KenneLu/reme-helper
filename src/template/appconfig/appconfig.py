@@ -5,6 +5,9 @@
 """reme-helper 参数区（T1：拷贝后唯一允许修改的文件）。"""
 APP_ID = "reme-helper"
 APP_NAME = "ReMe 助手"
+# W4（autostart 1.2.0）：Run 键名沿用存量 APP_ID（D3 方案 A——APP_NAME 是中文展示名，
+# 注册表键名须 ASCII；历史键即 reme-helper，改名 = 断链）。
+AUTOSTART_KEY = APP_ID
 
 REPO_OWNER = "KenneLu"
 REPO_NAME = "reme-helper"

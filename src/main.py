@@ -30,6 +30,7 @@ from template import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块
 from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
 from template.i18n import i18n   # noqa: F402  T5 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + 语言态同步
+from template.autostart import autostart  # noqa: F402  T3 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
 from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
@@ -59,10 +60,11 @@ from PIL import Image, ImageDraw, ImageFont
 #   paths 1.1.3 / log_kit 1.0.3 / tray_kit 2.2.0 / service_link 0.1.0 已是模板正本拷贝
 #     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
 #     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
-#   autostart / update_helper / icons 三件仍**内联**（申报留痕）：
-#     自启键名 APP_ID + sync_autostart_path 修复语义、更新链 bat+备份目录、运行态图标着色
-#     ——与模板接口不同构，强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板；
-#     抽件评估见 CHANGELOG Unreleased。
+#   autostart 已于 W4（2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
+#     migrate_autostart 自愈，config 镜像删除——doctor 直查注册表）；
+#   update_helper / icons 两件仍**内联**（申报留痕）：
+#     更新链 bat+备份目录、运行态图标着色——与模板接口不同构，强换必改行为
+#     （护栏：不为对齐而改行为）。反向沉淀已入模板；抽件评估见 CHANGELOG Unreleased。
 VERSION = "1.2.6"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
@@ -341,7 +343,6 @@ DEFAULT_CONFIG = {
     "reme_root": DEFAULT_REME_ROOT,
     "mode": "minimal",
     "start_on_launch": False,
-    "autostart": False,
     "start_tunnels_with_reme": False,
     # G4.2 条款 5：退出时的清理勾选（持久化、默认不清理——服务与隧道越过托盘生命周期继续运行）
     "quit_stop_reme": False,
@@ -3568,76 +3569,8 @@ def open_env_template() -> None:
     os.startfile(str(path))
 
 
-def autostart_enabled() -> bool:
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            value, _ = winreg.QueryValueEx(key, APP_ID)
-        return bool(value)
-    except OSError:
-        return False
-
-
-def set_autostart(enabled: bool) -> None:
-    import winreg
-
-    path = str(Path(sys.executable).resolve())
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-        if enabled:
-            winreg.SetValueEx(key, APP_ID, 0, winreg.REG_SZ, f'"{path}"')
-        else:
-            try:
-                winreg.DeleteValue(key, APP_ID)
-            except FileNotFoundError:
-                pass
-
-
 def toggle_autostart(_icon, _item) -> None:
-    enabled = not autostart_enabled()
-    set_autostart(enabled)
-    CFG["autostart"] = enabled
-    save_config()
-
-
-def sync_autostart_path() -> None:
-    """自启开着的时候，把 Run 值指回**当前这个** exe。
-
-    1.0.6 的 exe 带版本号，所以它的自启值是
-    ``...\\reme-helper-1.0.6\\reme-helper-1.0.6.exe``。把新版**解压覆盖**到那个
-    目录（不是走更新器，而是手动替换）之后，那个文件就没了，值变成悬空——而
-    没有任何东西会去重写它：`set_autostart()` 只在用户点菜单切换时才跑。结果是
-    下次开机静默失效，用户只会觉得"自启莫名其妙坏了"。
-
-    幂等且便宜：只在自启开着、且存的值不是当前 exe 时才写。顺带也修好"整个文件夹
-    被移动/改名"的情况。路径来源与 `set_autostart` 一致，都是 `sys.executable`。
-
-    ⚠️ **只在打包态修**：从源码跑（`python src\\main.py`）时 `sys.executable` 是
-    python.exe，照做会把自启值改成 python.exe —— 实测踩过一次。开发态没有"安装位置"
-    这个概念，本就不该动它。
-    """
-    if os.name != "nt" or not CFG.get("autostart"):
-        return
-    if not getattr(sys, "frozen", False):
-        return
-    try:
-        import winreg
-
-        current = str(Path(sys.executable).resolve())
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            try:
-                stored, _ = winreg.QueryValueEx(key, APP_ID)
-            except FileNotFoundError:
-                stored = ""
-            if str(stored).strip('"') != current:
-                winreg.SetValueEx(key, APP_ID, 0, winreg.REG_SZ, f'"{current}"')
-                log(f"autostart path repaired: {stored!r} -> {current!r}")
-    except OSError as exc:  # noqa: BLE001 - 自启修不好也不该拦住托盘
-        log(f"autostart path repair failed: {exc}")
-    if TRAY_ICON:
-        refresh_tray_menu()
+    autostart.set_autostart(not autostart.is_autostart_enabled())
 
 
 def toggle_start_on_launch(_icon, _item) -> None:
@@ -6598,7 +6531,7 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("深色模式"), toggle_theme, checked=lambda _item: theme_name() == "dark"),
         pystray.MenuItem(menu_text("English / 中文"), toggle_language),
         pystray.MenuItem(menu_text("启动工具时启动ReMe"), toggle_start_on_launch, checked=lambda _item: bool(CFG.get("start_on_launch"))),
-        pystray.MenuItem(menu_text("开机自启"), toggle_autostart, checked=lambda _item: autostart_enabled()),
+        pystray.MenuItem(menu_text("开机自启"), toggle_autostart, checked=lambda _item: autostart.is_autostart_enabled()),
         pystray.MenuItem(menu_text("状态刷新间隔"), build_probe_interval_menu()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("未检测到 ReMe —— 复制安装提示词"),
@@ -7831,7 +7764,7 @@ def release_check() -> int:
         personal = [entry for entry in targets
                     if entry.get("host") not in ("", "192.168.1.100") or entry.get("user") not in ("", "ubuntu")]
         checks.append(("no personal targets", not personal))
-        checks.append(("no autostart", not CFG.get("start_on_launch") and not CFG.get("autostart")))
+        checks.append(("no autostart", not CFG.get("start_on_launch") and not autostart.is_autostart_enabled()))
         checks.append(("probe not remembered",
                        not CFG["llm"].get("probe_ok") and not CFG["embedding"].get("probe_ok")))
         checks.append(("icon asset", icon_path() is not None))
@@ -8304,7 +8237,7 @@ def main() -> int:
     #   * 必须在 pystray.Icon 构造**之前**——晚了就等于"窗口还没建"那段时间没有保护。
     # 句柄持有到进程结束（故意不 close）；拿不到只记日志放行（D3.2）；dev 态跳过。
     hold_exe_delete_guard(log=log)
-    sync_autostart_path()
+    autostart.migrate_autostart(log=log)
     sweep_stale_update_dirs()
     # 这两个是**快**的：本地健康探测与读配置。它们决定图标首帧和 setup() 里的
     # 「ReMe 启动后启动隧道」判断，所以留在同步路径上。

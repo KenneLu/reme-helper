@@ -129,7 +129,7 @@ check("pip spec helper is the single formatter",
       main.reme_pip_spec() == pinned and main.reme_upgrade_target() == PIN)
 
 # ---------- ④ 负数面：源码与词表里不再有「最新稳定版」 ----------
-for path in (SRC_DIR / "main.py", SRC_DIR / "template" / "i18n" / "pairs.json"):
+for path in (SRC_DIR / "main.py", TOOL / "locales" / "zh.json", TOOL / "locales" / "en.json"):
     text = path.read_text(encoding="utf-8", errors="replace")
     check("no 'latest stable' wording in %s" % path.name, "最新稳定版" not in text)
 
