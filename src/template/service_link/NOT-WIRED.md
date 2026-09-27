@@ -4,7 +4,7 @@ This folder is a byte-identical copy of the family template module (README +
 `__init__.py` + `service_link.py`), staged under `src/modules/service_link/`,
 but **nothing imports it**: `grep -rn "service_link" src/ tests/ scripts/`
 finds only this folder. The G4.2 ADOPTED graceful-shutdown path is still pending
-(REVIEW.md finding #8), so the live quit flow keeps terminating the attached
+(复审记录.md finding #8), so the live quit flow keeps terminating the attached
 service by pid.
 
 本模块是模板正本拷贝（整文件夹已采纳），但**全仓库没有任何调用点**——G4.2 的

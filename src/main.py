@@ -7039,7 +7039,7 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
     import tkinter as tk
 
     win = tk.Toplevel(ui_parent())
-    # T3（HANDOFF R1 §3）：原来这里是裸常量 `APP_NAME`，**英文模式下退出框标题仍是
+    # T3（交接 R1 §3）：原来这里是裸常量 `APP_NAME`，**英文模式下退出框标题仍是
     # "ReMe 助手"**。改用本仓现成的本地化标题入口 `app_title()`（= `f"{t(APP_NAME)} {VERSION}"`）。
     win.title(app_title())
     win.attributes("-topmost", True)
@@ -7087,7 +7087,7 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
     cancel_btn.focus_set()
     win.protocol("WM_DELETE_WINDOW", cancel)
     win.bind("<Escape>", lambda _event: cancel())
-    # T3（HANDOFF R1 §3）：正文 / 两个勾选框 / 两个按钮共 5 处原为硬编码中文，
+    # T3（交接 R1 §3）：正文 / 两个勾选框 / 两个按钮共 5 处原为硬编码中文，
     # **英文模式下全部显示中文**。它们用 Tk 的 Label/Checkbutton/Button 构造，
     # **不经过** `_TranslatedMessageBox` 那条 messagebox 路径 ⇒ 当年两条路都绕开了。
     # 一次 `translate_tree(win)` 递归换掉（它开头 `if ui_lang() == "zh": return` ⇒ 中文侧零风险）。

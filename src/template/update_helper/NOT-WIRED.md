@@ -9,7 +9,7 @@
   （实证：reme 早就把外部命令绝对路径化了，而模板很久之后才追上，
   **其间没有任何机制报告过**）。
 - 本工具的更新链是**内联 + OVERRIDE 申报**（bat + 备份目录链路，行为差异大，
-  见 `REVIEW.md` 对应关系矩阵）。它的 `UPDATE-CHAIN-REFERENCE.md` 是模板的
+  见 `复审记录.md` 对应关系矩阵）。它的 `UPDATE-CHAIN-REFERENCE.md` 是模板的
   **参考文档**（`ALIGNMENT §7.2`）。
 
 ## 重验触发
