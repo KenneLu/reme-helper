@@ -1,7 +1,7 @@
 # NOT WIRED YET / 尚未接线
 
 This folder is a byte-identical copy of the family template module (README +
-`__init__.py` + `service_link.py`), staged under `src/modules/service_link/`,
+`__init__.py` + `service_link.py`), staged under `src/template/service_link/`,
 but **nothing imports it**: `grep -rn "service_link" src/ tests/ scripts/`
 finds only this folder. The G4.2 ADOPTED graceful-shutdown path is still pending
 (复审记录.md finding #8), so the live quit flow keeps terminating the attached
@@ -13,7 +13,7 @@ ADOPTED 优雅关闭分支尚未接入（REVIEW 发现 #8）。**不要把它当
 
 This file is reme-local (it has no template counterpart) and is not part of the
 template comparison set; the three template files in this folder stay byte-identical
-to `my-diy-tool-template/modules/service_link/`.
+to `my-diy-tool-template/template/service_link/`.
 
 ## D9 核查（2026-09-19）：优雅关闭 API 在服务侧不存在 ⇒ 不可接
 

@@ -1,7 +1,7 @@
 # NOT-WIRED · update_helper
 
 ## 结论
-本工具**有意不采纳**模板 `modules/update_helper/`。
+本工具**有意不采纳**模板 `template/update_helper/`。
 
 ## 依据
 - **D13（2026-09-19 决策）**：`reme` **不采纳** `update_helper` —— 它是蓝图；

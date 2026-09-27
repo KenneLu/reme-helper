@@ -1,7 +1,7 @@
 # NOT-WIRED · icons
 
 ## 结论
-本工具**有意不接入**模板 `modules/icons/`，使用内联实现。
+本工具**有意不接入**模板 `template/icons/`，使用内联实现。
 
 ## 依据
 - **语义不同形**：模板 `icons` 是**构建期静态生成**（`base_image()` / `make_icons()`）；
