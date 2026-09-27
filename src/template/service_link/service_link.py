@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TEMPLATE-FROM: my-diy-tool-template/modules/service_link/service_link.py | TEMPLATE-VER: 0.1.0
+# TEMPLATE-FROM: my-diy-tool-template/template/service_link/service_link.py | TEMPLATE-VER: 0.1.0
 """服务接入与唯一性（helper ↔ 服务 的所有权模型）。
 
 规范出处：STANDARDS.md §G4.2。四条铁律：

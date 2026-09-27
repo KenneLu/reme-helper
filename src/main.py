@@ -26,11 +26,11 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from tkinter import messagebox as _raw_messagebox
 import guide
-from modules import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
-from modules.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
-from modules.i18n import i18n   # noqa: F402  i18n 重形态住 modules/i18n（词表 pairs.json）
-from modules.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
-from modules.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
+from template import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
+from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
+from template.i18n import i18n   # noqa: F402  i18n 重形态住 template/i18n（词表 pairs.json）
+from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
+from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH, hold_exe_delete_guard)
 
@@ -45,7 +45,7 @@ ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
 TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
 TRAY_HICON_PIXELS = 32
-from modules.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）
+from template.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）
     acquire_single_instance, mutex_name_is_valid, single_instance_free)
 
 import psutil

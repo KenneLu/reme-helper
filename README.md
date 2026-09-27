@@ -140,7 +140,7 @@ work" is an expected state, not a lost artifact (CONFORMANCE §4.1.11).
 in the template (`autostart` 1.1.1, `icons` 2.0.0, `update_helper` 1.0.1) but reme has not
 adopted them - they live inline in `src/main.py`, and `service_link` is adopted but not
 wired. Having no feature is a **gap that must be closed**, not a conflict to be tolerated;
-a schedule is not a permission. Everything under `src/modules/` is kept byte-identical to
+a schedule is not a permission. Everything under `src/template/` is kept byte-identical to
 `my-diy-tool-template` (README + `__init__.py` + code); the heavy-form `i18n` is the only
 declared `TEMPLATE-LOCAL-OVERRIDE`. Unreleased work has no local build: `VERSION` stays at
 the last published `1.2.5` until a release (dev-time rule), and the D1-02 gate blocks build

@@ -344,7 +344,7 @@ rem dropped as well.
   --add-data "%CD%\reme-helper.ico;." ^
   --add-data "%CD%\reme-helper-taskbar.ico;." ^
   --add-data "%CD%\doc;doc" ^
-  --add-data "%CD%\src\modules\i18n\pairs.json;modules/i18n" ^
+  --add-data "%CD%\src\template\i18n\pairs.json;template/i18n" ^
   --exclude-module numpy ^
   --exclude-module numpy.core ^
   --exclude-module PIL._avif ^

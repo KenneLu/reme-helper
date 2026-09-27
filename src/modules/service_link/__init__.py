@@ -1,2 +1,0 @@
-# TEMPLATE-FROM: my-diy-tool-template/modules/service_link/__init__.py | TEMPLATE-VER: 0.1.0
-from .service_link import *  # noqa: F401,F403
