@@ -26,12 +26,14 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from tkinter import messagebox as _raw_messagebox
 import guide
+import icon_pipeline
 from template import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
 from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
 from template.i18n import i18n   # noqa: F402  T5 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + 语言态同步
 from template.autostart import autostart  # noqa: F402  T3 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
 from template.update_helper import update_helper  # noqa: F402  T4 在线更新 1.5.0（W5 后段接线：marker 语义基准已移交模板）
+from template.tray_icons import tray_icons
 from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
@@ -65,8 +67,8 @@ from PIL import Image, ImageDraw, ImageFont
 #     migrate_autostart 自愈，config 镜像删除——doctor 直查注册表）；
 #   update_helper 已于 W5（2026-09-28）接线模板 1.5.0（marker 语义基准在模板 E 组；
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
-#   icons 一件仍**内联**（申报留痕）：运行态图标着色——与模板接口不同构，
-#     强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板；抽件评估见 CHANGELOG Unreleased。
+#   icons 已于 W6（2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
+#     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
 VERSION = "1.2.6"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
@@ -6543,60 +6545,9 @@ def build_menu() -> pystray.Menu:
     )
 
 
-def icon_font(size: int):
-    """图标里的那个「R」用 TrueType 渲染；一个都取不到就退回 Pillow 自带字体。"""
-    for name in ("seguisb.ttf", "segoeuib.ttf", "arialbd.ttf"):
-        path = Path(os.environ.get("WINDIR") or r"C:\Windows") / "Fonts" / name
-        try:
-            if path.is_file():
-                return ImageFont.truetype(str(path), size)
-        except OSError:
-            continue
-    try:
-        return ImageFont.load_default(size)     # Pillow ≥ 10.1 的可缩放默认字体
-    except TypeError:
-        return ImageFont.load_default()
-
-
-def make_icon(running: bool = True, tunnels: bool = False, size: int = 64) -> Image.Image:
-    """状态托盘图标：圆底 + 「R」+ 可选隧道点。
-
-    坐标全部按比例算——同一个函数既要喂 16px 的 .ico 帧，也要喂 64px 的托盘图标；
-    写死像素的话小尺寸会糊成一团。
-    """
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    color = "#26a269" if running else "#6c757d"
-    # Notification-area icons end up around 16–20 physical pixels. The old 10% margin reduced the
-    # 16px drawing to a 12x12 island and made both the ring and R look soft after shell scaling.
-    margin = max(1, round(size * 0.035))
-    ring = max(1, round(size * 0.04))
-    draw.ellipse((margin, margin, size - margin - 1, size - margin - 1),
-                 fill=color, outline="#f6f5f4", width=ring)
-    font = icon_font(max(9, round(size * 0.67)))
-    left, top, right, bottom = draw.textbbox((0, 0), "R", font=font)
-    draw.text(((size - (right - left)) / 2 - left, (size - (bottom - top)) / 2 - top),
-              "R", font=font, fill="white")
-    if tunnels:
-        dot = max(4, round(size * 0.26))
-        draw.ellipse((size - dot - 1, size - dot - 1, size - 1, size - 1),
-                     fill="#f5c211", outline="#ffffff", width=max(1, round(size * 0.03)))
-    return image
-
-
-def make_taskbar_icon(size: int = 64) -> Image.Image:
-    """Taskbar/titlebar asset with small-size geometry that fills the available pixels."""
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    margin = max(1, round(size * 0.035))
-    ring = max(1, round(size * 0.04))
-    draw.ellipse((margin, margin, size - margin - 1, size - margin - 1),
-                 fill="#26a269", outline="#ffffff", width=ring)
-    font = icon_font(max(9, round(size * 0.67)))
-    left, top, right, bottom = draw.textbbox((0, 0), "R", font=font)
-    draw.text(((size - (right - left)) / 2 - left, (size - (bottom - top)) / 2 - top),
-              "R", font=font, fill="white")
-    return image
+def _tray_state_key(running: bool, tunnels: bool) -> str:
+    """(健康, 隧道) → 贴图状态键。4 形态全量图（D6），运行时只查键不画图。"""
+    return ("ok" if running else "down") + ("_tunnel" if tunnels else "")
 
 
 def refresh_tray_icon() -> None:
@@ -6611,20 +6562,10 @@ def refresh_tray_icon() -> None:
         return
     try:
         if icon.visible:
-            icon.icon = tray_icon_image(running=bool(STATE.get("healthy")),
-                                        tunnels=any(TUNNEL_STATE.values()))
+            icon.icon = tray_icons.get(_tray_state_key(bool(STATE.get("healthy")),
+                                                       any(TUNNEL_STATE.values())))
     except Exception as exc:  # noqa: BLE001 - status paint failure must not break the action
         log(f"tray icon refresh failed: {type(exc).__name__}: {exc}")
-
-
-def tray_icon_image(*, running: bool, tunnels: bool) -> Image.Image:
-    """画托盘那枚 HICON 的源图，尺寸就取外壳真正会用的那一档。
-
-    pystray 的 win32 后端把 PIL 图存成单帧 .ico，再 `LoadImage(..., LR_DEFAULTSIZE)` 取成
-    32×32 的 HICON；喂它 64×64 等于让 Windows 连缩两次（64→32→16），圆环和字母先糊一层。
-    """
-    pixels = max(16, round(TRAY_HICON_PIXELS * window_dpi() / 96))
-    return make_icon(running, tunnels, pixels)
 
 
 def write_app_icon() -> tuple[Path, Path]:
@@ -6632,11 +6573,11 @@ def write_app_icon() -> tuple[Path, Path]:
 
     每一帧单独按目标尺寸渲染，不靠缩放：256px 缩到 16px 的话那个「R」会糊。
     """
-    frames = [make_icon(True, False, size) for size in ICON_SIZES]
+    frames = [icon_pipeline.make_icon(True, False, size) for size in ICON_SIZES]
     frames[-1].save(ICON_PATH, format="ICO",
                     sizes=[(size, size) for size in ICON_SIZES],
                     append_images=frames[:-1])
-    taskbar_frames = [make_taskbar_icon(size) for size in TASKBAR_ICON_SIZES]
+    taskbar_frames = [icon_pipeline.make_taskbar_icon(size) for size in TASKBAR_ICON_SIZES]
     taskbar_frames[-1].save(TASKBAR_ICON_PATH, format="ICO",
                             sizes=[(size, size) for size in TASKBAR_ICON_SIZES],
                             append_images=taskbar_frames[:-1])
@@ -6774,7 +6715,7 @@ def monitor_loop() -> None:
             # 的比对结果被吃掉，真正生效的那次就永远不来了。
             if icon_state != last_icon and TRAY_ICON.visible:
                 last_icon = icon_state
-                TRAY_ICON.icon = tray_icon_image(running=icon_state[0], tunnels=icon_state[1])
+                TRAY_ICON.icon = tray_icons.get(_tray_state_key(*icon_state))
             signature = tray_signature()
             if signature != last_signature:
                 last_signature = signature
@@ -7511,8 +7452,9 @@ def release_check() -> int:
                        not CFG["llm"].get("probe_ok") and not CFG["embedding"].get("probe_ok")))
         checks.append(("icon asset", icon_path() is not None))
         # 托盘与菜单的构造路径（打包后最容易缺资源的地方）
-        icon = make_icon(True, False)
-        checks.append(("icon drawn", icon is not None and icon.size[0] > 0))
+        tray_icons.init()
+        icon = tray_icons.get("ok")
+        checks.append(("icon asset loaded", icon is not None and icon.size[0] > 0))
         tray = pystray.Icon(APP_ID, icon, t(APP_NAME), build_menu())
         checks.append(("menu built", tray is not None))
         # 此刻没有别的托盘实例在跑（只探测，不占锁）
@@ -7921,8 +7863,11 @@ def main() -> int:
     if "--make-icon" in sys.argv:
         try:
             tray_path, taskbar_path = write_app_icon()
+            from template.icons.icons import make_state_icons
+            states = make_state_icons(str(Path(__file__).resolve().parent.parent))
             print(f"icons written: tray={tray_path} ({', '.join(str(s) for s in ICON_SIZES)}); "
-                  f"taskbar={taskbar_path} ({', '.join(str(s) for s in TASKBAR_ICON_SIZES)})")
+                  f"taskbar={taskbar_path} ({', '.join(str(s) for s in TASKBAR_ICON_SIZES)}); "
+                  f"states={{{', '.join(f'{k}:{len(v)}' for k, v in states.items())}}}")
             return 0
         except Exception as exc:  # noqa: BLE001
             print(f"icon failed: {type(exc).__name__}: {exc}")
@@ -7988,9 +7933,10 @@ def main() -> int:
     # 托盘图标必须先立起来。refresh_tunnels() 已移进 monitor_loop 的第一轮（立即执行）：
     # 它要给每台 VM 起 ssh 并等探测结果，VM 不在线时实测 ≥20 秒。挡在这里的后果是
     # 启动后 20 多秒内**没有任何托盘图标**（详见 monitor_loop 的说明）。
+    tray_icons.init()
     TRAY_ICON = pystray.Icon(APP_ID,
-                             tray_icon_image(running=bool(STATE["healthy"]),
-                                             tunnels=any(TUNNEL_STATE.values())),
+                             tray_icons.get(_tray_state_key(bool(STATE["healthy"]),
+                                                            any(TUNNEL_STATE.values()))),
                              t(APP_NAME), build_menu())
     log(f"tray: icon created (elapsed {time.monotonic() - started:.2f}s)")
     threading.Thread(target=monitor_loop, daemon=True).start()

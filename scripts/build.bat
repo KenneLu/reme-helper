@@ -345,6 +345,7 @@ rem dropped as well.
   --add-data "%CD%\reme-helper-taskbar.ico;." ^
   --add-data "%CD%\doc;doc" ^
   --add-data "%CD%\locales;locales" ^
+  --add-data "%CD%esources;resources" ^
   --exclude-module numpy ^
   --exclude-module numpy.core ^
   --exclude-module PIL._avif ^
