@@ -253,10 +253,10 @@ def build_steps(api):
     def vm_buttons_fit_their_labels():
         # 防回归：之前按钮列太窄，“扫描密钥”四个字被裁掉
         fit = api["vm_button_fit"]()
-        check("VM 按钮：包含“扫描密钥…”且改到表格下方横排",
+        check("ssh 目标按钮：包含“扫描密钥…”且改到表格下方横排",
               any(text.startswith("扫描密钥") for text in fit), str(list(fit)))
         narrow = {text: size for text, size in fit.items() if size[0] < size[1]}
-        check("VM 按钮：每个按钮宽度都放得下自己的文字", not narrow, str(narrow))
+        check("ssh 目标按钮：每个按钮宽度都放得下自己的文字", not narrow, str(narrow))
 
     @step
     def key_warning_is_short():

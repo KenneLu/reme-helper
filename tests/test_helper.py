@@ -596,8 +596,8 @@ finally:
     main.MONITOR_WAKE_EVENT.clear()
 
 # 任务栏与托盘的16px小图都至少占14x14有效像素；任务栏另带20/40px原生帧。
-_tray_16 = main.make_icon(True, False, 16)
-_taskbar_16 = main.make_taskbar_icon(16)
+_tray_16 = main.icon_pipeline.make_icon(True, False, 16)
+_taskbar_16 = main.icon_pipeline.make_taskbar_icon(16)
 _tray_box = _tray_16.getbbox()
 _taskbar_box = _taskbar_16.getbbox()
 assert _tray_box and _taskbar_box
@@ -960,7 +960,7 @@ _saved_probe = main.probe_health
 _saved_tunnel_probe = main.probe_tunnel
 _saved_command = main.ssh_command
 _saved_tray_icon = main.TRAY_ICON
-_saved_make_icon = main.make_icon
+_saved_make_icon = main.icon_pipeline.make_icon
 _saved_tunnel_notify = main.notify
 _tunnel_events = []
 
@@ -972,9 +972,9 @@ class _TunnelIcon:
 
 _tunnel_icon = _TunnelIcon()
 main.TRAY_ICON = _tunnel_icon
-# 托盘图现在统一走 tray_icon_image(running=, tunnels=, size=)：它内部再调 make_icon，
-# 所以替身要接受同样的关键字参数。
-main.make_icon = lambda running=True, tunnels=False, size=64: (running, tunnels)
+# 托盘图 W6 起统一走 tray_icons.get(_tray_state_key(...))：替身返回状态键字符串
+# （"ok"/"ok_tunnel"/...），断言按键比较。
+main.tray_icons.get = lambda state, size=None: state
 main.notify = lambda message: _tunnel_events.append(message)
 main.STATE["healthy"] = True
 
@@ -1005,7 +1005,7 @@ main.TUNNEL_STATE.clear()
 main.TUNNEL_STATE[_fake_key] = True
 main.stop_tunnel(_fake_target)
 assert main.TUNNEL_WANTED[_fake_key] is False, "手动停止必须清掉期望标记"
-assert _tunnel_icon.icon == (True, False), "主动停止返回前应立即移除托盘黄色点"
+assert _tunnel_icon.icon == "ok", "主动停止返回前应立即移除托盘黄色点"
 assert _tunnel_events[-1] == "T 隧道已断开", _tunnel_events
 main.TUNNEL_STATE.clear()
 main.refresh_tunnels()
@@ -1017,7 +1017,7 @@ main.TUNNEL_STATE.clear()
 _tunnel_icon.icon = None
 ok, _detail = main.start_tunnel(_fake_target)
 assert ok is True
-assert _tunnel_icon.icon == (True, True), "主动启动成功后应立即显示托盘黄色点"
+assert _tunnel_icon.icon == "ok_tunnel", "主动启动成功后应立即显示托盘黄色点"
 assert _tunnel_events[-1] == "T 隧道已连接", _tunnel_events
 
 # 5. 句柄丢失但转发仍在：不许先报「已断开」再报「已连接」，也不许重复拉起 ssh
@@ -1064,7 +1064,7 @@ main.probe_health = _saved_probe
 main.probe_tunnel = _saved_tunnel_probe
 main.ssh_command = _saved_command
 main.TRAY_ICON = _saved_tray_icon
-main.make_icon = _saved_make_icon
+main.icon_pipeline.make_icon = _saved_make_icon
 main.notify = _saved_tunnel_notify
 main.TUNNEL_PROCS.clear()
 main.TUNNEL_STATE.clear()

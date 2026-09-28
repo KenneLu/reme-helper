@@ -34,6 +34,7 @@ import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + �
 from template.autostart import autostart  # noqa: F402  T3 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
 from template.update_helper import update_helper  # noqa: F402  T4 在线更新 1.5.0（W5 后段接线：marker 语义基准已移交模板）
 from template.tray_icons import tray_icons
+from template.tunnel_kit import tunnel_kit  # noqa: F402  W7：隧道参数正本（Decision 10）
 from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
@@ -50,8 +51,8 @@ ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
 TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
 TRAY_HICON_PIXELS = 32
-from template.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）
-    acquire_single_instance, mutex_name_is_valid, single_instance_free)
+from template.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）+ 菜单占用探测器
+    acquire_single_instance, menu_is_open, mutex_name_is_valid, single_instance_free)
 
 import psutil
 import pystray
@@ -60,7 +61,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 # 模板化状态（W-f/W-g，执行文档-20260918 §四.9）：
-#   paths 1.1.3 / log_kit 1.0.3 / tray_kit 2.2.0 / service_link 0.1.0 已是模板正本拷贝
+#   paths 1.1.3 / log_kit 1.0.3 / tray_kit 2.3.0 / service_link 0.2.0 已是模板正本拷贝
 #     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
 #     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
 #   autostart 已于 W4（2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
@@ -654,7 +655,7 @@ def settings_changed_items(draft: dict, saved_cfg: dict, saved_root: str, saved_
     if draft["reme_root"] != saved_root:
         items.append("ReMe 目录")
     if targets != saved_cfg.get("targets", []):
-        items.append("VM 隧道目标")
+        items.append("ssh 隧道目标")
     return items
 
 
@@ -680,7 +681,7 @@ def _format_pending_value(section: str, key: str, value) -> str:
 # 悬浮明细的大节顺序与字段标签：严格对应面板的大标题与选项小标题，按面板顺序排列方便对照修改。
 PENDING_SECTION_ORDER = (
     "运行与模式", "LLM 与模型", "Embedding（语义检索）",
-    "记忆管道", "MCP 工具暴露", "自定义模式功能", "VM 隧道目标",
+    "记忆管道", "MCP 工具暴露", "自定义模式功能", "ssh 隧道目标",
 )
 PENDING_FIELD_LABELS = {
     "mode": "模式",
@@ -696,7 +697,7 @@ PENDING_FIELD_LABELS = {
     "dream_cron": "整理计划",
     "custom": "自定义选择",
     "jobs": "暴露的 Job",
-    "targets": "VM 目标",
+    "targets": "ssh 目标",
 }
 
 
@@ -748,9 +749,9 @@ def settings_pending_details(draft: dict, saved_cfg: dict, saved_root: str, save
     # ---- 5. MCP 工具暴露 ----
     if draft["expose"] != saved_cfg["expose"]:
         walk("MCP 工具暴露", draft["expose"], saved_cfg["expose"])
-    # ---- 7. VM 隧道目标 ----
+    # ---- 7. ssh 隧道目标 ----
     if targets != saved_cfg.get("targets", []):
-        add("VM 隧道目标", "targets", f"{len(saved_cfg.get('targets', []))} 项", f"{len(targets)} 项")
+        add("ssh 隧道目标", "targets", f"{len(saved_cfg.get('targets', []))} 项", f"{len(targets)} 项")
 
     details: list[tuple[str, str, str, str]] = []
     for sec in PENDING_SECTION_ORDER:
@@ -1485,7 +1486,7 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         f"- {t('当前版本：')}reme-ai {installed}{t('，pip 安装，extra 是 [core]')}",
         f"- {t('目标版本：')}reme-ai=={target}{target_hint}{upstream_note}",
         f"- {t('服务地址：')}http://127.0.0.1:2333{t('，当前')}{t(running)}",
-        f"- {t('配套工具：')}{helper_location()}{t('，负责生成配置、启停服务、VM 隧道')}",
+        f"- {t('配套工具：')}{helper_location()}{t('，负责生成配置、启停服务、ssh 隧道')}",
         "",
         t("## 第一阶段：只分析，不动手"),
         t("允许的动作：读已装包的 METADATA 与 default.yaml、必要时把**目标版本**的 wheel 下载到临时目录解包对比、读 config/ 与日志。不要去看上游有没有更新的版本。"),
@@ -3002,18 +3003,13 @@ def ssh_command(target: dict, remote_command: str | None = None) -> list[str]:
     if target.get("key"):
         command += ["-i", str(Path(target["key"]).expanduser())]
     if remote_command is None:
-        command += [
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "ServerAliveInterval=20",
-            "-o",
-            "ServerAliveCountMax=3",
-            "-N",
-            "-R",
-            f"127.0.0.1:{int(target.get('remote_port',22333))}:127.0.0.1:2333",
-            target_connection(target),
-        ]
+        # W7：长连接参数段走 tunnel_kit 正本（Decision 10 统一：ServerAliveInterval
+        # 20→30 家族归一；remote_bind=127.0.0.1 保 reme 收紧语义——远端只听本机）。
+        command += tunnel_kit.build_reverse_args(
+            {"host": target_connection(target), "port": target.get("port", 22),
+             "remote_port": int(target.get("remote_port", 22333)),
+             "local_host": "127.0.0.1", "local_port": 2333},
+            remote_bind="127.0.0.1")
     else:
         command += [target_connection(target), remote_command]
     return command
@@ -3119,7 +3115,7 @@ def stop_tunnel(target: dict) -> None:
 def start_all_tunnels() -> tuple[bool, str]:
     targets = [target for target in CFG["targets"] if target.get("enabled", True)]
     if not targets:
-        return False, "没有启用的VM目标"
+        return False, "没有启用的ssh 目标"
     failures = []
     for target in targets:
         ok, detail = start_tunnel(target)
@@ -3131,7 +3127,7 @@ def start_all_tunnels() -> tuple[bool, str]:
 def stop_all_tunnels() -> tuple[bool, str]:
     for target in CFG.get("targets", []):
         stop_tunnel(target)
-    return True, "VM隧道已停止"
+    return True, "ssh 隧道已停止"
 
 
 def refresh_tunnels() -> None:
@@ -3636,7 +3632,7 @@ def validate_targets(targets: list[dict]) -> None:
     seen = set()
     for target in targets:
         if not str(target.get("host") or "").strip():
-            raise ValueError("VM目标的主机 / IP不能为空")
+            raise ValueError("ssh 目标的主机 / IP不能为空")
         for field, default in (("port", 22), ("remote_port", 22333)):
             try:
                 target[field] = int(target.get(field, default))
@@ -3646,7 +3642,7 @@ def validate_targets(targets: list[dict]) -> None:
                 raise ValueError("端口必须在1到65535之间")
         identity = (str(target["host"]).lower(), target["port"], target["remote_port"])
         if identity in seen:
-            raise ValueError("同一VM目标不能重复使用同一个映射端口")
+            raise ValueError("同一ssh 目标不能重复使用同一个映射端口")
         seen.add(identity)
 
 
@@ -3656,7 +3652,7 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
         "port": 22, "remote_port": 22333, "key": "", "enabled": True,
     })
     window = toplevel(parent)
-    window.title("编辑VM目标" if target else "添加VM目标")
+    window.title("编辑ssh 目标" if target else "添加ssh 目标")
     window.geometry("520x350")
     attach_dialog(parent, window)
     window.grab_set()
@@ -3702,7 +3698,7 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
 def choose_target_dialog(title: str) -> dict | None:
     targets = CFG.get("targets", [])
     if not targets:
-        notify("还没有VM目标")
+        notify("还没有ssh 目标")
         return None
     if len(targets) == 1:
         return targets[0]
@@ -3773,7 +3769,7 @@ def edit_target(_icon=None, _item=None) -> None:
         parent = ui_parent()
         if parent is None:
             return
-        selected = choose_target_dialog("选择要编辑的VM目标")
+        selected = choose_target_dialog("选择要编辑的ssh 目标")
         if not selected:
             return
         candidate = edit_target_dialog(parent, selected)
@@ -3796,7 +3792,7 @@ def delete_target(_icon=None, _item=None) -> None:
         parent = ui_parent()
         if parent is None:
             return
-        selected = choose_target_dialog("选择要删除的VM目标")
+        selected = choose_target_dialog("选择要删除的ssh 目标")
         if not selected:
             return
         accepted = messagebox.askyesno(APP_NAME, f"确定删除 {selected['name']}（{selected['host']}）？", parent=parent)
@@ -5120,8 +5116,8 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                                  wraplength=760, justify="left")
         feature_note.grid(row=row_index, column=0, columnspan=6, sticky="w", pady=(12, 0))
 
-        # ================= 7. VM 隧道 =================
-        vm_holder = section(7, "VM 隧道目标", "把 Windows 上的 ReMe 反向映射给虚拟机内的 Agent。")
+        # ================= 7. ssh 隧道 =================
+        vm_holder = section(7, "ssh 隧道目标", "把 Windows 上的 ReMe 反向映射给虚拟机内的 Agent。")
         targets_data = deep_copy(CFG.get("targets", []))
         columns = ("enabled", "name", "connection", "remote_port", "key")
         tree = ttk.Treeview(vm_holder, columns=columns, show="headings", height=4, selectmode="browse")
@@ -5163,7 +5159,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         def edit_vm():
             index = selected_index()
             if index is None:
-                messagebox.showinfo(APP_NAME, "请先选择一个VM目标", parent=root)
+                messagebox.showinfo(APP_NAME, "请先选择一个ssh 目标", parent=root)
                 return
             candidate = edit_target_dialog(root, targets_data[index])
             if candidate:
@@ -5179,7 +5175,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         def delete_vm():
             index = selected_index()
             if index is None:
-                messagebox.showinfo(APP_NAME, "请先选择一个VM目标", parent=root)
+                messagebox.showinfo(APP_NAME, "请先选择一个ssh 目标", parent=root)
                 return
             if messagebox.askyesno(APP_NAME, f"确定删除 {targets_data[index]['name']}？", parent=root):
                 targets_data.pop(index)
@@ -5197,9 +5193,9 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
             command=lambda: (refresh_target_tree(),
                              messagebox.showinfo(APP_NAME, "本机 SSH 密钥扫描完成", parent=root)))
         scan_button.pack(side="left", padx=(6, 0))
-        Tooltip(add_button, "添加一个 VM 目标；需要填写 SSH 用户名、主机、端口。")
-        Tooltip(edit_button, "编辑选中的 VM 目标（先在上表里选中一行）。")
-        Tooltip(delete_button, "删除选中的 VM 目标（不影响虚拟机本身）。")
+        Tooltip(add_button, "添加一个 ssh 目标；需要填写 SSH 用户名、主机、端口。")
+        Tooltip(edit_button, "编辑选中的 ssh 目标（先在上表里选中一行）。")
+        Tooltip(delete_button, "删除选中的 ssh 目标（不影响虚拟机本身）。")
         Tooltip(scan_button, "重新扫描本机 ~/.ssh 下可用的私钥，并刷新上表“密钥”列。")
         ttk.Label(vm_buttons, text="添加/编辑/删除作用于上表选中的那一行",
                   font=FONT_HINT, foreground=THEME["muted"]).pack(side="left", padx=(12, 0))
@@ -6152,7 +6148,7 @@ def mode_text(_item=None) -> str:
 def tunnel_text(_item=None) -> str:
     targets = [target for target in CFG.get("targets", []) if target.get("enabled", True)]
     connected = sum(1 for target in targets if TUNNEL_STATE.get(target_key(target)))
-    return t("VM隧道：") + f"{connected}/{len(targets)}"
+    return t("ssh 隧道：") + f"{connected}/{len(targets)}"
 
 
 def attach_dialog(parent, dialog) -> None:
@@ -6399,53 +6395,8 @@ def menu_text(source: str):
 
 MENU_DIRTY = {"dirty": False}
 
-
-GUI_INMENUMODE = 0x00000004
-
-
-def menu_is_open() -> bool:
-    """系统弹出菜单是否正开着。
-
-    开着的时候重建菜单会把它关掉（pystray 的 _update_menu 是 DestroyMenu+CreatePopupMenu），
-    表现就是「鼠标滑着滑着突然失焦」。所以先问一句。
-
-    探测方式：菜单模态标记（GUI_INMENUMODE）挂在**调用 TrackPopupMenu 的那个线程**上，
-    而托盘窗口并不会因此变成前台窗口（实测过），所以遍历本进程所有线程去问；
-    顺带把「前台窗口就是系统菜单类 #32768」这条也留作兜底。
-    """
-    if os.name != "nt":
-        return False
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class GUITHREADINFO(ctypes.Structure):
-            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
-                        ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
-                        ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
-                        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
-                        ("rcCaret", wintypes.RECT)]
-
-        user32 = ctypes.windll.user32
-        for thread in threading.enumerate():
-            thread_id = getattr(thread, "native_id", None)
-            if not thread_id:
-                continue
-            info = GUITHREADINFO()
-            info.cbSize = ctypes.sizeof(GUITHREADINFO)
-            if not user32.GetGUIThreadInfo(int(thread_id), ctypes.byref(info)):
-                continue
-            if info.flags & GUI_INMENUMODE:
-                return True
-        hwnd = user32.GetForegroundWindow()
-        if hwnd:
-            name = ctypes.create_unicode_buffer(32)
-            user32.GetClassNameW(hwnd, name, 32)
-            if name.value == "#32768":
-                return True
-        return False
-    except Exception:  # noqa: BLE001 - 探测失败就当没开着
-        return False
+# menu_is_open 探测器已随 tray_kit 2.3.0 下沉模板（W7 Decision 9），
+# 经 template.tray_kit 具名导入，此处不再内联。
 
 
 def refresh_tray_menu(force: bool = False) -> None:
@@ -6484,7 +6435,7 @@ def tray_signature() -> tuple:
 
 def build_menu() -> pystray.Menu:
     return pystray.Menu(
-        # 分组顺序 = 使用频率：状态(只读) → 控制台 → 服务 → VM 隧道 → 打开 → 设置 → 退出。
+        # 分组顺序 = 使用频率：状态(只读) → 控制台 → 服务 → ssh 隧道 → 打开 → 设置 → 退出。
         # 每个区内部也按常用度排；「未检测到 ReMe」只在该出现的时候出现。
         pystray.MenuItem(status_text, None, enabled=False),
         # 两个版本行分开：ReMe（服务）在前，ReMe 助手（本工具）在后。
@@ -6519,9 +6470,9 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("重启ReMe"), lambda _icon, _item: run_action(restart_service), enabled=lambda _item: service_is_healthy()),
         pystray.MenuItem(menu_text("打开ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy()),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(menu_text("VM目标"), build_targets_menu()),
-        pystray.MenuItem(menu_text("启动全部VM隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
-        pystray.MenuItem(menu_text("停止全部VM隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
+        pystray.MenuItem(menu_text("ssh 目标"), build_targets_menu()),
+        pystray.MenuItem(menu_text("启动全部ssh 隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
+        pystray.MenuItem(menu_text("停止全部ssh 隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
         pystray.MenuItem(menu_text("ReMe启动后启动隧道"), toggle_tunnels_on_start, checked=lambda _item: bool(CFG.get("start_tunnels_with_reme"))),
         pystray.Menu.SEPARATOR,
         # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
@@ -6946,7 +6897,7 @@ def confirm_quit_dialog() -> tuple[bool, bool, bool]:
     var_tunnels = tk.BooleanVar(master=win, value=result["tunnels"])
     tk.Checkbutton(opts, text="同时关闭当前 ReMe 服务", variable=var_reme,
                    command=lambda: _persist_quit_choice("quit_stop_reme", var_reme.get())).pack(anchor="w")
-    tk.Checkbutton(opts, text="同时关闭当前 VM 隧道", variable=var_tunnels,
+    tk.Checkbutton(opts, text="同时关闭当前 ssh 隧道", variable=var_tunnels,
                    command=lambda: _persist_quit_choice("quit_stop_tunnels", var_tunnels.get())).pack(anchor="w")
     btns = tk.Frame(win)
     btns.pack(pady=(8, 12))
@@ -7031,7 +6982,7 @@ def quit_app(icon, _item) -> None:
     elif stop_reme:
         notify("正在安全退出：正在停止 ReMe 服务…")
     elif stop_tunnels:
-        notify("正在安全退出：正在停止 VM 隧道…")
+        notify("正在安全退出：正在停止 ssh 隧道…")
     else:
         notify("正在安全退出（ReMe 与隧道保持运行）…")
     threading.Thread(target=shutdown_tray, args=(icon,),
