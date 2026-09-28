@@ -81,7 +81,23 @@ def run() -> int:
     logs = []
     log = logs.append
     key = "reme-helper"  # AUTOSTART_KEY 经 appconfig == APP_ID
+    # 模块级替身必须恢复（finally）：同进程内后续 import template.autostart 的
+    # 用例不应拿到被替换的 sys/os/winreg（C-17 的"还原"豁免腿也正是这一语义）。
+    saved = {}
+    for attr in ("sys", "os", "winreg"):
+        saved[attr] = getattr(autostart, attr, None)
 
+    try:
+        _cases(logs, log, key)
+    finally:
+        for attr, val in saved.items():
+            if val is not None:
+                setattr(autostart, attr, val)
+        logs.append("restored: sys/os/winreg substituted attrs returned")
+    return 0 if not FAILS else 1
+
+
+def _cases(logs, log, key):
     # ① 无键：不新建、要出声
     fake = FakeWinreg(read_error="filenotfound")
     with_fake(None, fake, frozen=True)
@@ -113,9 +129,8 @@ def run() -> int:
     check("dev run: registry untouched", fake.writes == [], str(fake.writes))
     check("dev run: guard logged", any("dev run" in l for l in logs), str(logs))
 
-    print("AUTOSTART TEST " + ("FAILED: " + ",".join(FAILS) if FAILS else "OK"), flush=True)
-    return 1 if FAILS else 0
-
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    code = run()
+    print("AUTOSTART TEST " + ("FAILED: " + ",".join(FAILS) if FAILS else "OK"), flush=True)
+    raise SystemExit(code)
