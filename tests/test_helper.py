@@ -606,31 +606,48 @@ assert (_taskbar_box[2] - _taskbar_box[0]) >= 14, _taskbar_box
 assert 20 in main.TASKBAR_ICON_SIZES and 40 in main.TASKBAR_ICON_SIZES
 
 # 交互启动后检查一次更新：发现新版才通知；已是最新与网络失败只写日志。
-_saved_latest_release = main.helper_latest_release
+# W5 接线后 mock 点：模板 update_helper.check_update（返回 dict；旧 helper_latest_release 已删）
+_saved_check = main.update_helper.check_update
+_saved_dl = main.update_helper.download_and_prepare
 _saved_update_notify = main.notify
 _saved_update_state = dict(main.HELPER_UPDATE_STATE)
 _update_messages = []
+def _fake_check(newer, latest="99.0.0"):
+    def _impl(current_version, force=False, repo=None):
+        # 模板真实 check_update 成功路径会经 _publish 更新模块状态；整体替换 mock 时
+        # 必须手动同步，否则 update_ready() 恒空（实测踩过：外壳判"没有可用目标"）。
+        main.update_helper._PUBLISHED["ready"] = latest if newer else None
+        return {"latest": latest, "current": current_version, "newer": newer, "error": ""}
+    return _impl
 try:
     main.STOP_EVENT.clear()
     main.SHUTDOWN_STARTED.clear()
     main.notify = lambda message: _update_messages.append(message)
-    main.helper_latest_release = lambda: {"tag": "v99.0.0", "zip": "x", "sha256": ""}
+    main.update_helper.check_update = _fake_check(True)
     main.startup_helper_update_check()
-    assert len(_update_messages) == 1 and "v99.0.0" in _update_messages[0], _update_messages
+    assert len(_update_messages) == 1 and "99.0.0" in _update_messages[0], _update_messages
     # 更新状态必须进菜单签名：否则后台查到新版后「下载并更新」要等别的状态变化才亮
     # （与 i18n 那次「状态不在签名里 ⇒ 菜单不刷新」同源）。
     _sig_newer = main.tray_signature()
     main.HELPER_UPDATE_STATE["newer"] = False
     assert _sig_newer != main.tray_signature(), "更新状态必须参与 tray_signature 比较"
-    # sha256 期望值缺失必须**中止**，不得静默跳过校验（安全缺口，2026-09-19 修）。
+    # 下载链失败必须**整体失败**（不半装）。模板链路：下载/校验任一失败 RuntimeError
+    # ⇒ 外壳 _fail 返回 False（sha256 缺失中止的语义由模板 verify_zip_sha256 保证，
+    # 此处验证的是"失败透传不误报成功"）。
+    def _boom(latest, target_dir, update_dir, log=lambda *a: None, **kw):
+        raise RuntimeError("发布页缺少 xxx.zip.sha256 校验文件，已中止更新")
+    main.update_helper.download_and_prepare = _boom
+    main.update_helper.check_update = _fake_check(True)
+    main.HELPER_UPDATE_STATE["newer"] = True
     _ok, _detail = main.download_and_apply_helper_update()
     assert _ok is False and "sha256" in _detail, (_ok, _detail)
     _update_messages.clear()
-    main.helper_latest_release = lambda: {"tag": f"v{main.VERSION}", "zip": "x", "sha256": ""}
+    main.update_helper.check_update = _fake_check(False, latest=main.VERSION)
     main.startup_helper_update_check()
     assert not _update_messages, "已是最新时不应每次启动都弹通知"
 finally:
-    main.helper_latest_release = _saved_latest_release
+    main.update_helper.check_update = _saved_check
+    main.update_helper.download_and_prepare = _saved_dl
     main.notify = _saved_update_notify
     main.HELPER_UPDATE_STATE.clear()
     main.HELPER_UPDATE_STATE.update(_saved_update_state)
@@ -641,9 +658,9 @@ with tempfile.TemporaryDirectory(prefix="reme-sha-") as _sha_dir:
     _pkg = Path(_sha_dir) / "pkg.zip"
     _pkg.write_bytes(b"payload")
     _good = _hashlib.sha256(b"payload").hexdigest()
-    assert main.verify_zip_sha256(_pkg, _good + "  pkg.zip")[0] is True
-    assert main.verify_zip_sha256(_pkg, "0" * 64)[0] is False
-    assert main.verify_zip_sha256(_pkg, "   ")[0] is False
+    assert main.update_helper.verify_zip_sha256(_pkg, _good + "  pkg.zip")[0] is True
+    assert main.update_helper.verify_zip_sha256(_pkg, "0" * 64)[0] is False
+    assert main.update_helper.verify_zip_sha256(_pkg, "   ")[0] is False
 
 # 16) 标题随语言切换（弹窗标题早就翻了，窗口标题/托盘提示以前没有）
 _lang = main.CFG.get("ui_lang")

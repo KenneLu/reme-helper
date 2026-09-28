@@ -865,5 +865,8 @@
  "restored_to_baseline_4": "Restored to baseline (",
  "running_2": ") Running…",
  "cost_performance_2": "\n\nCost / performance: ",
- "auto_dream_off": "Auto Dream Off"
+ "auto_dream_off": "Auto Dream Off",
+ "no_update_target_available_check_fai": "No update target available (check failed or already latest)",
+ "download_verify_update_package_faile": "Download/verify update package failed: ",
+ "failed_to_launch_the_updater": "Failed to launch the updater"
 }

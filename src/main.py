@@ -31,6 +31,7 @@ from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa
 from template.i18n import i18n   # noqa: F402  T5 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + 语言态同步
 from template.autostart import autostart  # noqa: F402  T3 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
+from template.update_helper import update_helper  # noqa: F402  T4 在线更新 1.5.0（W5 后段接线：marker 语义基准已移交模板）
 from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
@@ -62,9 +63,10 @@ from PIL import Image, ImageDraw, ImageFont
 #     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
 #   autostart 已于 W4（2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
 #     migrate_autostart 自愈，config 镜像删除——doctor 直查注册表）；
-#   update_helper / icons 两件仍**内联**（申报留痕）：
-#     更新链 bat+备份目录、运行态图标着色——与模板接口不同构，强换必改行为
-#     （护栏：不为对齐而改行为）。反向沉淀已入模板；抽件评估见 CHANGELOG Unreleased。
+#   update_helper 已于 W5（2026-09-28）接线模板 1.5.0（marker 语义基准在模板 E 组；
+#     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
+#   icons 一件仍**内联**（申报留痕）：运行态图标着色——与模板接口不同构，
+#     强换必改行为（护栏：不为对齐而改行为）。反向沉淀已入模板；抽件评估见 CHANGELOG Unreleased。
 VERSION = "1.2.6"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
@@ -7107,19 +7109,17 @@ def quit_app(icon, _item) -> None:
 #
 # 配置已经不在安装目录了（见 CONFIG_PATH），所以这里可以整目录铺过去，不必给任何文件写例外。
 # ---------------------------------------------------------------------------
-HELPER_RELEASES_API = f"https://api.github.com/repos/{appconfig.REPO_OWNER}/{appconfig.REPO_NAME}/releases/latest"
-HELPER_ASSET_SUFFIX = "-windows-x64.zip"
-HELPER_EXE = f"{APP_ID}.exe"
-HELPER_UPDATE_LOG = USER_DATA_DIR / "update.log"
+# W5 后段（接线模板 update_helper 1.5.0）：更新暂存根。模板的派生链全部以它为轴——
+# failed_marker = update_dir.parent/update.failed、backup = parent/_backup、
+# snapshot = parent/_backup.pre、log = parent/update.log —— 传 update_dir=
+# USER_DATA_DIR/"update-staging" 时四者恰与旧内联常量逐一相等（零迁移）。
+HELPER_UPDATE_STAGING = USER_DATA_DIR / "update-staging"
 # 旧版本备份放**用户数据目录**，不放安装目录里：
 #   * 安装目录那份要用 robocopy /purge 清掉上一版的残留文件，备份若在里面就会被一起删；
 #   * 而且备份若在 install 下，`robocopy install install\_backup /e` 会扫到自己的输出。
 HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
 # 替换前的现场快照：只在**替换成功之后**才轮转为 BACKUP，因此任何时刻都有一份可回退的
 # 上一版本；失败时它被保留，供人工恢复。
-HELPER_UPDATE_SNAPSHOT = USER_DATA_DIR / "_backup.pre"
-# 更新器失败时留的 marker：主程序下次启动读到就通知用户并删除（托盘已不在，只能下次说）。
-HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
 # 等旧进程退出的预算：**两个常量别合并**——`LIMIT` 是**轮询次数**、`TICK_MS` 是
 # **每拍毫秒**；`BUDGET_S` 由两者现算，是**下界**（真墙钟更大，见下）。
 # 一个节拍 = 一句真正的 Start-Sleep（**不是** `ping -n 2`：丢 loopback ICMP 的机器上
@@ -7135,9 +7135,6 @@ HELPER_UPDATE_FAILED = USER_DATA_DIR / "update.failed"
 # 实测（本机 2026-09-19，整轮墙钟）：`limit=1` **0.2 s**、`limit=2` **1.81 s**。
 # 门禁里有一条**耗时断言**钉住它（`test_update_bat.py`：limit=2 ⇒ elapsed ≥ tick/1000）——
 # "它在等"只能量出来：这一拍历史上曾因 `ping`+`dev/null` 折成 0.03 s（等价于没等）。
-HELPER_UPDATE_LIMIT = 120
-HELPER_UPDATE_TICK_MS = 1000
-HELPER_UPDATE_BUDGET_S = HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000
 
 # ReMe 助手自己的更新状态。**必须与 REME_UPDATE_STATE 分开**：这两个字典以前都叫
 # UPDATE_STATE，后者在模块加载时把前者覆盖掉，于是两个检查共用一份 `latest`——
@@ -7146,180 +7143,12 @@ HELPER_UPDATE_BUDGET_S = HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000
 # 版本号当作升级目标。
 HELPER_UPDATE_STATE: dict = {"checked": False, "latest": "", "newer": False, "detail": ""}
 
-# .bat 模板。**ASCII-only**：cmd.exe 按机器 ANSI 代码页解析 .bat，中文注释会变乱码甚至
-# 吃掉命令（build.bat 顶上写着同一条纪律）。解释一律留在 Python 侧。
-# 刻意**不用括号块**：cmd 对块内 errorlevel 的解析不可靠，全程 goto 流程。
-# 等待循环还刻意**不用管道**——理由写在循环上方，那是实测出来的。
-# ⚠️ 等待循环用 `{exe}`（= HELPER_EXE）这个**镜像名**判断旧进程有没有退出。对当前所有
-# 版本都是对的：更新器是 1.0.7 才有的，而 1.0.7 起 exe 就定名 reme-helper.exe，各版本
-# 同名。**若以后重新引入带版本号的 exe 名，这里会误判成"旧进程已退出"并去覆盖被锁住的
-# 文件**——改 HELPER_EXE 或改 exe 命名规则之前先回来看这条。
-HELPER_UPDATE_BAT = r"""@echo off
-setlocal
-set "INSTALL={install}"
-set "STAGE={stage}"
-set "WORK={work}"
-set "BACKUP={backup}"
-set "SNAPSHOT={snapshot}"
-set "FAILED={failed}"
-set "LOG={log}"
-echo [{stamp}] start install=%INSTALL% backup=%BACKUP% >> "%LOG%"
-set "POLL=%LOG%.poll"
-set /a tries=0
-:wait
-rem NO PIPE HERE, on purpose. This script is spawned with DETACHED_PROCESS and
-rem therefore has no console, and in that context "tasklist | find" NEVER
-rem RETURNS: find.exe blocks on stdin forever. The update then silently does not
-rem happen - the app quits, the tray has already said "update started", and
-rem nothing else ever occurs. Verified by spawning this exact script both ways:
-rem with a console the pipeline finishes in 0.13s, detached it hangs
-rem indefinitely. Sending the child's stdio to DEVNULL does not help; removing
-rem the pipe does. So tasklist writes to a file and find reads that file.
-rem
-rem %SystemRoot%\System32 on EVERY command below, never the bare name. PATH is not
-rem ours to assume: a developer machine with Git-for-Windows or MSYS on PATH puts
-rem H:\...\Git\usr\bin\find.exe ahead of the Windows one, and GNU find reads
-rem "smss.exe" as a FILE NAME, so it always exits 1. The wait loop then always
-rem concludes "the old process is already gone" and copies over a binary that is
-rem still running (locked files -> robocopy retries, no /R limit set). Measured
-rem here: `where find` -> H:\Tools\Git\usr\bin\find.exe first. (The bare `ping`
-rem this script used as a wait tick hit the same trap from the other side - iputils
-rem reads -n as "numeric", not a count - and it is gone regardless, see below.)
-rem Absolute paths make the script independent of whoever launched it.
-%SystemRoot%\System32\tasklist.exe /fi "imagename eq {exe}" /nh > "%POLL%" 2>nul
-%SystemRoot%\System32\find.exe /i "{exe}" "%POLL%" >nul
-if errorlevel 1 goto gone
-set /a tries+=1
-if %tries% geq {limit} goto giveup
-rem Wait tick: a REAL sleep. `ping -n 2 127.0.0.1` used to sit on this line, and its
-rem "one second" only holds while loopback ICMP answers. On a machine that drops it
-rem every packet waits out the timeout - measured 9.0s per tick - so the nominally
-rem 120s budget became ~18 minutes while the abort line still announced seconds.
-rem (C-33: never use ping as a clock.) `timeout` and `choice` are NOT alternatives:
-rem this script runs DETACHED with no console, and both fail instantly there.
-rem Absolute path for the same PATH reason as every other command above.
-%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds {tick_ms}"
-goto wait
-:gone
-rem Pre-check the SOURCE before touching anything at all. An EXISTING BUT EMPTY stage dir
-rem is the dangerous case: `robocopy /e /purge` then deletes every file in the install dir
-rem (verified), and it still reports rc=2 - inside the 0-7 "success" range - so the failure
-rem would sail straight through the rc check below with the install already emptied.
-rem (A MISSING stage reports rc=16 but also wipes the destination first, so it only survives
-rem because the rollback path exists.) Template update_helper 1.4.0 carries the same
-rem pre-check; this script was missing it.
-if not exist "%STAGE%\{exe}" goto stage_bad
-rem Snapshot the CURRENT install first. The previous BACKUP is NOT deleted here: it is the
-rem rollback source and is only rotated AFTER a copy that succeeded.
-if exist "%SNAPSHOT%" rmdir /s /q "%SNAPSHOT%"
-%SystemRoot%\System32\Robocopy.exe "%INSTALL%" "%SNAPSHOT%" /e /njh /njs /nfl /ndl >nul
-echo [{stamp}] snapshot rc=%ERRORLEVEL% >> "%LOG%"
-%SystemRoot%\System32\Robocopy.exe "%STAGE%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
-set "RC=%ERRORLEVEL%"
-echo [{stamp}] copied rc=%RC% >> "%LOG%"
-if %RC% geq 8 goto install_failed
-rem Check for the exe BEFORE rotating the snapshot away. The rotation moves SNAPSHOT to
-rem BACKUP, so a check placed after it would send the rollback below to a path that no
-rem longer exists: the restore would copy nothing, the install would stay empty, and the
-rem log would still claim the snapshot was kept - at a path that is gone.
-if not exist "%INSTALL%\{exe}" goto start_missing
-if exist "%BACKUP%" rmdir /s /q "%BACKUP%"
-move /y "%SNAPSHOT%" "%BACKUP%" >nul 2>nul
-start "" "%INSTALL%\{exe}"
-echo [{stamp}] done >> "%LOG%"
-goto cleanup
-:install_failed
-rem robocopy: 0-7 = success, >=8 = failure. On failure NEVER start the new exe; restore the
-rem previous version from the snapshot so the tool comes back, and leave a marker for the app.
-> "%FAILED%" echo update failed {stamp}: install rc=%RC%
-echo [{stamp}] INSTALL FAILED rc=%RC% - restoring from snapshot >> "%LOG%"
-%SystemRoot%\System32\Robocopy.exe "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
-if errorlevel 8 goto install_dead
-echo [{stamp}] restored - starting previous version >> "%LOG%"
-if not exist "%INSTALL%\{exe}" goto install_dead
-start "" "%INSTALL%\{exe}"
-goto cleanup_keep
-:install_dead
-rem Last resort: the install dir is unusable and the rollback copy could not be restored.
-rem Start nothing (a missing exe would open an undismissable modal box); leave the
-rem marker so the next manual launch can tell the user what happened.
-rem The report names only the copies that are REALLY there - the old wording always said
-rem "snapshot kept at %SNAPSHOT%" even on paths where the snapshot had already been
-rem rotated to %BACKUP%, i.e. it pointed the user at a path that did not exist.
-set "KEPT="
-if exist "%SNAPSHOT%" set "KEPT=%SNAPSHOT%"
-if exist "%BACKUP%" set "KEPT=%KEPT% %BACKUP%"
-if not defined KEPT set "KEPT=(none - the install dir itself is all that is left)"
-echo [{stamp}] RESTORE FAILED - not starting; rollback copies kept at %KEPT% >> "%LOG%"
-> "%FAILED%" echo update failed {stamp}: restore failed, no exe started; kept %KEPT%
-goto cleanup_keep
-:stage_bad
-rem Nothing was touched: the install dir is exactly as it was, so the OLD version can simply
-rem be started again (guarded, as everywhere else - `start` on a missing exe opens a modal
-rem box that cannot be dismissed and this script runs detached).
-echo [{stamp}] aborted: no staged exe at "%STAGE%\{exe}" - install untouched >> "%LOG%"
-> "%FAILED%" echo update aborted {stamp}: staged exe missing, install untouched
-if not exist "%INSTALL%\{exe}" goto cleanup_keep
-start "" "%INSTALL%\{exe}"
-goto cleanup_keep
-:start_missing
-rem Never `start` a missing exe: the modal error box cannot be dismissed and this
-rem script runs detached, so the update would hang forever. Restore + report instead.
-echo [{stamp}] exe missing at "%INSTALL%\{exe}" - restoring >> "%LOG%"
-> "%FAILED%" echo update failed {stamp}: exe missing after copy
-%SystemRoot%\System32\Robocopy.exe "%SNAPSHOT%" "%INSTALL%" /e /purge /njh /njs /nfl /ndl >> "%LOG%" 2>&1
-if not exist "%INSTALL%\{exe}" goto install_dead
-echo [{stamp}] restored - starting previous version >> "%LOG%"
-start "" "%INSTALL%\{exe}"
-goto cleanup_keep
-:giveup
-rem Wait limit hit: the old process never exited. Do not replace anything.
-rem Report the MEASURED semantics: polls x ms per tick, plus the nominal budget as a
-rem LOWER BOUND. Wall-clock is strictly larger (PowerShell startup per tick), so printing
-rem a plain "Ns" here would be the exact lie C-33 exists to stop.
-echo [{stamp}] aborted: {exe} still running after %tries% polls x {tick_ms}ms (nominal budget {budget_s}s, lower bound) >> "%LOG%"
-> "%FAILED%" echo update aborted {stamp}: {exe} still running after %tries% polls x {tick_ms}ms (nominal budget {budget_s}s, lower bound)
-goto cleanup
-:cleanup
-if exist "%WORK%" rmdir /s /q "%WORK%"
-goto cleanup_tail
-:cleanup_keep
-rem Keep WORK and SNAPSHOT for manual recovery; the marker makes the app notify next start.
-goto cleanup_tail
-:cleanup_tail
-del "%POLL%" >nul 2>nul
-(goto) 2>nul & del "%~f0"
-"""
 
 
 def parse_version(text: str) -> tuple:
     """``'v1.0.7'`` → ``(1, 0, 7)``。取不到数字就给 ``(0,)``，**绝不抛**。"""
     parts = re.findall(r"\d+", str(text or ""))
     return tuple(int(part) for part in parts[:3]) or (0,)
-
-
-def _http_text(url: str, timeout: float = 8.0) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": f"{APP_ID}/{VERSION}",
-                                                   "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="replace")
-
-
-def helper_latest_release() -> dict:
-    """``GET releases/latest`` → ``{"tag", "zip", "sha256"}``。失败抛异常，调用方转成人话。"""
-    data = json.loads(_http_text(HELPER_RELEASES_API))
-    tag = str(data.get("tag_name") or "").strip()
-    zip_url = sha_url = ""
-    for asset in data.get("assets") or []:
-        name = str(asset.get("name") or "")
-        url = str(asset.get("browser_download_url") or "")
-        if name.endswith(HELPER_ASSET_SUFFIX + ".sha256"):
-            sha_url = url
-        elif name.endswith(HELPER_ASSET_SUFFIX):
-            zip_url = url
-    if not tag or not zip_url:
-        raise RuntimeError(t("发布页上没有可下载的 zip"))
-    return {"tag": tag, "zip": zip_url, "sha256": sha_url}
 
 
 def http_error_hint(exc: Exception) -> str:
@@ -7340,39 +7169,29 @@ def check_helper_update() -> tuple[bool, str]:
     """托盘「检查 ReMe 助手更新」：**只查、只提示**，绝不自动替换。
 
     刻意与 ReMe 的检查保持同一种交互（只提示、不升级）：升级会动配置与配套工具，
-    该由用户决定什么时候做。
+    该由用户决定什么时候做。W5 后段起查询/节流走模板 update_helper.check_update
+    （24h 进程内节流白得）；对话框文案与 HELPER_UPDATE_STATE 是工具侧扩展。
     """
-    try:
-        latest = helper_latest_release()
-    except Exception as exc:  # noqa: BLE001 - 网络问题不该弄崩托盘
-        HELPER_UPDATE_STATE.update(checked=True, latest="", newer=False, detail=str(exc))
-        return False, t("检查更新失败：") + str(exc) + http_error_hint(exc)
-    newer = parse_version(latest["tag"]) > parse_version(VERSION)
-    HELPER_UPDATE_STATE.update(checked=True, latest=latest["tag"], newer=newer, detail="")
+    result = update_helper.check_update(VERSION)
+    if result["error"]:
+        HELPER_UPDATE_STATE.update(checked=True, latest="", newer=False, detail=result["error"])
+        return False, t("检查更新失败：") + result["error"]
+    newer = result["newer"]
+    HELPER_UPDATE_STATE.update(checked=True, latest=result["latest"], newer=newer, detail="")
     if newer:
-        return True, t("有新版本，点「下载并更新」会自动替换并重启") + f"（{latest['tag']}）"
+        return True, t("有新版本，点「下载并更新」会自动替换并重启") + f"（v{result['latest']}）"
     return True, t("已是最新版本") + f"（{VERSION}）"
 
 
 def _report_failed_previous_update() -> None:
-    """上一次自动更新失败时更新器留了 marker：读一次、通知用户、删掉。
+    """上次更新失败时模板件留了 marker：读一次、通知用户、删掉（模板 pop 语义）。
 
-    删除**放在日志之后**：原顺序是"读证据 → 删证据 → 写日志"，一旦 log() 本身抛异常
-    （磁盘满、日志目录被占），证据已经被删掉，日志里也没有任何记录——那一刻这次失败
-    就彻底没有痕迹了。先落日志再删，至少保证"删掉之前一定已经写进日志"。
+    模板 pop_failed_update_note 已含"先日志后删证据"顺序（C-32）；notify 的中文
+    文案走 t()（双语），模板 note 的 detail 只进日志不重复弹。
     """
-    if not HELPER_UPDATE_FAILED.exists():
-        return
-    try:
-        detail = HELPER_UPDATE_FAILED.read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        detail = ""
-    log(f"previous update failed: {detail}")
-    try:
-        HELPER_UPDATE_FAILED.unlink()
-    except OSError:
-        pass
-    notify(t("上次自动更新失败，已回退到原版本并保留现场；详见 update.log"))
+    detail = update_helper.pop_failed_update_note(str(HELPER_UPDATE_STAGING), log=log)
+    if detail:
+        notify(t("上次自动更新失败，已回退到原版本并保留现场；详见 update.log"))
 
 
 def startup_helper_update_check() -> None:
@@ -7389,18 +7208,6 @@ def startup_helper_update_check() -> None:
     refresh_tray_menu()
     if ok and HELPER_UPDATE_STATE.get("newer") and not STOP_EVENT.is_set():
         notify(detail)
-
-
-def verify_zip_sha256(zip_path, sha_text) -> tuple[bool, str]:
-    """校验下载包。**期望值缺失也算失败**——绝不静默放行（安全缺口）。"""
-    wanted = str(sha_text or "").strip()
-    if not wanted:
-        return False, t("校验更新包失败：sha256 为空")
-    wanted = wanted.split()[0].strip().lower()
-    actual = hashlib.sha256(Path(zip_path).read_bytes()).hexdigest()
-    if wanted != actual:
-        return False, t("更新包校验失败：sha256 对不上")
-    return True, ""
 
 
 def _rmtree_verified(path, what: str = "temp dir") -> bool:
@@ -7429,97 +7236,32 @@ def _rmtree_verified(path, what: str = "temp dir") -> bool:
 
 
 def download_and_apply_helper_update() -> tuple[bool, str]:
-    """托盘「下载并更新」：下载 → 校验 sha256 → 解压 → 起 updater。
+    """托盘「下载并更新」：模板 download_and_prepare → **立即** launch_pending_cmd。
 
-    它**不负责退出**：调用方看到 True 之后自己去 `shutdown_tray()`，好让托盘先把结果提示出来。
+    reme 的交互形态是"下载完马上起替换脚本、本窗口随后关"（调用方看到 True 后自己
+    shutdown_tray）——与模板默认的"发布 PENDING_CMD、退出收尾时拉起"（三仓形态）不同，
+    这里显式保 reme 形态。失败早退清暂存（_rmtree_verified，reme 私有强化）保留。
     """
-    try:
-        latest = helper_latest_release()
-    except Exception as exc:  # noqa: BLE001
-        return False, t("检查更新失败：") + str(exc)
-    if not latest["sha256"]:
-        return False, t("发布页缺少 .sha256 校验文件，已中止更新（无法校验完整性）")
-    work = Path(tempfile.mkdtemp(prefix=f"{APP_ID}-update-"))
+    check_helper_update()   # 确保 update_ready() 已发布（无头直调时也要拿到目标版本）
+    latest = update_helper.update_ready()
+    if not latest:
+        return False, t("没有可用的更新目标（检查更新失败或已是最新）")
 
     def _fail(message: str):
-        """失败早退：先把暂存目录清掉，别在 %TEMP% 里留空壳（2026-09-19 实测到过）。
-
-        清理走 `_rmtree_verified`：删不掉会留下日志并回读确认，不再静默（C-30）。
-        """
-        if not _rmtree_verified(work, "helper update download"):
+        if not _rmtree_verified(HELPER_UPDATE_STAGING, "helper update download"):
             message += t("（提示：临时目录未能删除，见日志）")
         return False, message
-    zip_path = work / f"{APP_ID}{HELPER_ASSET_SUFFIX}"
+
     try:
-        request = urllib.request.Request(latest["zip"],
-                                         headers={"User-Agent": f"{APP_ID}/{VERSION}"})
-        with urllib.request.urlopen(request, timeout=60.0) as response, zip_path.open("wb") as out:
-            shutil.copyfileobj(response, out)
+        update_helper.download_and_prepare(
+            latest, str(APP_DIR), str(HELPER_UPDATE_STAGING), log=log,
+            backup_dir=str(HELPER_UPDATE_BACKUP))
     except Exception as exc:  # noqa: BLE001
-        return _fail(t("下载更新包失败：") + str(exc))
-    try:
-        ok, detail = verify_zip_sha256(zip_path, _http_text(latest["sha256"]))
-    except Exception as exc:  # noqa: BLE001
-        return _fail(t("校验更新包失败：") + str(exc))
-    if not ok:
-        return _fail(detail)
-    stage = work / "stage"
-    try:
-        with zipfile.ZipFile(zip_path) as archive:
-            archive.extractall(stage)
-    except Exception as exc:  # noqa: BLE001
-        return _fail(t("解压更新包失败：") + str(exc))
-    if not (stage / HELPER_EXE).is_file():
-        return _fail(t("更新包里没有 ") + HELPER_EXE)
-    text = HELPER_UPDATE_BAT.format(
-        install=APP_DIR, stage=stage, work=work, backup=HELPER_UPDATE_BACKUP, snapshot=HELPER_UPDATE_SNAPSHOT,
-        failed=HELPER_UPDATE_FAILED,
-        log=HELPER_UPDATE_LOG, exe=HELPER_EXE,
-        # 名义预算**由同一次渲染的 limit × tick_ms 现算**，不直接传模块常量：测试会用
-        # limit=1/2 保持等待短，若预算来自常量就会渲染出"1 拍 × 1000ms（名义预算 120s）"
-        # ——两个数自相矛盾（l-s2t 那条 `2 拍写成 120s` 的同族形态）。HELPER_UPDATE_BUDGET_S
-        # 只是**默认那一对**的取值，供人读，不供渲染。
-        limit=HELPER_UPDATE_LIMIT, tick_ms=HELPER_UPDATE_TICK_MS,
-        budget_s=HELPER_UPDATE_LIMIT * HELPER_UPDATE_TICK_MS // 1000,
-        stamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-    script = Path(tempfile.gettempdir()) / f"{APP_ID}-update.bat"
-    try:
-        # cmd.exe 按机器 ANSI 代码页解析 .bat ⇒ 按 ANSI 落盘（安装路径里可能有中文）
-        script.write_text(text, encoding="mbcs", errors="replace")
-    except (LookupError, UnicodeError):
-        script.write_text(text, encoding="utf-8")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
-    try:
-        subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=flags, close_fds=True)
-    except OSError as exc:
-        return _fail(t("启动更新程序失败：") + str(exc))
-    log(f"update staged: {stage} -> {APP_DIR} (tag {latest['tag']}, bat {script})")
+        return _fail(t("下载/校验更新包失败：") + str(exc))
+    if not update_helper.launch_pending_cmd(log=log):
+        return _fail(t("启动更新程序失败"))
+    log(f"update staged via template 1.5.0 -> {APP_DIR} (tag v{latest})")
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
-
-
-def sweep_stale_update_dirs() -> None:
-    """清掉更新器遗留在 %TEMP% 里的暂存目录。
-
-    正常路径上更新器自己收尾（见 HELPER_UPDATE_BAT 的 :cleanup），但它可能在收尾前
-    被打断 —— 机器重启、进程被杀、bat 半路消失。那之后就没有任何东西知道那份**解压好的
-    整包**在哪了：实测每次更新约 50 MB，四轮下来在 %TEMP% 里积了 201 MB。
-
-    只动本应用自己命名的那一类（`<APP_ID>-update-*`），且只动**一小时前**的：正在进行的
-    更新，其暂存目录是刚建的，绝不能碰。
-    """
-    try:
-        cutoff = time.time() - 3600
-        for path in Path(tempfile.gettempdir()).glob(f"{APP_ID}-update-*"):
-            try:
-                if path.is_dir() and path.stat().st_mtime < cutoff:
-                    # 同一课：删除必须可验证，日志不许在失败时照样宣称"已清理"（C-30）。
-                    if _rmtree_verified(path, "stale update sweep"):
-                        log(f"removed stale update dir: {path}")
-            except OSError:
-                continue
-    except Exception as exc:  # noqa: BLE001 - 清扫失败不该拦住启动
-        log(f"stale update sweep failed: {exc}")
 
 
 def helper_upgrade_prompt(target: str = "") -> str:
@@ -8238,7 +7980,7 @@ def main() -> int:
     # 句柄持有到进程结束（故意不 close）；拿不到只记日志放行（D3.2）；dev 态跳过。
     hold_exe_delete_guard(log=log)
     autostart.migrate_autostart(log=log)
-    sweep_stale_update_dirs()
+    update_helper.sweep_stale_update_dirs()
     # 这两个是**快**的：本地健康探测与读配置。它们决定图标首帧和 setup() 里的
     # 「ReMe 启动后启动隧道」判断，所以留在同步路径上。
     refresh_service_state()

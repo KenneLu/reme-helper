@@ -6,7 +6,7 @@
 （磁盘满/文件被占/源缺失），会留下**半铺的安装目录**却报 done；而 `_backup` 不是
 回滚源，且下一次更新开头还会把它删掉（唯一手工回退材料也没了）。
 
-本测试**真跑** `main.HELPER_UPDATE_BAT` 渲染出的脚本（不 mock），用假 exe（probe.vbs）
+本测试**真跑** `模板 build_apply_script（W5 接线）` 渲染出的脚本（不 mock），用假 exe（probe.vbs）
 观察"到底启动了哪个版本"，断言：
   成功：新版本被启动、安装目录已更新、快照轮转成 BACKUP；
   空 STAGE（**存在但无 exe** ⇒ robocopy /purge 会把 install 清空而 rc=2 落在"成功"区间）：
@@ -204,15 +204,10 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
     所以：① 所有 `start` 目标由用例保证存在；② 判"有没有被启动"看**副作用**
     （marker 文件），绝不用"目标不存在"；③ 下面的超时把"挂死"转成**红灯**（R4）。
     """
-    text = main.HELPER_UPDATE_BAT.format(
-        install=paths["install"], stage=paths["stage"], work=paths["work"],
-        backup=paths["backup"], snapshot=paths["snapshot"], failed=paths["failed"],
-        log=paths["log"], exe=exe, limit=limit, stamp="test",
-        # 预算与 limit/tick **同源**（模块常量是默认那一对的值，直接传它会让 limit=1 的
-        # 渲染印出"名义预算 120s"——判据里那条"日志里的数必须是被测过的数"）。
-        tick_ms=main.HELPER_UPDATE_TICK_MS,
-        budget_s=limit * main.HELPER_UPDATE_TICK_MS // 1000,
-    )
+    text = main.update_helper.build_apply_script(
+        paths["install"], paths["stage"], paths["work"], paths["backup"], paths["log"],
+        limit=limit, snapshot_dir=paths["snapshot"], failed_marker=paths["failed"],
+        exe_name=exe)
     bat = root / "updater.bat"
     # 行尾**必须与产品落盘的字节一致**：`main.py` 用 `script.write_text(text, encoding="mbcs")`
     # （不传 `newline`）⇒ Windows 文本模式把 `\n` 翻成 `\r\n`。旧写法 `newline=""` 关掉了那次
@@ -252,12 +247,10 @@ def _static_checks() -> None:
        真正打开文件的时刻在后面。详见 `_run_bat` 的 docstring——**"故障又出现了"不等于
        "守卫漏了"，别在这里再加一条守卫**。
     """
-    rendered = main.HELPER_UPDATE_BAT.format(
-        install=r"C:\i", stage=r"C:\s", work=r"C:\w", backup=r"C:\b",
-        snapshot=r"C:\b.pre", failed=r"C:\f", log=r"C:\l", exe="probe.vbs",
-        limit=2, stamp="static",
-        tick_ms=main.HELPER_UPDATE_TICK_MS,
-        budget_s=2 * main.HELPER_UPDATE_TICK_MS // 1000)
+    rendered = main.update_helper.build_apply_script(
+        r"C:\i", r"C:\s", r"C:\w", r"C:", r"C:\l",
+        limit=2, snapshot_dir=r"C:.pre", failed_marker=r"C:",
+        exe_name="probe.vbs")
     lines = rendered.splitlines()
     labels = {l.strip()[1:] for l in lines if l.startswith(":")}
     gotos = set(re.findall(r"goto (\w+)", rendered))
@@ -291,9 +284,12 @@ def _static_checks() -> None:
                 return i
         return -1
 
-    stage_bad_at = _idx(lambda l: "goto stage_bad" in l)
+    # W5 接线：模板 bat 变量名 %TARGET%（原 %INSTALL%）+ exe 守卫锚展开路径
+    # （target/exe 字面由 build_apply_script 渲染，静态块传 r"C:\i" 与 probe.vbs）
+    stage_bad_at = _idx(lambda l: "goto stage_bad" in l or "goto stage_invalid" in l)
     first_copy = _idx(lambda l: "Robocopy.exe" in l and "%STAGE%" in l)
-    exe_check = _idx(lambda l: l.strip().startswith('if not exist "%INSTALL%'))
+    exe_check = _idx(lambda l: l.strip().startswith('if not exist "C:\i\probe.vbs"')
+                     or l.strip().startswith('if not exist "%INSTALL%'))
     rotate = _idx(lambda l: l.strip().startswith("move /y"))
     check("bat: the STAGE pre-check comes before any copy",
           0 <= stage_bad_at < first_copy,
@@ -402,7 +398,7 @@ def main_test() -> int:
             # 同源，不会出现"1 拍却写 120 秒"那种自相矛盾。
             expect = ("aborted: %s still running after 1 polls x %dms "
                       "(nominal budget 1s, lower bound)"
-                      % (running, main.HELPER_UPDATE_TICK_MS))
+                      % (running, main.update_helper.UPDATE_WAIT_TICK_MS))
             check("giveup: log records the abort line", expect in giveup_log,
                   " | ".join(giveup_log.splitlines()[-3:]))
             check("giveup: marker written", paths["failed"].exists()
@@ -433,9 +429,9 @@ def main_test() -> int:
             _run_bat(root, paths2, exe=running, limit=2)
             tick_elapsed = time.time() - tick_started
             check("wait tick really sleeps (limit=2 => exactly one tick)",
-                  tick_elapsed >= main.HELPER_UPDATE_TICK_MS / 1000.0,
+                  tick_elapsed >= main.update_helper.UPDATE_WAIT_TICK_MS / 1000.0,
                   "%.2fs >= %.2fs (本机每拍实测 ~1.66s incl. PS startup)"
-                  % (tick_elapsed, main.HELPER_UPDATE_TICK_MS / 1000.0))
+                  % (tick_elapsed, main.update_helper.UPDATE_WAIT_TICK_MS / 1000.0))
             check("wait tick does not hang", tick_elapsed < 30, "%.2fs" % tick_elapsed)
 
         # ---------- rc=0 那条"看起来成功、实则什么都没铺"的路径 ----------

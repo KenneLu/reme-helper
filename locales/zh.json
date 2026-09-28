@@ -865,5 +865,8 @@
  "restored_to_baseline_4": "已回到基线（",
  "running_2": ") 运行中…",
  "cost_performance_2": "\n\n成本/性能：",
- "auto_dream_off": "Auto Dream 未启用"
+ "auto_dream_off": "Auto Dream 未启用",
+ "no_update_target_available_check_fai": "没有可用的更新目标（检查更新失败或已是最新）",
+ "download_verify_update_package_faile": "下载/校验更新包失败：",
+ "failed_to_launch_the_updater": "启动更新程序失败"
 }
