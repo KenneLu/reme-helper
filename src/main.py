@@ -3005,11 +3005,12 @@ def ssh_command(target: dict, remote_command: str | None = None) -> list[str]:
     if remote_command is None:
         # W7：长连接参数段走 tunnel_kit 正本（Decision 10 统一：ServerAliveInterval
         # 20→30 家族归一；remote_bind=127.0.0.1 保 reme 收紧语义——远端只听本机）。
-        # N2 降级留痕（W8-C，09-29）：本工具自愈形态 = ServerAlive 让死连接自退 +
-        # 既有 refresh_tunnels 单拍拉回，**无 N 次确认防抖/退避翻倍**（D10 半兑现，
-        # W7 §4「同款自愈演练」判据未闭环）。升级迁移 tunnel_kit.TunnelTarget
-        # （ensure=N=3 确认+完整退避）留 10-01 排期——见模板 tunnel_kit README
-        # 「最低消费口径」节。
+        # N2 降级留痕（W8-C，09-29；10-01 复审 F-R11 正式改期）：本工具自愈形态 =
+        # ServerAlive 让死连接自退 + 既有 refresh_tunnels 单拍拉回，**无 N 次确认
+        # 防抖/退避翻倍**（D10 半兑现，W7 §4「同款自愈演练」判据未闭环）。升级迁移
+        # tunnel_kit.TunnelTarget（ensure=N=3 确认+完整退避）**改期至 reme 下次
+        # 大版本动刀**（原「10-01 排期」到期未能兑现，复审 F-R11 裁定正式改期
+        # 留档）——见模板 tunnel_kit README「最低消费口径」节。
         command += tunnel_kit.build_reverse_args(
             {"host": target_connection(target), "port": target.get("port", 22),
              "remote_port": int(target.get("remote_port", 22333)),
