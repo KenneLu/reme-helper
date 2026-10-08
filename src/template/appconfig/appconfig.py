@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # TEMPLATE-FROM: my-diy-tool-template/template/appconfig/appconfig.py | TEMPLATE-VER: 1.0.0
-# TEMPLATE-LOCAL-OVERRIDE: VERSION 不入此文件（单一事实源在 main.py，D15/D16）；
+# TEMPLATE-LOCAL-OVERRIDE: VERSION 不入此文件（单一事实源在 main.py）；
 #   W6 起 ICON_DRAW 启用（绘制挪构建侧 src/icon_pipeline.py，运行时零绘制）。
-"""reme-helper 参数区（T1：拷贝后唯一允许修改的文件）。"""
+"""reme-helper 参数区（appconfig：拷贝后唯一允许修改的文件）。"""
 APP_ID = "reme-helper"
 APP_NAME = "ReMe 助手"
 # W4（autostart 1.2.0）：Run 键名沿用存量 APP_ID（D3 方案 A——APP_NAME 是中文展示名，

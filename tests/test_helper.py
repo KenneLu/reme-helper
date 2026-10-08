@@ -547,7 +547,7 @@ assert any("打开 workspace" in text for text in menu_texts), menu_texts
 assert any("打开指引" in text for text in menu_texts), menu_texts
 assert any("状态刷新间隔" in text for text in menu_texts), menu_texts
 # 「打开…」已经收敛：本地配置文件不再各占一个菜单项。**例外**：本工具自己的日志目录
-# 按 D13/C-15 必须在托盘「打开区」单独留一项（模板 log_kit 的 open_log_dir），且是立即
+# 按 /判据·打开日志项 必须在托盘「打开区」单独留一项（模板 log_kit 的 open_log_dir），且是立即
 # 执行动作，按 E2 命名五规则②不带「…」。
 for gone in ("打开ReMe目录", "打开官方default配置", "打开当前配置", "打开 .env（凭据）"):
     assert not any(gone in text for text in menu_texts), (gone, menu_texts)
@@ -606,7 +606,7 @@ assert (_taskbar_box[2] - _taskbar_box[0]) >= 14, _taskbar_box
 assert 20 in main.TASKBAR_ICON_SIZES and 40 in main.TASKBAR_ICON_SIZES
 
 # 交互启动后检查一次更新：发现新版才通知；已是最新与网络失败只写日志。
-# W5 接线后 mock 点：模板 update_helper.check_update（返回 dict；旧 helper_latest_release 已删）
+# 接线后 mock 点：模板 update_helper.check_update（返回 dict；旧 helper_latest_release 已删）
 _saved_check = main.update_helper.check_update
 _saved_dl = main.update_helper.download_and_prepare
 _saved_update_notify = main.notify
@@ -972,7 +972,7 @@ class _TunnelIcon:
 
 _tunnel_icon = _TunnelIcon()
 main.TRAY_ICON = _tunnel_icon
-# 托盘图 W6 起统一走 tray_icons.get(_tray_state_key(...))：替身返回状态键字符串
+# 托盘图 起统一走 tray_icons.get(_tray_state_key(...))：替身返回状态键字符串
 # （"ok"/"ok_tunnel"/...），断言按键比较。
 main.tray_icons.get = lambda state, size=None: state
 main.notify = lambda message: _tunnel_events.append(message)

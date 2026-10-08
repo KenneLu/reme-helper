@@ -6,7 +6,7 @@
 （磁盘满/文件被占/源缺失），会留下**半铺的安装目录**却报 done；而 `_backup` 不是
 回滚源，且下一次更新开头还会把它删掉（唯一手工回退材料也没了）。
 
-本测试**真跑** `模板 build_apply_script（W5 接线）` 渲染出的脚本（不 mock），用假 exe（probe.vbs）
+本测试**真跑** `模板 build_apply_script` 渲染出的脚本（不 mock），用假 exe（probe.vbs）
 观察"到底启动了哪个版本"，断言：
   成功：新版本被启动、安装目录已更新、快照轮转成 BACKUP；
   空 STAGE（**存在但无 exe** ⇒ robocopy /purge 会把 install 清空而 rc=2 落在"成功"区间）：
@@ -186,7 +186,7 @@ def _old_version_in_place(install: Path) -> bool:
 def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) -> None:
     """跑一次渲染出的更新 bat。
 
-    **替身必须永远存在**（R1，2026-09-19 全员规则）：本函数跑的是真 bat，而 bat 会
+    **替身必须永远存在**（2026-09-19 全员规则）：本函数跑的是真 bat，而 bat 会
     `start "" "%INSTALL%\\{exe}"`。让被 `start` 的目标**缺失**来构造场景，等于拿
     Windows Script Host 的"无法找到脚本文件"**模态框**当断言——模态框会把它自己挂死，
     无人值守下永久卡住（2026-09-19 实测：一个删了临时目录又立刻重跑的调试脚本连弹了
@@ -198,11 +198,11 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
     `if not exist` 是**批处理时刻**的判断，`start` 是**异步**的（立即返回），而目标是在
     判断**之后**消失的：判断那一刻文件还在，`wscript` 真正去打开它时已经没了。
     **守卫只能保证"检查的那一刻存在"，保证不了"进程真正打开它的那一刻还存在"。**
-    ⇒ 对本 harness 而言 R1（替身活满整轮）**不是双保险，是唯一的解**；三形态（目标缺失 /
+    ⇒ 对本 harness 而言替身活满整轮**不是双保险，是唯一的解**；三形态（目标缺失 /
     真跑单实例守卫 / 其它模态）的解法也是同一个，所以只立这一条不变式，不列三个场景。
 
     所以：① 所有 `start` 目标由用例保证存在；② 判"有没有被启动"看**副作用**
-    （marker 文件），绝不用"目标不存在"；③ 下面的超时把"挂死"转成**红灯**（R4）。
+    （marker 文件），绝不用"目标不存在"；③ 下面的超时把"挂死"转成**红灯**。
     """
     text = main.update_helper.build_apply_script(
         paths["install"], paths["stage"], paths["work"], paths["backup"], paths["log"],
@@ -217,7 +217,6 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
     # "The system cannot find the batch label specified"，78 与 86+ 正常；CI 的 scratch 根
     # 正好 79 字节 ⇒ "CI 红、本机全绿"，两轮发版被挡住。改成 CRLF 后 47 个长度 0 失败。
     # 本仓今天只是**恰好**没落在坏相位（scratch 根长度不在 79..85），并不是没有这颗雷。
-    # 登记：模板仓 CONFORMANCE §4.1.62。
     bat.write_text(text, encoding="ascii", newline="\r\n")
     try:
         subprocess.run(["cmd.exe", "/c", str(bat)], cwd=str(root), timeout=60,
@@ -238,11 +237,9 @@ def _run_bat(root: Path, paths: dict, exe: str = "probe.vbs", limit: int = 2) ->
 def _static_checks() -> None:
     """渲染出的 bat 的机械卫生（不依赖运行）：
 
-    ① 每个 `goto X` 都要有 `:X`——2026-09-19 真实回归：重写尾部时把 `:giveup`
-       删了而循环仍在 `goto giveup`，超时路径会跳到不存在的标签（脚本直接中止）。
+    ① 每个 `goto X` 都要有 `:X`——超时路径会跳到不存在的标签（脚本直接中止）。
     ② 每个 `start ""` 前必须紧邻 `if not exist` 守卫——`start` 一个不存在的 exe 会
-       弹**无法关闭**的模态错误框，而更新器是 detached 的，会永久挂住（模板 1.4.0 的
-       同款教训）。
+       弹**无法关闭**的模态错误框，而更新器是 detached 的，会永久挂住。
        ⚠️ **这条守卫是必要不充分**（TOCTOU）：它只保证"检查那一刻存在"，`start` 是异步的，
        真正打开文件的时刻在后面。详见 `_run_bat` 的 docstring——**"故障又出现了"不等于
        "守卫漏了"，别在这里再加一条守卫**。
@@ -284,7 +281,7 @@ def _static_checks() -> None:
                 return i
         return -1
 
-    # W5 接线：模板 bat 变量名 %TARGET%（原 %INSTALL%）+ exe 守卫锚展开路径
+    # 接线：模板 bat 变量名 %TARGET%（原 %INSTALL%）+ exe 守卫锚展开路径
     # （target/exe 字面由 build_apply_script 渲染，静态块传 r"C:\i" 与 probe.vbs）
     stage_bad_at = _idx(lambda l: "goto stage_bad" in l or "goto stage_invalid" in l)
     first_copy = _idx(lambda l: "Robocopy.exe" in l and "%STAGE%" in l)
@@ -311,7 +308,7 @@ def _static_checks() -> None:
     #    当**文件名**，恒返回 1 —— 等待循环于是永远判"旧进程已经退出"，直接去覆盖一个
     #    还在运行的 exe（文件被锁 → robocopy 反复重试）。裸名一律判红，防的是
     #    "换个 shell 启动就变了语义"。`powershell` 也在这个名单里：它现在是等待节拍
-    #    的唯一实现（`ping -n` 已被 C-33 换成真正的 Start-Sleep）。
+    #    的唯一实现（`ping -n` 已被 判据·禁ping节拍 换成真正的 Start-Sleep）。
     bare = [i + 1 for i, line in enumerate(lines)
             if re.match(r"\s*(tasklist|find|ping|robocopy|findstr|powershell)\b", line)]
     check("bat: external commands use absolute System32 paths", not bare,

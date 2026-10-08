@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """autostart 模板件（1.2.1）单测：monkeypatch winreg，零真实注册表读写。
 
-四用例（W4 补，i18n-unify 复核 F-2）：
+四用例：
   ① 无键不新建且出声（migrate：FileNotFoundError → log 一行、零写）
   ② 值 == 当前命令行且目标活着 → 不动（零写）
   ③ 死链重写（值指向不存在的路径 → set_autostart(True) 重写）
-  ④ 非 frozen 态 migrate 只读只记（1.2.1 守卫：注册表零接触——
-     W4 实测事故的前置红灯，事故语义此前只靠 C-40 事后抓获）
+  ④ 非 frozen 态 migrate 只读只记
 """
 from __future__ import annotations
 
@@ -82,7 +81,7 @@ def run() -> int:
     log = logs.append
     key = "reme-helper"  # AUTOSTART_KEY 经 appconfig == APP_ID
     # 模块级替身必须恢复（finally）：同进程内后续 import template.autostart 的
-    # 用例不应拿到被替换的 sys/os/winreg（C-17 的"还原"豁免腿也正是这一语义）。
+    # 用例不应拿到被替换的 sys/os/winreg（判据·测试隔离 的"还原"豁免腿也正是这一语义）。
     saved = {}
     for attr in ("sys", "os", "winreg"):
         saved[attr] = getattr(autostart, attr, None)

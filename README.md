@@ -129,12 +129,12 @@ the release-config generator, and `doc/` the documentation the app reads at runt
 `src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
 a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
-**Building locally.** The running-instance gate (D1-02, refined) refuses only when the build's
+**Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
 folder is allowed. Locally that still means no new artifact: `VERSION` stays at the published
-`1.2.5` during development, so the target folder exists and the earlier D1-01 check stops the
+`1.2.5` during development, so the target folder exists and the earlier 工程·拒重复构建 check stops the
 build first. Releases come from CI on a clean checkout, so "no local release folder for this
-work" is an expected state, not a lost artifact (CONFORMANCE §4.1.11).
+work" is an expected state, not a lost artifact.
 
 **Known gaps (not "allowed differences").** Three family mechanism modules already exist
 in the template (`autostart` 1.1.1, `icons` 2.0.0, `update_helper` 1.0.1) but reme has not
@@ -143,7 +143,7 @@ wired. Having no feature is a **gap that must be closed**, not a conflict to be 
 a schedule is not a permission. Everything under `src/template/` is kept byte-identical to
 `my-diy-tool-template` (README + `__init__.py` + code); the heavy-form `i18n` is the only
 declared `TEMPLATE-LOCAL-OVERRIDE`. Unreleased work has no local build: `VERSION` stays at
-the last published `1.2.5` until a release (dev-time rule), and the D1-02 gate blocks build
+the last published `1.2.5` until a release (dev-time rule), and the 工程·运行检测串 gate blocks build
 runs while the resident tray is up. The tray item and the build-gate fix are verified in dev
 only (8 suites + `--smoke` + isolated-start probe), not through a frozen build; tagging `v*`
 lets `release.yml` build from a clean checkout.

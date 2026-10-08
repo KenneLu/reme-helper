@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""C-2 接线：`hold_exe_delete_guard` 必须在**单实例守卫之后、托盘构造之前**被调用。
+"""exe-delete-guard 接线：`hold_exe_delete_guard` 必须在**单实例守卫之后、托盘构造之前**被调用。
 
 **为什么用"跑真正的 `main()` 并记录顺序"而不是读源码/读注释**：顺序是**行为**，
 注释保证不了它 —— 它随时可以被一次"顺手整理"挪走，而挪走之后**没有任何门禁会红**。
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from conftest import TOOL  # noqa: E402, F401  (puts src/ on sys.path)
 
-# F11/D12 实例隔离：必须在 import main 之前钉住数据根与配置，否则导入期的
+# 实例隔离：必须在 import main 之前钉住数据根与配置，否则导入期的
 # seed_config() 会写用户真实的 %LOCALAPPDATA%\reme-helper\。
 _TMP = tempfile.mkdtemp(prefix="reme-guard-order-")
 os.environ["REME_HELPER_DATA_DIR"] = _TMP

@@ -3,7 +3,7 @@
 > 用户口径（2026-09-19）：解决分歧时**以 reme-helper 为标准**，除非有更好的兼容方式
 > （那可以连 reme-helper 一起优化）。
 >
-> 判定口径（STANDARDS B4 两条前提）：允许不一致只有两种情形——**业务冲突**（前提是**双方都有**该功能）
+> 判定口径：允许不一致只有两种情形——**业务冲突**（前提是**双方都有**该功能）
 > 或**更好方案**（须给可验证理由）；两者都附带义务：**评估模板能否吸收该差异**。
 > **"没有功能"不构成冲突，那是「缺失」，必须补齐**；`TEMPLATE-LOCAL-OVERRIDE` 是留痕，不是豁免。
 
@@ -15,11 +15,11 @@
 | # | 分歧点 | 分类 | 依据（可验证） | 谁改 | 模板能否吸收（结论+理由） |
 |---|---|---|---|---|---|
 | 1 | i18n **状态表示法** | **一致** | 模板 i18n 2.1.1 `__init__` 不复制状态（`from . import i18n` + PEP 562 `__getattr__`）并加 `current_lang()`；l-s2t/dsh 均 2.1.1 | 无（l-s2t `main.py:310/375` 建议改用 `current_lang()`，非阻塞） | **已吸收**：reme 的原则（状态用参数/访问器，不做外部可读可变全局） |
-| 2 | i18n **形态**（中文即键 + `pairs.json` + 片段替换 ↔ 键名 + `zh/en.json`） | **业务冲突**（非"更好方案"） | reme `--lang-audit` 实测 **826 条**词对；模板 README / STANDARDS §E4 明示重形态适用百条级；轻形态工具各自门禁全绿 | reme 保留（已 OVERRIDE 申报） | **部分已吸收**（状态原则，见 #1）。**形态差异不吸收**：① 拷贝式模板下，每个工具都会背上中文即键表 + 片段引擎 + AST 全树扫描，而轻形态工具没有这个数据量；② §E4 已把轻/重定义为**数据格式分叉**，合并等于取消该分叉；③ `pairs.json`（`[zh,en]` 对）与模板 `zh/en.json`（键值表）**schema 不同**，合表需改四工具词表。**可吸收的替代**：把 reme 的 AST 覆盖率审计做成**可选门禁件** |
-| 3 | **ocx 无 i18n** | **缺失**（T1 成立） | `opencodex-helper` 远端 = `https://github.com/KenneLu/opencodex-helper.git`（公开）；`src/template/` 无 i18n；`main.py` 中文文案 **115 条（去重 108）** | ocx 必须补齐 | 模板 `template/i18n` 2.1.1 已在；无需吸收 |
+| 2 | i18n **形态**（中文即键 + `pairs.json` + 片段替换 ↔ 键名 + `zh/en.json`） | **业务冲突**（非"更好方案"） | reme `--lang-audit` 实测 **826 条**词对；模板 README 明示重形态适用百条级；轻形态工具各自门禁全绿 | reme 保留（已 OVERRIDE 申报） | **部分已吸收**（状态原则，见 #1）。**形态差异不吸收**：① 拷贝式模板下，每个工具都会背上中文即键表 + 片段引擎 + AST 全树扫描，而轻形态工具没有这个数据量；② 轻/重已定义为**数据格式分叉**，合并等于取消该分叉；③ `pairs.json`（`[zh,en]` 对）与模板 `zh/en.json`（键值表）**schema 不同**，合表需改四工具词表。**可吸收的替代**：把 reme 的 AST 覆盖率审计做成**可选门禁件** |
+| 3 | **ocx 无 i18n** | **缺失**（i18n 触发条件成立） | `opencodex-helper` 远端 = `https://github.com/KenneLu/opencodex-helper.git`（公开）；`src/template/` 无 i18n；`main.py` 中文文案 **115 条（去重 108）** | ocx 必须补齐 | 模板 `template/i18n` 2.1.1 已在；无需吸收 |
 | 4 | 托盘**菜单开着时的重建推迟** | **缺失** | `grep -c "MenuSignature\|menu_is_open"`：dsh = **0**、ocx = **0**（l-s2t 用模板件；reme 有内联等价） | dsh/ocx 必须补齐 | **已吸收**：模板 `tray_kit.MenuSignature` 即 reme 机制的接口化 |
 | 5 | 退出确认 + 清理勾选 | **一致** | 四家同语义；三家直接调 `tray_kit.confirm_quit_dialog`；模板 2.0.2 已含 i18n 参数化 | reme 可选迁移去重（内联 duplicated，低优先） | **已吸收** |
-| 6 | 服务唯一性 / 接入 / **有界清理** | **缺失**（ocx 另有**违规**） | 四家均未消费 `service_link`（reme 文件夹在但全仓库 0 import；dsh/ocx 无模块）；**ocx `main.py:238 kill_target_procs` 按命令行签名击杀，违 G4.2-3** | 四家补齐；ocx 违规单独登记、最急 | 模板模块已在；无需吸收 |
+| 6 | 服务唯一性 / 接入 / **有界清理** | **缺失**（ocx 另有**违规**） | 四家均未消费 `service_link`（reme 文件夹在但全仓库 0 import；dsh/ocx 无模块）；**ocx `main.py:238 kill_target_procs` 按命令行签名击杀，违 §服务唯一性-3** | 四家补齐；ocx 违规单独登记、最急 | 模板模块已在；无需吸收 |
 | 7 | 路径与数据区 / 日志 | **一致** | 四方 `paths` 1.1.3、`log_kit` 1.0.2；env 名统一 `*_DATA_DIR` / `*_CONFIG` | — | 已吸收 |
 | 8 | **autostart** | **缺失（reme 侧）** | 模板 1.1.1 在；reme 内联（`APP_ID` 键 + `sync_autostart_path`）且**无稳定安装位、无 `migrate_autostart` 自愈**；l-s2t/dsh/ocx 已采纳 | reme 必须补齐 | 模板已在（G4.1 明示其形态更优）；无需吸收。**迁移注意**：`APP_ID`→`APP_NAME` 键名变更会让存量自启项失联，须自带迁移 |
 | 9 | **icons** | **缺失** | 模板 `icons` 2.0.0 在；reme/dsh/ocx 无 `src/template/icons/`；l-s2t 为 `src/icons.py` 未包化 | 各工具补齐 | 模板已在；无需吸收 |
@@ -43,12 +43,12 @@
 |---|---|
 | reme | `autostart`、`icons`、`update_helper` 采纳；`service_link` 接线 |
 | dsh | `MenuSignature`；`service_link`；`icons` |
-| ocx | **i18n（T1）**；`MenuSignature`；`service_link`（+ 签名击杀违规）；`icons` |
+| ocx | **i18n**；`MenuSignature`；`service_link`（+ 签名击杀违规）；`icons` |
 | l-s2t | `icons` 包化采纳（`src/icons.py` → `template/icons/`） |
 
 ## 四、reme 侧缺口的工作量 / 风险评估（本轮不做）
 
-<!-- D13 推翻留痕（2026-09-28 W5 后段，执行文档 D1/F17）：2026-09-19 的「reme 不采纳 update_helper 以保留基线」已被推翻——模板 1.5.0 吸收 reme marker 语义（基准角色移交模板 E 组判据），reme 已接线采纳（commit 8453df3），blueprints 豁免行已删。 -->
+<!-- 推翻留痕：2026-09-19 的「reme 不采纳 update_helper 以保留基线」已被推翻——模板 1.5.0 吸收 reme marker 语义（基准角色移交模板 E 组判据），reme 已接线采纳（commit 8453df3），blueprints 豁免行已删。 -->
 
 | 缺口项 | 工作量 | 风险 | 关键点 |
 |---|---|---|---|

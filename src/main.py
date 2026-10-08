@@ -27,16 +27,16 @@ from tkinter import filedialog, ttk
 from tkinter import messagebox as _raw_messagebox
 import guide
 import icon_pipeline
-from template import appconfig   # noqa: F402  T1 参数区（REPO/EXE 经模块引用）
+from template import appconfig   # noqa: F402  appconfig 参数区（REPO/EXE 经模块引用）
 from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
-from template.i18n import i18n   # noqa: F402  T5 轻形态（locales/*.json；R 垫层见 i18n_bridge）
-import i18n_bridge  # noqa: F402  W3 迁移垫层：中文原文→键反查 + 语言态同步
-from template.autostart import autostart  # noqa: F402  T3 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
-from template.update_helper import update_helper  # noqa: F402  T4 在线更新 1.5.0（W5 后段接线：marker 语义基准已移交模板）
+from template.i18n import i18n   # noqa: F402  i18n 轻形态（locales/*.json；R 垫层见 i18n_bridge）
+import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语言态同步
+from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
+from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.0
 from template.tray_icons import tray_icons
-from template.tunnel_kit import tunnel_kit  # noqa: F402  W7：隧道参数正本（Decision 10）
-from template.log_kit import make_logger  # noqa: F402  T12 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
-from template.paths import (  # noqa: F402  T2 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + C-2）
+from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
+from template.log_kit import make_logger  # noqa: F402  log_kit 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
+from template.paths import (  # noqa: F402  paths 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + exe-delete-guard）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH, hold_exe_delete_guard)
 
@@ -51,7 +51,7 @@ ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 TASKBAR_ICON_PATH = RUN_DIR / f"{APP_ID}-taskbar.ico"
 TASKBAR_ICON_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 64, 96, 128, 256)
 TRAY_HICON_PIXELS = 32
-from template.tray_kit import (  # noqa: F402  T7 单实例互斥体（mutex 四件）+ 菜单占用探测器
+from template.tray_kit import (  # noqa: F402  tray_kit 单实例互斥体（mutex 四件）+ 菜单占用探测器
     acquire_single_instance, menu_is_open, mutex_name_is_valid, single_instance_free)
 
 import psutil
@@ -60,15 +60,15 @@ import yaml
 from PIL import Image, ImageDraw, ImageFont
 
 
-# 模板化状态（W-f/W-g，执行文档-20260918 §四.9）：
+# 模板化状态：
 #   paths 1.1.3 / log_kit 1.0.3 / tray_kit 2.3.0 / service_link 0.2.0 已是模板正本拷贝
 #     （sync_check [ok]，无 TEMPLATE-LOCAL-OVERRIDE）；i18n 重形态（中文即键 + pairs.json）
-#     按 STANDARDS §E4 明示许可保留；appconfig 是参数文件（设计豁免）。
-#   autostart 已于 W4（2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
+#     属许可的形态分叉，保留；appconfig 是参数文件（设计豁免）。
+#   autostart 已于 （2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
 #     migrate_autostart 自愈，config 镜像删除——doctor 直查注册表）；
-#   update_helper 已于 W5（2026-09-28）接线模板 1.5.0（marker 语义基准在模板 E 组；
+#   update_helper 已于 （2026-09-28）接线模板 1.5.0（marker 语义基准在模板 E 组；
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
-#   icons 已于 W6（2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
+#   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
 VERSION = "1.2.6"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -820,8 +820,8 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
     draft["expose"] = deep_copy(base["expose"])
 
 
-# T12：1MB×3 滚动 + 升级窗口回退 FileHandler（模板 make_logger 内部完成，含 mkdir）。
-# open_log_dir 是模板给的「打开日志目录」闭包，已接到托盘「打开区」（CONFORMANCE C-15）。
+# log_kit：1MB×3 滚动 + 升级窗口回退 FileHandler（模板 make_logger 内部完成，含 mkdir）。
+# open_log_dir 是模板给的「打开日志目录」闭包，已接到托盘「打开区」。
 log, open_log_dir = make_logger(LOG_DIR)
 
 
@@ -3003,14 +3003,12 @@ def ssh_command(target: dict, remote_command: str | None = None) -> list[str]:
     if target.get("key"):
         command += ["-i", str(Path(target["key"]).expanduser())]
     if remote_command is None:
-        # W7：长连接参数段走 tunnel_kit 正本（Decision 10 统一：ServerAliveInterval
-        # 20→30 家族归一；remote_bind=127.0.0.1 保 reme 收紧语义——远端只听本机）。
-        # N2 降级留痕（W8-C，09-29；10-01 复审 F-R11 正式改期）：本工具自愈形态 =
+        #长连接参数段走 tunnel_kit 正本。
+        # 降级留痕：本工具自愈形态 =
         # ServerAlive 让死连接自退 + 既有 refresh_tunnels 单拍拉回，**无 N 次确认
-        # 防抖/退避翻倍**（D10 半兑现，W7 §4「同款自愈演练」判据未闭环）。升级迁移
+        # 防抖/退避翻倍**。升级迁移
         # tunnel_kit.TunnelTarget（ensure=N=3 确认+完整退避）**改期至 reme 下次
-        # 大版本动刀**（原「10-01 排期」到期未能兑现，复审 F-R11 裁定正式改期
-        # 留档）——见模板 tunnel_kit README「最低消费口径」节。
+        # 大版本动刀**——见模板 tunnel_kit README「最低消费口径」节。
         command += tunnel_kit.build_reverse_args(
             {"host": target_connection(target), "port": target.get("port", 22),
              "remote_port": int(target.get("remote_port", 22333)),
@@ -4140,7 +4138,7 @@ def ui_lang() -> str:
 
 
 def t(text) -> str:
-    """把界面文案换成当前语言（轻形态 T5 + R 垫层；未收录的也原样返回）。
+    """把界面文案换成当前语言（轻形态 i18n + R 垫层；未收录的也原样返回）。
 
     词表在 locales/{zh,en}.json；i18n_bridge 做中文原文→键反查：已键化的调用点
     传键直接命中，历史中文调用点（迁移期双轨）由反查兜底。
@@ -6401,7 +6399,7 @@ def menu_text(source: str):
 
 MENU_DIRTY = {"dirty": False}
 
-# menu_is_open 探测器已随 tray_kit 2.3.0 下沉模板（W7 Decision 9），
+# menu_is_open 探测器已随 tray_kit 2.3.0 下沉模板，
 # 经 template.tray_kit 具名导入，此处不再内联。
 
 
@@ -6484,7 +6482,7 @@ def build_menu() -> pystray.Menu:
         # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
         # 其余（目录 / .env / 官方 default / 当前配置 / 日志 / 说明）收进「打开指引」。
         pystray.MenuItem(menu_text("打开 workspace"), lambda _icon, _item: open_path(reme_root() / "workspace")),
-        # D13/C-15：本工具自己的日志目录（%LOCALAPPDATA%\reme-helper\log）。立即执行，按
+        # /判据·打开日志项：本工具自己的日志目录（%LOCALAPPDATA%\reme-helper\log）。立即执行，按
         # E2 命名五规则②不加「…」；模板 log_kit 的 open_log_dir 闭包（含 mkdir）直接用。
         pystray.MenuItem(menu_text("打开日志目录"), lambda _icon, _item: open_log_dir()),
         pystray.MenuItem(menu_text("打开指引（文件在哪）…"), lambda _icon, _item: show_path_guide()),
@@ -6705,7 +6703,7 @@ def quit_watch_loop() -> None:
             # ⚠ `--quit` 是**无 UI 的外部入口**（外部工具/脚本在用，见 `--quit` 的发送端
             # 与本函数 docstring）：**没有任何人**被问过。
             # ⇒ 不得让它沿用"用户在**有确认框**的语境下保存的勾选"去执行破坏性动作
-            #   （停服务/停隧道）——这正是 §4.1.43 / C-41 禁止的形态，与 dsh/ocx 末级
+            #   （停服务/停隧道）——这正是 §4.1.43 / 判据·不可用不停服 禁止的形态，与 dsh/ocx 末级
             #   `return True, False` 同形：**"没问到"与"用户选了"必须分开**。
             # 旧实现调 `shutdown_tray(TRAY_ICON)` 不传 kwargs ⇒ `stop_reme/stop_tunnels`
             # 落 `None` ⇒ 回读 `CFG["quit_stop_*"]` ⇒ **勾过一次的用户会被静默停服务**。
@@ -6998,7 +6996,7 @@ def quit_app(icon, _item) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 在线自更新（W4）
+# 在线自更新
 #
 # 三段：查（GitHub Releases API）→ 下并校验（zip + sha256）→ 换（独立进程 + 自己退出）。
 # 为什么非要"独立进程"：**Windows 上正在运行的 exe 与已加载的 DLL 换不掉**。所以流程是
@@ -7007,7 +7005,7 @@ def quit_app(icon, _item) -> None:
 #
 # 配置已经不在安装目录了（见 CONFIG_PATH），所以这里可以整目录铺过去，不必给任何文件写例外。
 # ---------------------------------------------------------------------------
-# W5 后段（接线模板 update_helper 1.5.0）：更新暂存根。模板的派生链全部以它为轴——
+# 后段（接线模板 update_helper 1.5.0）：更新暂存根。模板的派生链全部以它为轴——
 # failed_marker = update_dir.parent/update.failed、backup = parent/_backup、
 # snapshot = parent/_backup.pre、log = parent/update.log —— 传 update_dir=
 # USER_DATA_DIR/"update-staging" 时四者恰与旧内联常量逐一相等（零迁移）。
@@ -7021,7 +7019,7 @@ HELPER_UPDATE_BACKUP = USER_DATA_DIR / "_backup"
 # 等旧进程退出的预算：**两个常量别合并**——`LIMIT` 是**轮询次数**、`TICK_MS` 是
 # **每拍毫秒**；`BUDGET_S` 由两者现算，是**下界**（真墙钟更大，见下）。
 # 一个节拍 = 一句真正的 Start-Sleep（**不是** `ping -n 2`：丢 loopback ICMP 的机器上
-# 一拍实测 9.0 秒，见 C-33），再加 PowerShell 自身的启动开销。
+# 一拍实测 9.0 秒，见 判据·禁ping节拍），再加 PowerShell 自身的启动开销。
 # **实测**：本机 2026-09-19 一拍 **1.66s**（1.000s 睡眠 + 0.66s 启动）⇒ 120 拍墙钟约
 # 3.3 分钟；模板侧记录的是其机器上的 **1.29s**（PS 启动 ~0.29s）。两个都是**测量值**，
 # 差在 PS 冷启动与机器负载——所以预算按 `limit × tick_ms` 算，日志只报这个**下界**。
@@ -7067,7 +7065,7 @@ def check_helper_update() -> tuple[bool, str]:
     """托盘「检查 ReMe 助手更新」：**只查、只提示**，绝不自动替换。
 
     刻意与 ReMe 的检查保持同一种交互（只提示、不升级）：升级会动配置与配套工具，
-    该由用户决定什么时候做。W5 后段起查询/节流走模板 update_helper.check_update
+    该由用户决定什么时候做。后段起查询/节流走模板 update_helper.check_update
     （24h 进程内节流白得）；对话框文案与 HELPER_UPDATE_STATE 是工具侧扩展。
     """
     result = update_helper.check_update(VERSION)
@@ -7084,7 +7082,7 @@ def check_helper_update() -> tuple[bool, str]:
 def _report_failed_previous_update() -> None:
     """上次更新失败时模板件留了 marker：读一次、通知用户、删掉（模板 pop 语义）。
 
-    模板 pop_failed_update_note 已含"先日志后删证据"顺序（C-32）；notify 的中文
+    模板 pop_failed_update_note 已含"先日志后删证据"顺序（判据·证据不先删）；notify 的中文
     文案走 t()（双语），模板 note 的 detail 只进日志不重复弹。
     """
     detail = update_helper.pop_failed_update_note(str(HELPER_UPDATE_STAGING), log=log)
@@ -7098,7 +7096,7 @@ def startup_helper_update_check() -> None:
         return
     _report_failed_previous_update()
     ok, detail = check_helper_update()
-    # C-38：这行原本写的是 `startup update check:`，于是 C-38 的锚（"第一个以 `startup`
+    # 判据·启动自证：这行原本写的是 `startup update check:`，于是 判据·启动自证 的锚（"第一个以 `startup`
     # 开头的 log 行"）落在**更新检查**上而不是启动上 —— 语义错位。改掉前缀：它本就是
     # 更新检查，不是启动标记（真正的启动标记在 `main()` 单实例守卫之后）。
     log(f"update check: ok={ok} detail={detail}")
@@ -7109,7 +7107,7 @@ def startup_helper_update_check() -> None:
 
 
 def _rmtree_verified(path, what: str = "temp dir") -> bool:
-    """删目录并**回读确认**——删不掉不许静默（C-30）。
+    """删目录并**回读确认**——删不掉不许静默（判据·临时目录归属）。
 
     这里以前直接调 rmtree 并传 ignore_errors：Windows 上偶发句柄未释放时
     只是**这一次**删不掉，失败被吞掉之后 %TEMP% 里就留一个空壳，
@@ -7228,7 +7226,7 @@ def copy_helper_upgrade_prompt_from_tray() -> None:
 
 
 def ident_line() -> str:
-    """R-EVID（2026-09-19 全员规则）：取证必须**自带时点**。
+    """取证实读（2026-09-19 全员规则）：取证必须**自带时点**。
 
     不带修订号的证据是不可反驳的——分不清"它错了"与"它取得更早"，而这两种情况的处置
     完全不同（前者要改、后者只要重取）。所以每份会被贴进对话的诊断日志，第一行都写清：
@@ -7355,11 +7353,11 @@ def smoke() -> int:
         check("doc has codex+mcp", "codex exec" in doc_text and "mcp_servers.reme" in doc_text)
         check("doc has capture.mjs", "capture.mjs" in doc_text)
         check("doc has capture_cc.mjs", "capture_cc.mjs" in doc_text)
-        # 守卫覆盖探针（tray_kit 2.2.0 / D3.1 / C-10）：名字**形状合法且内核收得下**。
+        # 守卫覆盖探针（tray_kit 2.2.0 / D3.1 / 判据·smoke不绕）：名字**形状合法且内核收得下**。
         # 不占锁、不弹窗；`ERROR_ALREADY_EXISTS` 也算合法（名字被占用恰恰证明内核接受它），
         # 故用户常驻实例在跑时这条依然为真——**不能用 single_instance_free()**：那个问的是
         # "此刻别处有没有实例在跑"，用户实例在跑时必假，冒烟会假红。
-        # 这条断言真正要打的故障是"名字非法 ⇒ 守卫静默 fail-open"（SINGLE-01 的 l-s2t 教训）。
+        # 这条断言真正要打的故障是"名字非法 ⇒ 守卫静默 fail-open"。
         check("single-instance name valid",
               mutex_name_is_valid(APP_ID, mutex_name=SINGLE_INSTANCE_NAME))
         # ReMe 适配版本必须随包分发且非空（用户 2026-09-19 定：不再跟随 PyPI 最新）。
@@ -7510,7 +7508,7 @@ def ui_check() -> int:
 #      裸名按 Win32 语义落在会话命名空间里，`Local\<同名>` 指的就是**同一个内核对象**
 #      （已实测：持有裸名时对 `Local\` 前缀名调用 CreateMutexW 同样返回 183），
 #      所以补前缀是**显式化**而不是改名——①②两条保护原样保留。
-#   ④ 前缀之后不得再有第二个反斜杠（SINGLE-01 的 l-s2t 教训）。
+#   ④ 前缀之后不得再有第二个反斜杠。
 # 若还留裸名：2.2.0 的守卫会判其非法并**放行**（D3.2 失败方向），单实例保护会静默消失——
 # 这正是构建期 `--smoke` 探针要打红的东西（D3.3）。
 SINGLE_INSTANCE_NAME = "Local\\" + APP_ID + "-tray"
@@ -7644,7 +7642,7 @@ def install_unique_tray_uid() -> None:
     **与修复前一模一样。** 换用「每次运行都不同」的 hID 完全没有改变行为，所以
     缓存键**不是** (路径, uID)。假设作废，函数不再被调用。
 
-    顺带得到一个真实的教训：把 `win32.NOTIFYICONDATAW` 换成普通函数会让
+    把 `win32.NOTIFYICONDATAW` 换成普通函数会让
     `ctypes.sizeof()` 抛 `TypeError: this type has no size`，`setup()` 于是在
     `visible = True` 里炸掉 —— 表现是"进程在跑、图标从未出现"，比原 bug 更难查。
     必须子类化结构体（保留布局与 sizeof），而不是替换它。
@@ -7864,15 +7862,15 @@ def main() -> int:
     if not acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log):
         warn_duplicate_instance()
         return 0
-    # C-38（§4.1.38 的**唯一正本样例**，勿自创变体）：启动标记 + 两行**解析后**的数据根/配置。
-    # 位置：单实例守卫**通过之后**（走到这里才叫"本次启动成功"），且在 C-2 持句柄之前
+    # 判据·启动自证（§4.1.38 的**唯一正本样例**，勿自创变体）：启动标记 + 两行**解析后**的数据根/配置。
+    # 位置：单实例守卫**通过之后**（走到这里才叫"本次启动成功"），且在 exe-delete-guard 持句柄之前
     # （保持"唯一合法窗口"那段注释的约束不被挪动）。
     # 为什么值得：`python -c` / heredoc 探针**不落盘**，源码扫描原理上覆盖不到；
     # 能定死归属的只有**产物自带的这几行**。
     log(f"startup {APP_NAME} v{VERSION} (pid {os.getpid()})")
     log("data root: %s" % USER_DATA_DIR)
     log("config   : %s" % CONFIG_PATH)
-    # C-2：活实例对自己的 exe 持一个不含 FILE_SHARE_DELETE 的句柄 ⇒ 删除/改名由**内核**拒绝。
+    # exe-delete-guard：活实例对自己的 exe 持一个不含 FILE_SHARE_DELETE 的句柄 ⇒ 删除/改名由**内核**拒绝。
     # 位置是**唯一合法窗口**，三面都有理由，挪哪边都错：
     #   * 必须在上面那批**无头 CLI 分支之后**——`--helper-update` 走 os._exit(0) 后要靠
     #     更新器**整目录替换 exe**，提前持句柄等于让那次更新自己把自己钉住；

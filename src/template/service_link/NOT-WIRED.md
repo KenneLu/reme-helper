@@ -15,7 +15,7 @@ This file is reme-local (it has no template counterpart) and is not part of the
 template comparison set; the three template files in this folder stay byte-identical
 to `my-diy-tool-template/template/service_link/`.
 
-## D9 核查（2026-09-19）：优雅关闭 API 在服务侧不存在 ⇒ 不可接
+## 优雅关闭 API 核查（2026-09-19）：服务侧不存在 ⇒ 不可接
 
 REVIEW #8 要求 ADOPTED 停止"优先走服务的优雅关闭 API"。**实测（只读）：该 API 不存在。**
 
@@ -28,7 +28,7 @@ REVIEW #8 要求 ADOPTED 停止"优先走服务的优雅关闭 API"。**实测�
   `call_server(<job>)`——**没有 `reme stop`**。
 
 **结论**：helper 侧无从"先走优雅关闭 API"——**不是 reme-helper 漏接，是服务端没有这条路径**。
-按 §D3.2「失败方向必须不破坏」，维持既有回退：只终止规范端点的接入 pid
+按 §自检与测试·失败方向「失败方向必须不破坏」，维持既有回退：只终止规范端点的接入 pid
 （`stop_service(only_attached=True)`，`src/main.py:2921`），**不做全量签名击杀**。
 **卡点**：需先在 `reme` 服务包上游新增优雅关闭端点/命令（属本工具家族之外的工程），
 helper 才能接线；在此之前**不得**用空回调冒充 graceful（假 API 违反 G4.2 条款 3 的意图）。
@@ -37,6 +37,6 @@ helper 才能接线；在此之前**不得**用空回调冒充 graceful（假 AP
 
 - reme 全仓唯一 `ServiceLink` 出现点 = 本目录拷贝件的类定义本身，**零消费方**；
   main.py L64 为版本名册注释（描述拷贝状态），非接线证据。
-- C-53 [STALE-NW] 黄灯对本模块属**已知误报形态**（保守文本口径与版本名册注释的
+- stale-not-wired [STALE-NW] 黄灯对本模块属**已知误报形态**（保守文本口径与版本名册注释的
   交集）——复核结论 = **维持未接入**；本申报持续有效直至 service_link 真实接线
   （届时撤销本文件）。

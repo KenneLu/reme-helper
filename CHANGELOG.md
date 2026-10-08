@@ -4,9 +4,9 @@
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
 ## 1.2.6
-- **`--quit` no longer inherits the persisted cleanup checkbox** (2026-09-20, C-51). `--quit` is the headless entry used by external tools - nobody is asked anything - yet quit_watch_loop called shutdown_tray(ICON) without keyword arguments, leaving stop_reme/stop_tunnels as None, which the function then fills in from CFG["quit_stop_*"] . A user who had once ticked "stop the service on exit" would therefore have the service silently stopped by an external `--quit`. This is exactly the shape C-41 forbids: a preference saved in the presence of a confirmation dialog must not drive an action nobody confirmed. The tray menu path is unaffected - it goes through quit_app, where the user really is asked. Guard: template criterion C-51.
-- **The exit dialog is localised** (task T3): the six hard-coded Chinese strings in the quit confirmation window (title, body, two checkboxes, two buttons) now go through app_title() and one translate_tree(win) pass - they are built from Tk widgets, which never pass through the messagebox shim, so both available localisation paths had been bypassed. Guard: template criterion C-48.
-- **Startup self-identification** (C-38): the startup line is followed by the resolved data root and config path; the update-check line no longer starts with startup, so the criterion anchor lands on the real startup marker instead of on an update check.
+- **`--quit` no longer inherits the persisted cleanup checkbox** (2026-09-20, headless-quit-explicit-stops). `--quit` is the headless entry used by external tools - nobody is asked anything - yet quit_watch_loop called shutdown_tray(ICON) without keyword arguments, leaving stop_reme/stop_tunnels as None, which the function then fills in from CFG["quit_stop_*"] . A user who had once ticked "stop the service on exit" would therefore have the service silently stopped by an external `--quit`. This is exactly the shape 判据·不可用不停服 forbids: a preference saved in the presence of a confirmation dialog must not drive an action nobody confirmed. The tray menu path is unaffected - it goes through quit_app, where the user really is asked. Guard: template criterion headless-quit-explicit-stops.
+- **The exit dialog is localised** (task T3): the six hard-coded Chinese strings in the quit confirmation window (title, body, two checkboxes, two buttons) now go through app_title() and one translate_tree(win) pass - they are built from Tk widgets, which never pass through the messagebox shim, so both available localisation paths had been bypassed. Guard: template criterion no-chinese-ui-literal.
+- **Startup self-identification** (判据·启动自证): the startup line is followed by the resolved data root and config path; the update-check line no longer starts with startup, so the criterion anchor lands on the real startup marker instead of on an update check.
 - **Registered, not implemented** (REVIEW #8): the graceful-shutdown API this tool's exit path would prefer does not exist on the service side - ReMe 0.4.1.11 exposes 32 routes, all POST /<job>, with no /shutdown, /stop, /quit or /exit, and its CLI has no stop action. The only graceful channel would be a console Ctrl+C. Recorded rather than faked; wiring it waits for that endpoint.
 - **VERSION 1.2.5 -> 1.2.6.**
 
@@ -15,8 +15,8 @@
 > 构建产物按版本号命名，而版本号要到发版才动。
 > 发布时判级：**补丁级 +0.0.1**。主体是行为等价的模板对齐——托盘菜单重画、退出确认弹窗
 > 等形态**未改**（仍是 reme 自己的实现，只是 tray_kit 模块升到 2.2.0），默认数据路径也不变。
-> 唯一一处用户可见变化是**新增托盘「打开日志目录」项**（D13/C-15，用模板 `open_log_dir`），
-> 按 D15「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
+> 唯一一处用户可见变化是**新增托盘「打开日志目录」项**（判据·打开日志项，用模板 `open_log_dir`），
+> 按 「日常小功能 +0.0.1」计，未达"较大功能性差异"的 +0.1 门槛；其余新增面是工具链用的
 > `_DATA_DIR` / `_CONFIG` env 契约与构建/测试隔离。
 
 - **退出三态：与 dsh/ocx 的 `_decide_quit()` 形态等价，差异只在三态的表达方式**（lead 2026-09-19
@@ -44,7 +44,7 @@
 
 - **工具链同族的第二处：构建的隔离数据根就在 `%TEMP%` 里，而删它是**不可验证**的**。
   `scripts/build.bat:22` 把 `REME_HELPER_DATA_DIR` 钉到 `%TEMP%\reme-helper-builddata`（固定名，
-  落在 `%TEMP%` 正是 F11 要的隔离位），可 `:drop_data_dir` 的实现是
+  落在 `%TEMP%` 正是 要的隔离位），可 `:drop_data_dir` 的实现是
   `if exist ... rmdir /s /q ... 2>nul`：**没有回读、没有报告**，"删掉了"和"还在"输出一模一样
   （都是什么都不输出）。实测：那个目录里 `reme-helper\config.json` 的 mtime 是 **16:31**，
   即当天某次运行之后它**一直躺在 %TEMP% 里**，而所有门禁都不吭一声。
@@ -59,7 +59,7 @@
   写在 `call` **之前**，脚本从顶部顺序执行就**落进子程序**，里面 `goto :eof` 在主上下文里等于
   结束整个脚本 ⇒ `call` 与 echo 从未执行，解析器把"缺行"当空串，A/C 两态**因为错误的原因变绿**。
   判据自己假绿，是本家族最忌的形态；这次是靠 B 态那处不一致（WARN 印了、flag 读不到）暴露的。
-- **泄漏口径的覆盖缺口（上报 tpl-keeper）**：C-30 腿 B 的签名是"顶层或其一层子目录里有
+- **泄漏口径的覆盖缺口（上报 tpl-keeper）**：判据·临时目录归属 腿 B 的签名是"顶层或其一层子目录里有
   `config.json` **且**顶层下至少一个 `*.log`"。上述目录在 16:31–18:22 之间只有
   `reme-helper\config.json`（还没有 log），于是**两条腿都看不见它**——
   "有配置、还没写日志"是当前签名的盲区。
@@ -67,7 +67,7 @@
   没进词表，`tests/test_i18n.py` 立刻报 `main.py:7478` 红；补 `pairs.json` 一条后 23/23。
   这是"改完必须跑整轮门禁"的正面样本。
 
-- **C-30：`%TEMP%` 的清理不许静默失败（生产代码那一半）**。`download_and_apply_helper_update`
+- **判据·临时目录归属：`%TEMP%` 的清理不许静默失败（生产代码那一半）**。`download_and_apply_helper_update`
   的失败早退路径此前是 `rmtree(work, ignore_errors=True)`——`work` 正是 `mkdtemp` 的根目录，
   Windows 上偶发句柄未释放时这一拍删不掉，失败被吞掉后 %TEMP% 里留一个半删的壳，而调用方
   拿到的仍是"已清理"。现改为 `_rmtree_verified()`：**删不掉至少记一行日志**（`cleanup FAILED`）
@@ -77,9 +77,9 @@
   **双向对照**（`_verify-scratch/c30-probe.py`，从 `main.py` 抽**真源码**执行，不是重写一遍）：
   普通目录 → True 且真被删、无日志；**本进程打开着文件的目录** → False、目录仍在、恰好一行
   `cleanup FAILED`；路径本就不存在 → True 且不报错（"没东西可删"不是失败）。
-  验收：`conformance_check.py --roots reme-helper --only C-30` → `[ok]`。
+  验收：`conformance_check.py --roots reme-helper --only 判据·临时目录归属` → `[ok]`。
 
-- **C-33：等待节拍不许用 `ping`**。更新器 bat 里那句 `ping -n 2 127.0.0.1` 不是"睡 1 秒"，
+- **判据·禁ping节拍：等待节拍不许用 `ping`**。更新器 bat 里那句 `ping -n 2 127.0.0.1` 不是"睡 1 秒"，
   而是"发两个 ICMP 等回包"：丢 loopback ICMP 的机器上实测 **9.0s/拍**，名义 120 拍的预算
   变成 ~18 分钟，而 `:giveup` 仍打印 "{limit}s"——**日志说谎**。改用真正的
   `…\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds 1000"`
@@ -90,7 +90,7 @@
   继续报 "{limit}s" 就是换了个来源的同一句谎。测试同步：`test_update_bat.py` 的期望串改成
   tick 文案，静态判据的裸名黑名单加入 `powershell`。
   **实证**：用 `limit=2`（逼出**恰好一拍**，`limit=1` 在睡之前就跳走了、证明不了这一行）实测
-  `elapsed=1.66s`；`--roots reme-helper --only C-33` → `[ok]`。
+  `elapsed=1.66s`；`--roots reme-helper --only 判据·禁ping节拍` → `[ok]`。
 
 - **行序成为判据：回退源必须在检查之后才准搬走**。空 STAGE 那条缺陷（`571c83d` 修）的根因
   不是任何单行的内容，而是**顺序**：复制 → 判 rc → `move SNAPSHOT→BACKUP` → 才检查 install
@@ -127,10 +127,10 @@
   本机实测 `where find` → `H:\Tools\Git\usr\bin\find.exe` 第一位。修法：`tasklist` / `find` /
   `Robocopy` **全部改 `%SystemRoot%\System32\…` 绝对路径**，脚本不再随"谁启动它"改变语义；
   并加静态判据（裸名即红；负对照：逐个换回裸名 → 第 33 / 37 / 51,53,72,106 行被点名）。
-  当时同批改的 `ping` 后来被**整个换掉**（不是换路径）：见下面 C-33 那条——`ping -n` 的
+  当时同批改的 `ping` 后来被**整个换掉**（不是换路径）：见下面 判据·禁ping节拍 那条——`ping -n` 的
   "1 秒"是拿网络配置当计时器，绝对路径只修了"哪个 ping"，没修"它根本不是时钟"。
 
-- **退出路径的失败方向（#44 A 项）+ 打包 Tcl/Tk 断言（B 项）**：
+- **退出路径的失败方向（A 项）+ 打包 Tcl/Tk 断言（B 项）**：
   - **A 项：现状已是"链路不可用即放行"，本轮把它钉成机械判据。** `quit_app` 的降级链是
     富对话框 → 原生 `askyesno` → 放行；`confirmed` 初值为 True，两级都抛异常时保持 True
     ⇒ 照常退出，**不会**把用户锁死在工具里（触发条件正是"包被损坏、Tcl 起不来"，那时用户
@@ -151,7 +151,7 @@
     真产物 → `ALL-TK-CHECKS-PASSED` exit=0；不存在的路径 → `[ERROR] Tk runtime missing:
     _internal\_tkinter.pyd` exit=1。
 
-- **构建/测试卫生收尾（C-06 / C-07 / 临时目录泄漏 / 两处判据缺陷）**：
+- **构建/测试卫生收尾（判据·双README随包 / 判据·ico不入库 / 临时目录泄漏 / 两处判据缺陷）**：
   - **构建脚本"只有托盘已经在跑才能构建"（本轮最严重的发现）**：运行实例守卫里那行
     `if defined RUNNING_DIR if "%RUNNING_DIR:~-1%"=="\" set "RUNNING_DIR=%RUNNING_DIR:~0,-1%"`
     在变量**未定义**时会展开成垃圾，cmd 直接以「命令语法不正确」中止整个脚本——而
@@ -164,19 +164,19 @@
     已删除；门禁跑完 `%TEMP%` 中 `reme*` 签名目录实测为 **0**（**2026-09-19 17:23 那一刻的
     读数**——单次计数只是**时点值**，不是长期保证：此后残留又出现过（复核扫描与 team-lead
     的计数都在其之后）。真正的不变式是"每次跑完自己清、且清理能回读确认"，不是"某次读到 0"）。
-  - **临时目录残留的"运行期一半"接进门禁（R-10 / C-30，2026-09-19）**：此前只有静态判据
-    （C-30 看 `mkdtemp` 的前缀与清理写法），"跑起来到底有没有新增残留"没人管。现在
+  - **临时目录残留的"运行期一半"接进门禁（回归·temp残留 / 判据·临时目录归属，2026-09-19）**：此前只有静态判据
+    （判据·临时目录归属 看 `mkdtemp` 的前缀与清理写法），"跑起来到底有没有新增残留"没人管。现在
     `build.bat` 在**测试段之前**取基线（`--temp-leak-save`）、**测试段之后**判增量
     （`--temp-leak-baseline`），**只对新增报红**——历史存量（本机当前 4 条，都不是 reme 的）
     不会误判。实测四个 rc：基线 `0` / 增量 `0` / **空基线对照 `1`**（证明有区分力，不是恒绿）
     / 植入一个本仓前缀的泄漏目录 `reme-helper-update-ctl0` → `1` 且输出里点名。
     模板仓不在时跳过（CI 单仓 checkout），与 `sync_check` 闸同规则。
-  - **C-07 生成物 ico 不再入库**：`reme-helper.ico` / `reme-helper-taskbar.ico` 由
+  - **判据·ico不入库 生成物 ico 不再入库**：`reme-helper.ico` / `reme-helper-taskbar.ico` 由
     `--make-icon` 生成，却一直被 git 跟踪（`git ls-files '*.ico'` 非空）。已 `git rm --cached`
     并在 `.gitignore` 里同时覆盖仓库根（开发态的 `RUN_DIR`）与 `src/`。**不是嘴上说说**：
     把两个 ico 从磁盘删掉后跑**完整构建**，`--make-icon` 在 PyInstaller 之前重新生成、
     PyInstaller 用 `--icon` 嵌入、构建走到 `[DONE]`——干净检出即可构建。
-  - **C-06 发布包漏发中文 README**：`build.bat` 只 `copy README.md`，`README.zh-CN.md`
+  - **判据·双README随包 发布包漏发中文 README**：`build.bat` 只 `copy README.md`，`README.zh-CN.md`
     从没进过发布包（两份 README 顶部互相链接，缺一份就是死链）。现已同时复制，并加
     "复制后必须存在"的硬校验。
   - **构建把隔离数据根留在 %TEMP%**：`REME_HELPER_DATA_DIR=%TEMP%\reme-helper-builddata`
@@ -221,7 +221,7 @@
 - **tray_kit 追平模板 2.2.0，连带修掉一个"静默失去单实例保护"的隐患**：
   模板 2.2.0 把互斥体名的合法性收成**一份判据** `mutex_name_ok()`（非空 + `Local\` 前缀 +
   前缀后无第二个反斜杠），守卫、探针、`single_instance_free` 共用；同时新增
-  `mutex_name_is_valid()` 探针（2.1.0，D3.1/C-10）。reme 跟着升级时发现自己的名字
+  `mutex_name_is_valid()` 探针（2.1.0，D3.1/判据·smoke不绕）。reme 跟着升级时发现自己的名字
   `reme-helper-tray` 是**裸名**，在新判据下会被判非法，而守卫遇非法名按 D3.2 **放行**——
   即单实例保护会**静默消失**（这正是 l-s2t "守卫坏了三个月而构建全绿"的同型）。名字改为
   `Local\reme-helper-tray`：裸名按 Win32 语义本就在会话命名空间里，补前缀是**显式化而非改名**
@@ -286,21 +286,21 @@
 > **运行检测已精化**（2026-09-19）：只在"构建目标目录 == 运行实例所在目录"时拒绝；构建到
 > **另一个**版本目录不再要求退出实例。原"有实例即拦"形态的唯一实际效果，是拦住无害的
 > 异版本构建（D1-01 已覆盖真正危险的情形）；该"拦"分支现属**兜底**。
-> **验证范围必须说清**：C-15 托盘菜单项、更新链加固与守卫精化只经过 **dev 态**验证
+> **验证范围必须说清**：判据·打开日志项 托盘菜单项、更新链加固与守卫精化只经过 **dev 态**验证
 > （9 套件 + `--smoke` + 隔离数据区正常启动探针 + 守卫两分支合成重放），**尚未经过冻结
 > 构建**。正式发布物由 `.github/workflows/release.yml` 在推 `v*` tag 时从干净检出构建。
 
-- **模板件收敛（W-g）**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
-  `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §E4 许可保留）。
+- **模板件收敛**：四个模板件改为模板正本拷贝，`sync_check` 全 `[ok]`，
+  `TEMPLATE-LOCAL-OVERRIDE` 归零（appconfig 仍按设计豁免、i18n 重形态按 §双语i18n 许可保留）。
   - `paths.py` → 模板 1.1.3 正本：dev 态 `APP_DIR` 改由「向上找 main.py 的仓库根」锚定，
     撤掉 reme 的 dev-RUN_DIR override；`REME_HELPER_DATA_DIR` **整体重定向数据根**
-    （F11/D12：测试/构建实例与常驻托盘彻底隔离），`REME_HELPER_CONFIG` 钉配置也由模板
+    （测试/构建实例与常驻托盘彻底隔离），`REME_HELPER_CONFIG` 钉配置也由模板
     1.1.3 统一提供（main.py 里的临时接管已删除）。reme 专有派生（`DIAG_LOG_DIR` /
     `QUIT_REQUEST_PATH` / `ICON_*` / `TASKBAR_*` / `TRAY_HICON_PIXELS`）移入 `main.py`；
     `build.bat` 固定 `REME_HELPER_DATA_DIR` 到临时目录。
   - `log_kit.py` → 模板 1.0.2 正本：撤销 root-logger/`configure_logging` override，改
     `make_logger(LOG_DIR)`（named logger + 升级窗口 FileHandler 回退），轮转仍 1MB×3。
-    `open_log_dir` 已接住，并已挂到托盘「打开区」（CONFORMANCE C-15 **已完成**，见本节末的
+    `open_log_dir` 已接住，并已挂到托盘「打开区」（CONFORMANCE 判据·打开日志项 **已完成**，见本节末的
     「新增托盘『打开日志目录』」条；实现位置 `src/main.py:6505`）。
   - `tray_kit.py` → 模板 2.0.2 正本：调用点适配新签名
     `acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log)`；互斥体名
@@ -324,11 +324,11 @@
   本就是）。此前的 reme README 还在描述已撤销的 override 状态，属错误文档。
   `__init__.py` 也统一补 `TEMPLATE-FROM` 头，sync_check 现在把 README 与 `__init__.py`
   一并纳入比对（CONFORMANCE §4.1.9/§4.1.10）。
-- **新增托盘「打开日志目录」**（D13 补强 / CONFORMANCE C-15）：接模板 `log_kit.make_logger`
+- **新增托盘「打开日志目录」**（补强 / CONFORMANCE 判据·打开日志项）：接模板 `log_kit.make_logger`
   返回的 `open_log_dir`，放在「打开区」（`打开 workspace` 与 `打开指引…` 之间）；立即执行，
   按 E2 命名五规则②不加「…」。`test_helper` 的旧断言（「打开…」全收进指引窗口）随之更新：
   日志目录是规则要求的例外。
-- **修 build.bat 运行检测串**（CONFORMANCE C-11 / D1-02）：`findstr /c:"reme-helper-"`
+- **修 build.bat 运行检测串**（CONFORMANCE 判据·检测串一致 / D1-02）：`findstr /c:"reme-helper-"`
   → `/c:"reme-helper"`。原串尾部连字符命不中 `reme-helper.exe`，闸门形同虚设；现在有实例
   在跑时构建会被拒绝（exit 1）。
 
@@ -347,7 +347,7 @@
 - **零中断更新**：「下载并更新 ReMe 助手」的退出路径显式放行服务与隧道——helper 换装
   重启期间 ReMe 零中断，会话不掉线。
 - **只读退出**：开发迭代/构建打包不再反复启停 ReMe，避免记忆处理被频繁打断（规范
-  STANDARDS §D3「测试与自检的服务无扰」同步成文）。
+  STANDARDS §自检与测试「测试与自检的服务无扰」同步成文）。
 
 ## v1.2.3
 
@@ -567,7 +567,7 @@
 
   **VM 不可达条件下的实测**（同一台机器、同一时刻）：
 
-  | | 启动到托盘窗口出现 |
+  | — | 启动到托盘窗口出现 |
   |---|---|
   | 1.0.10 / 1.0.11（修复前） | **≥ 20.0 秒**（其中一个实例实测 29.3 秒） |
   | **1.0.12（修复后）** | **1.67 秒** |

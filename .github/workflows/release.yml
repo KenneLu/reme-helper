@@ -69,11 +69,11 @@ jobs:
         run: |
           $pkg = "${{ steps.version.outputs.package }}"
           $dir = "release/$pkg"
-          # The folder and the zip keep the version; the exe inside does not (D3:
+          # The folder and the zip keep the version; the exe inside does not (
           # the autostart registry value stores the full path to the exe, so a
           # versioned name would strand it on every in-place update).
           if (-not (Test-Path "$dir/reme-helper.exe")) { throw "build produced no exe in $dir" }
-          # W5 (F16): keep the version directory layer inside the zip - the template
+          # keep the version directory layer inside the zip - the template
           # update_helper expects <APP_ID>-<ver>/ as the primary layout; the flat
           # fallback would lay the zip+sha256 (~50MB) straight into the install dir.
           Compress-Archive -Path "$dir" -DestinationPath "release/$pkg-windows-x64.zip"

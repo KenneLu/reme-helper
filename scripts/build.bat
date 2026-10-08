@@ -16,7 +16,7 @@ rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0.."
 
-rem F11/D12: build and test instances must never share the resident tray data
+rem Build and test instances must never share the resident tray data
 rem root (config / log / quit.request). Redirect the whole data root to a temp
 rem folder so a build can never disturb or be disturbed by the running app.
 set "REME_HELPER_DATA_DIR=%TEMP%\reme-helper-builddata"
@@ -38,7 +38,7 @@ for %%a in (%BUILD_ARGS%) do (
 :args_done
 
 rem ---------------------------------------------------------------------------
-rem IDENT line (R-EVID, team-wide 2026-09-19): evidence must carry its own revision.
+rem IDENT line (evidence-live-read, team-wide 2026-09-19): evidence must carry its own revision.
 rem Everything below goes into a log people paste into chat, and without this line a log
 rem cannot say WHEN it was taken - "it is wrong" and "it was taken before your fix" are
 rem indistinguishable, and the two need opposite responses. Prints first, before anything
@@ -93,8 +93,8 @@ echo [VERSION] %VERSION%  release: %RELEASE_DIR%
 
 if defined CLEAN_ONLY goto :clean
 
-rem G1 RELAXED (2026-09-19, C2): target-dir existence is INFO, not a refusal.
-rem Refusal is the running-instance guard below (D1-02); safety comes from C2 - the
+rem release-layout RELAXED (2026-09-19): target-dir existence is INFO, not a refusal.
+rem Refusal is the running-instance guard below (build-run-detect); safety comes from exe-delete-guard - the
 rem live instance holds its own exe (no FILE_SHARE_DELETE), so the kernel rejects
 rem deleting it with winerror 32 rather than emptying it silently.
 rem CLEANLINESS IS NOT RELAXED: the old dir is removed right after that guard, so
@@ -104,13 +104,13 @@ if exist "%RELEASE_DIR%" (
 )
 
 rem ---------------------------------------------------------------------------
-rem Running-instance guard (D1-02, refined 2026-09-19).
+rem Running-instance guard (build-run-detect, refined 2026-09-19).
 rem History: this gate used to refuse whenever ANY instance was running. Because
-rem D1-01 (same-version release dir already exists) is checked FIRST, that form's
+rem The same-version check (release dir already exists) is checked FIRST, that form's
 rem only real effect was blocking harmless builds of OTHER versions. What is
 rem actually unsafe is deleting/overwriting the directory a live instance runs
 rem from - so the judgement is directory equality, not 'is an instance running'.
-rem Since G1 was relaxed (2026-09-19, C2), THIS guard is the sole refusal: the block
+rem Since release-layout was relaxed (2026-09-19), THIS guard is the sole refusal: the block
 rem branch below is no longer belt-and-braces, it is load-bearing.
 rem The same guard must precede any manual rm/rmdir of a release dir.
 rem ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ if not defined RUNNING_EXE (
   if not errorlevel 1 echo [WARN] %APPNAME%.exe is running but its path could not be read; target dir not verified.
 )
 
-rem G1 relaxed: remove the existing same-version dir NOW (after the guard) so the
+rem release-layout relaxed: remove the existing same-version dir NOW (after the guard) so the
 rem assembly below starts from zero. A live instance would have been refused above;
 rem any other lock makes rmdir fail loudly right here instead of silently reusing.
 if exist "%RELEASE_DIR%" (
@@ -168,20 +168,36 @@ if errorlevel 1 (
 )
 
 rem ---------------------------------------------------------------------------
-rem R-10 / C-30 runtime half: %TEMP% residue must not GROW while the tests run.
+rem temp-leak-regression / mkdtemp-owned-prefix runtime half: %TEMP% residue must not GROW while the tests run.
 rem The baseline is "what already existed before", so historical residue can never
 rem turn this red - only NEW dirs count. Skipped when the template repo is absent
 rem (CI single-repo checkout), same rule as the sync_check gate.
 rem ---------------------------------------------------------------------------
 if not exist "..\my-diy-tool-template\conformance_check.py" goto :templeak_skip
 if not exist "build" mkdir "build"
-echo [GATE] temp-leak baseline (R-10) ...
+echo [GATE] temp-leak baseline (temp-leak-regression) ...
 "%PY%" "..\my-diy-tool-template\conformance_check.py" --roots reme-helper --temp-leak-save "build\_tmpbase.txt"
 if errorlevel 1 goto :templeak_fail
 goto :templeak_saved
 :templeak_skip
 echo [SKIP] temp-leak baseline: my-diy-tool-template not present (CI single-repo checkout)
 :templeak_saved
+rem sync_check gate: the template repo only exists on dev machines (CI checks
+rem out a single repo) - skipped there, local builds keep it ON.
+rem Family rule: every build.bat must gate on template drift.
+if not exist "..\my-diy-tool-template\sync_check.py" goto :sync_skip
+echo [GATE] template sync check ...
+"%PY%" ..\my-diy-tool-template\sync_check.py --roots reme-helper
+if errorlevel 1 goto :sync_fail
+goto :sync_done
+:sync_skip
+echo [SKIP] template sync check: my-diy-tool-template not present (CI single-repo checkout)
+goto :sync_done
+:sync_fail
+echo [ERROR] template drift detected. See my-diy-tool-template/sync_check.py output above.
+if not defined NOPAUSE pause
+exit /b 1
+:sync_done
 
 echo [TEST] unit tests + settings matrix ...
 "%PY%" tests\test_helper.py
@@ -296,7 +312,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [TEST] C-2 exe delete-guard wired in the right window ...
+echo [TEST] exe-delete-guard wired in the right window ...
 "%PY%" tests\test_delete_guard_wired.py
 if errorlevel 1 (
   echo [ERROR] exe delete-guard is not wired between the single-instance guard and the tray
@@ -307,13 +323,13 @@ if errorlevel 1 (
 )
 
 if not exist "build\_tmpbase.txt" goto :templeak_done
-echo [GATE] temp-leak increment check (R-10) ...
+echo [GATE] temp-leak increment check (temp-leak-regression) ...
 "%PY%" "..\my-diy-tool-template\conformance_check.py" --roots reme-helper --temp-leak-baseline "build\_tmpbase.txt"
 if errorlevel 1 goto :templeak_fail
 del /q "build\_tmpbase.txt"
 goto :templeak_done
 :templeak_fail
-echo [ERROR] temp-dir leak: %TEMP% gained NEW residue during this build (R-10). See list above.
+echo [ERROR] temp-dir leak: %TEMP% gained NEW residue during this build (temp-leak-regression). See list above.
 if not defined NOPAUSE pause
 exit /b 1
 :templeak_done
@@ -330,7 +346,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem W-f: the i18n locale tables (locales/zh.json + en.json) must ship inside
+rem the i18n locale tables (locales/zh.json + en.json) must ship inside
 rem the package - frozen i18n loads them from _internal\locales\.
 echo [BUILD] PyInstaller onedir noconsole ...
 rem onedir (not onefile) keeps tray startup instant: onefile unpacks the whole
@@ -428,7 +444,7 @@ if not exist "%RELEASE_DIR%\_internal\base_library.zip" (
   call :drop_data_dir
   exit /b 1
 )
-rem Tcl/Tk runtime (D2-02 / C-31). No smoke check can see this: nothing in smoke()
+rem Tcl/Tk runtime (template-original-eol). No smoke check can see this: nothing in smoke()
 rem creates a Tk object, and Tcl is only read on the FIRST tkinter.Tk() - so a package
 rem missing tcl can pass every gate and still die in the user's hands with
 rem "Can't find a usable init.tcl". These three files are what the user saw missing
@@ -545,7 +561,7 @@ rem     now belongs to the running app, not to the build. Deleting it underneath
 rem     a live instance would be worse than leaving it.
 rem The wait below is a REAL sleep, not `ping -n 9`: ping's "one second" only holds
 rem while loopback ICMP answers, and where it is dropped every packet waits out the
-rem timeout - measured 9.0s per tick instead of 1s (C-33). `timeout`/`choice` are
+rem timeout - measured 9.0s per tick instead of 1s (no-ping-as-sleep). `timeout`/`choice` are
 rem not alternatives: they need a console this build may not have. Absolute path
 rem for the same PATH reason as everywhere else in this file.
 if defined RUN_AFTER (
@@ -581,7 +597,7 @@ rem ---------------------------------------------------------------------------
 :drop_data_dir
 rem Read back AFTER deleting. The old body was `rmdir /s /q ... 2>nul` with no check at
 rem all, so "the directory survived" and "the directory was removed" produced the same
-rem output: nothing. That is the exact gap C-30 names - cleanup that ran vs cleanup that
+rem output: nothing. That is the exact gap mkdtemp-owned-prefix names - cleanup that ran vs cleanup that
 rem succeeded - and this root sits in %TEMP%, where a survivor stays forever.
 rem Not fatal inside this subroutine on purpose: in the RUN_AFTER flow the launched app
 rem owns the directory by design (it inherits the env var and rewrites its log), and the

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""W3 后段迁移垫层（R 方案）：重形态调用点 → 轻形态 T5（template/i18n 2.3.0）的桥。
+"""后段迁移垫层（R 方案）：重形态调用点 → 轻形态（template/i18n 2.3.0）的桥。
 
 - 词表：locales/{zh,en}.json（数据驱动，加词条/加语言只改 JSON）
 - 反查：_ZH2KEY 由 zh 表逆转（851+ 词条中文全唯一，准备期已验证）；历史调用点
@@ -82,7 +82,7 @@ from pathlib import Path
 
 # 中文字符与全角标点检测（审计与英文模式残留扫描共用）
 HAN = re.compile(r"[\u4e00-\u9fff]")
-FULLWIDTH = re.compile("[，。：；！？（）【】\u201c\u201d、《》]")
+FULLWIDTH = re.compile("[，。：；！？【】\u201c\u201d、《》]")
 
 # 这两个词条故意在英文里保留中文（语言开关本身要显示"中文"）
 ALLOW_CJK_IN_EN: frozenset = frozenset({"中文", "English / 中文"})

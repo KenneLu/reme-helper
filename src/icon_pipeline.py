@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""reme 图标像素链（W6：自 main.py 挪构建侧；运行时零绘制，tray_icons 只加载）。
+"""reme 图标像素链（自 main.py 挪构建侧；运行时零绘制，tray_icons 只加载）。
 
 make_icon/make_taskbar_icon/icon_font 逐字节等价迁移（坐标全按比例——同一函数
 既要喂 16px 帧也要喂 256px 基图）。构建期经 appconfig.ICON_STATE_ARTISTS 消费；
