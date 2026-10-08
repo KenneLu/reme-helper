@@ -3,6 +3,9 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## 1.2.7
+- **Semantic IDs across docs, comments and bat annotations** (2026-10-08, W9): single-letter reference codes (criterion IDs, spec section anchors, checklist entry IDs, bat step tags) replaced with semantic names throughout; machine-facing checker interface now uses kebab-case slugs. Documentation/comment/naming layer only - no runtime behavior change; gate re-run green (conformance 0 FAIL, sync 0 drift, full-suite compile pass).
+
 ## 1.2.6
 - **`--quit` no longer inherits the persisted cleanup checkbox** (2026-09-20, headless-quit-explicit-stops). `--quit` is the headless entry used by external tools - nobody is asked anything - yet quit_watch_loop called shutdown_tray(ICON) without keyword arguments, leaving stop_reme/stop_tunnels as None, which the function then fills in from CFG["quit_stop_*"] . A user who had once ticked "stop the service on exit" would therefore have the service silently stopped by an external `--quit`. This is exactly the shape 判据·不可用不停服 forbids: a preference saved in the presence of a confirmation dialog must not drive an action nobody confirmed. The tray menu path is unaffected - it goes through quit_app, where the user really is asked. Guard: template criterion headless-quit-explicit-stops.
 - **The exit dialog is localised** (task T3): the six hard-coded Chinese strings in the quit confirmation window (title, body, two checkboxes, two buttons) now go through app_title() and one translate_tree(win) pass - they are built from Tk widgets, which never pass through the messagebox shim, so both available localisation paths had been bypassed. Guard: template criterion no-chinese-ui-literal.

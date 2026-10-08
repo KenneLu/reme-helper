@@ -70,7 +70,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
