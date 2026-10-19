@@ -144,7 +144,10 @@ a schedule is not a permission. `src/template/` is a git submodule borrow pinned
 `diy-tool-kit` (one source for all family modules; a fresh clone needs
 `git clone --recurse-submodules`); tool differences live in the tool-owned card
 `src/app_params.py` — including the proprietary `SUPPORTED_REME_VERSION` pin, which the
-kit does not cover. Unreleased work has no local build: `VERSION` stays at
+kit does not cover. The supported ReMe version is **0.4.1.13** (full-adaptation target:
+job-table shape, the `proactive` → `proactive_read` rename, the `enable_serve: false`
+gate for `proactive_refresh`, the new `list_tags` tool, and the agentscope pin); 0.4.2.0
+is intentionally not followed until it is released and evaluated. Unreleased work has no local build: `VERSION` stays at
 the last published `1.2.5` until a release (dev-time rule), and the 工程·运行检测串 gate blocks build
 runs while the resident tray is up. The tray item and the build-gate fix are verified in dev
 only (8 suites + `--smoke` + isolated-start probe), not through a frozen build; tagging `v*`

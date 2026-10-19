@@ -291,6 +291,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] expose job table - ReMe 0.4.1.13 adaptation ...
+"%PY%" tests\test_expose_jobs.py
+if errorlevel 1 (
+  echo [ERROR] expose job table test failed - check the is_servable enable_serve:false gate,
+  echo         the proactive to proactive_read rename and the list_tags candidate.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
 "%PY%" tests\test_quit_failopen.py
 if errorlevel 1 (

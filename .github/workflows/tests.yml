@@ -67,6 +67,11 @@ jobs:
       - name: Update chain (real rendered bat)
         run: python tests/test_update_bat.py
 
+      # 0.4.1.13 job-table adaptation: is_servable(enable_serve:false), the
+      # proactive -> proactive_read rename and the new list_tags candidate.
+      - name: Expose job table (0.4.1.13 adaptation)
+        run: python tests/test_expose_jobs.py
+
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
 

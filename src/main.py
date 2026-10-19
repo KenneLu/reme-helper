@@ -72,7 +72,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -151,17 +151,18 @@ CRON_RE = re.compile(r"^\s*\S+(\s+\S+){4}\s*$")
 # ---------------- MCP 暴露允许列表 ----------------
 # 白名单里的名字必须**逐字**等于 ReMe 真实注册的 job 名。base_service.add_jobs() 会先做
 # self.jobs.difference(app.context.jobs)，有一个对不上就 raise KeyError，服务直接起不来；
-# 加不进去的 job 则是 raise TypeError。而官方的「功能名」和「job 名」并不一致——功能叫
-# proactive_read，对应的 job 叫 proactive——所以这里绝不手抄名单：候选一律由
-# servable_job_names() 从官方 default.yaml 推导，写盘前再按这份配置真正产出的 job 表过滤。
+# 加不进去的 job 则是 raise TypeError。官方「功能名」与「job 名」不一定一致——0.4.1.13 起
+# 功能与 job 同名 proactive_read（更早版本 job 叫 proactive）——所以这里绝不手抄名单：
+# 候选一律由 servable_job_names() 从官方 default.yaml 推导，写盘前再按这份配置真正产出的
+# job 表过滤。
 EXPOSE_JOB_GROUPS = (
     ("记忆读写", ("read", "write", "edit", "save", "load", "daily_write", "read_image",
                   "frontmatter_read", "frontmatter_update", "frontmatter_delete")),
     ("检索与浏览", ("search", "node_search", "traverse", "graph_snapshot",
-                    "list", "stat", "daily_list")),
+                    "list", "stat", "daily_list", "list_tags")),
     ("索引与维护", ("reindex", "daily_reindex", "move", "delete")),
     ("自动记忆", ("auto_memory", "auto_memory_cc", "auto_dream", "auto_resource",
-                  "proactive", "chat")),
+                  "proactive_read", "chat")),
     ("服务信息", ("health_check", "status", "version", "help", "app_config")),
 )
 EXPOSE_JOB_LABELS = {
@@ -182,6 +183,7 @@ EXPOSE_JOB_LABELS = {
     "list": "list（列目录）",
     "stat": "stat（看文件元信息）",
     "daily_list": "daily_list（列 daily 卡片）",
+    "list_tags": "list_tags（列出活跃标签与文件数）",
     "reindex": "reindex（重建检索索引）",
     "daily_reindex": "daily_reindex（重建 daily 索引）",
     "move": "move（移动记忆文件）",
@@ -190,7 +192,7 @@ EXPOSE_JOB_LABELS = {
     "auto_memory_cc": "auto_memory_cc（从 Claude Code 会话提炼）",
     "auto_dream": "auto_dream（立刻整理成长期记忆）",
     "auto_resource": "auto_resource（把资料转成卡片）",
-    "proactive": "proactive（读当天的兴趣主题）",
+    "proactive_read": "proactive_read（读当天的兴趣主题）",
     "chat": "chat（对话，仅 HTTP / SSE）",
     "health_check": "health_check（健康检查）",
     "status": "status（服务状态）",
@@ -232,11 +234,12 @@ EXPOSE_JOB_INFO = {
     "node_search": ("可选", "按节点（沉淀后的长期记忆单元）检索，比全文检索更聚焦。"),
     "graph_snapshot": ("可选", "导出关系图快照，用于整体查看记忆之间的连接。"),
     "daily_list": ("可选", "列出所有 daily 卡片。"),
+    "list_tags": ("可选", "列出活跃标签及文件数（只读）。"),
     "auto_memory": ("可选", "把一段对话提炼成记忆卡片。DSH 插件的后台工具会调它。"),
     "auto_memory_cc": ("可选", "从 Claude Code 会话提炼记忆。不用 Claude Code 时没有价值。"),
     "auto_dream": ("可选", "立刻把 daily 整理沉淀成长期记忆，相当于手动触发一次「做梦」。"),
     "auto_resource": ("可选", "把 resource 目录里的资料转成卡片。大文件会明显增加 token 与耗时。"),
-    "proactive": ("可选", "读当天的兴趣主题（daily/<日期>/interests.yaml）。"),
+    "proactive_read": ("可选", "读当天的兴趣主题（daily/<日期>/interests.yaml）。"),
     "chat": ("可选", "对话入口。只提供 HTTP / SSE 流式接口，不是 MCP 工具。"),
     "version": ("可选", "返回 ReMe 版本号。无副作用，排查问题时有用。"),
     "help": ("可选", "列出全部 Job 及其参数。排查与探索用。"),
@@ -307,7 +310,7 @@ FEATURES = {
         "official": True,
         "requires": "已有兴趣主题",
         "effect": "读取已有的主动主题",
-        "impact": "读取本身低成本；0.4.1.11默认配置不生成新主题",
+        "impact": "读取本身低成本；新主题由后台 job 定时刷新（不对外服务）",
     },
     "chat": {
         "name": "ReMe Chat",
@@ -943,10 +946,15 @@ def is_servable(spec) -> bool:
     """这个 job 能否被服务层注册。
 
     判据就是 base_service.add_jobs() 的那一条：background / cron 的 job 被强制
-    enable_serve=False，永远不会对外服务，写进白名单反而会 raise。
+    enable_serve=False，永远不会对外服务，写进白名单反而会 raise；0.4.1.13 起还有
+    **显式声明 `enable_serve: false` 的 base job**（`proactive_refresh` 就是：backend=base
+    但要靠调度跑、不对外服务）——同样不能写进白名单。
     """
-    backend = spec.get("backend") if isinstance(spec, dict) else None
-    return backend not in ("background", "cron")
+    if not isinstance(spec, dict):
+        return True
+    if spec.get("enable_serve") is False:
+        return False
+    return spec.get("backend") not in ("background", "cron")
 
 
 def servable_job_names() -> tuple:
@@ -979,7 +987,7 @@ def custom_job_removals(selected: dict) -> set:
     if not selected.get("auto_dream"):
         removals.update({"dream_cron", "auto_dream"})
     if not selected.get("proactive_read"):
-        removals.add("proactive")
+        removals.add("proactive_read")
     if not selected.get("chat"):
         removals.add("chat")
     return removals
@@ -1027,8 +1035,8 @@ def expose_job_rows() -> tuple:
 def expose_values() -> dict:
     """写进配置的暴露设置。
 
-    顺手丢掉已经不存在的 job 名——老配置里的 proactive_read 就是这样退场的，
-    留着它下次生成配置会让 ReMe 起不来。
+    顺手丢掉已经不存在的 job 名——老配置里的旧名字（例如 0.4.1.13 之前叫 `proactive`）
+    就是这样退场的，留着它下次生成配置会让 ReMe 起不来。
     """
     expose = CFG.get("expose") or {}
     jobs = [item for item in (expose.get("jobs") or []) if isinstance(item, str) and item.strip()]
@@ -1496,7 +1504,7 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         t("请按这个格式回报："),
         t("1. 版本与来源：当前 → 目标（目标必须正好是上面那个 ==版本，不要自己换一个）"),
         t("2. 会影响什么：新版 default.yaml 的 job 表差异（新增 / 删除 / 改名了哪些）；"
-          "依赖变化，尤其是 agentscope 的 pin（现在是 ==2.0.7.post1）"),
+          "依赖变化，尤其是 agentscope 的 pin（现在是 ==") + agentscope_pin() + t("）"),
         t("3. 需要联动 ReMe 助手的地方：升级后要用它重新生成三份配置（app.yaml / app-full.yaml / "
           "app-custom.yaml）；要重启它（它启动时才重新内省思考强度档位的合法集合）；"
           "要重新核对 MCP 工具暴露白名单（新 default.yaml 的 job 表可能变了）；助手本身不用重装"),
@@ -1572,6 +1580,44 @@ def mode_config_path(mode: str | None = None) -> Path:
 
 def official_default_path() -> Path:
     return reme_root() / "venv" / "Lib" / "site-packages" / "reme" / "config" / "default.yaml"
+
+
+# 0.4.1.13 的依赖 pin（README/CHANGELOG 之外的唯一展示点：升级提示词里的「依赖变化」）。
+# 优先读 ReMe 自己的 venv 里**实际装的** agentscope 版本（helper 进程里没有 agentscope，
+# 与 `_run_model_library_effort_script` 同一手法：短超时子进程）；读不到回退这个常量。
+# 一次性缓存：提示词可能连开两次，不值得每次都起子进程。
+AGENTSCOPE_PIN_FALLBACK = "2.0.9"
+_AGENTSCOPE_PIN_CACHE: dict = {"value": None}
+
+
+def agentscope_pin() -> str:
+    """已装 ReMe venv 里的 agentscope 版本；读不到回退 2.0.9。仅用于提示词展示。"""
+    cached = _AGENTSCOPE_PIN_CACHE.get("value")
+    if cached:
+        return cached
+    value = AGENTSCOPE_PIN_FALLBACK
+    try:
+        py = reme_python()
+        if py.is_file():
+            result = subprocess.run(
+                [str(py), "-c",
+                 "import importlib.metadata as m; print(m.version('agentscope'))"],
+                cwd=str(reme_root()),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=CREATE_NO_WINDOW,
+                timeout=5,
+            )
+            lines = (result.stdout or "").strip().splitlines()
+            if result.returncode == 0 and lines and re.match(r"^\d+(?:\.\d+)+", lines[-1]):
+                value = lines[-1]
+    except (OSError, subprocess.SubprocessError):
+        value = AGENTSCOPE_PIN_FALLBACK
+    _AGENTSCOPE_PIN_CACHE["value"] = value
+    return value
 
 
 # ---------------- ReMe 版本与更新 ----------------
@@ -5450,8 +5496,16 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                 max_units=clamp_int(max_units_var.get(), 1, 20, 5),
                 dream_cron=validate_cron(cron_custom_var.get() or cron_choice_var.get()),
             )
-            draft["expose"] = {"custom": expose_mode_var.get() == "custom",
-                               "jobs": [job for job, var in expose_vars.items() if var.get()]}
+            custom = expose_mode_var.get() == "custom"
+            if custom:
+                expose_jobs = [job for job, var in expose_vars.items() if var.get()]
+            else:
+                # 官方默认（custom=False）时勾选行是禁用的：不要用禁用控件的值回写 jobs。
+                # 否则「目标版本 default.yaml 有、本机装的版本里还没有/已改名」的 job 会被
+                # 静默抹掉，窗口一打开就误报「MCP 工具暴露 待保存」（辅助版本与已装 ReMe
+                # 不同期时必现）。保留已保存的集合，真正写盘前 expose_values() 还会再过滤。
+                expose_jobs = list(draft["expose"]["jobs"])
+            draft["expose"] = {"custom": custom, "jobs": expose_jobs}
 
         def sync_effort_row() -> None:
             """重画档位行：可选项**只由 ReMe 那一层决定**（硬约束）。

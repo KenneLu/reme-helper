@@ -18,7 +18,7 @@ EXE_NAME = "reme-helper.exe"
 # 本助手**适配**的 ReMe 版本（用户 2026-09-19 定：不再跟随 PyPI 最新）。
 #
 # 为什么固定：助手要生成三份配置、内省思考强度档位、核对 MCP 工具白名单——这些都依赖
-# 目标版本 default.yaml 的 job 表与依赖 pin（如 agentscope==2.0.7.post1）。上游一发新版
+# 目标版本 default.yaml 的 job 表与依赖 pin（如 agentscope==2.0.9）。上游一发新版
 # 就引导用户升，等于让"生成配置 / 白名单"跑在未验证的组合上。
 #
 # 单点定义：安装提示词、升级提示词、检查更新的四象限判定、界面提示全部读这里；换适配
@@ -27,7 +27,7 @@ EXE_NAME = "reme-helper.exe"
 # 专有键：kit 参数卡（template/appconfig/appconfig.py）不覆盖本键——kit 是通用共享库，
 # 不知道任何工具的目标版本；本键只属于 reme-helper，故由本卡持有。main.py 经
 # `from app_params import SUPPORTED_REME_VERSION` 取用（单一真源），冻结环境同样生效。
-SUPPORTED_REME_VERSION = "0.4.1.11"
+SUPPORTED_REME_VERSION = "0.4.1.13"
 
 # W6 状态贴图：4 形态全量图（D6）。绘制器在构建侧 src/icon_pipeline.py（与 main.py
 # 归一后零共享——运行时 tray_icons 只按档加载，包内零绘制代码）。
