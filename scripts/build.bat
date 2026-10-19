@@ -301,6 +301,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] log init fail-open - a blocked log path must never block startup ...
+"%PY%" tests\test_log_failopen.py
+if errorlevel 1 (
+  echo [ERROR] Log fail-open test failed - make_logger errors must degrade to no-op closures,
+  echo         never propagate out of module import.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
 "%PY%" tests\test_quit_failopen.py
 if errorlevel 1 (

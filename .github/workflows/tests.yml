@@ -72,6 +72,10 @@ jobs:
       - name: Expose job table (0.4.1.13 adaptation)
         run: python tests/test_expose_jobs.py
 
+      # Startup hotfix: a blocked/locked log path must not crash module import.
+      - name: Log init fail-open
+        run: python tests/test_log_failopen.py
+
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
 

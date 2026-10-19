@@ -72,7 +72,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.8"
+VERSION = "1.2.9"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -826,7 +826,26 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
 
 # log_kit：1MB×3 滚动 + 升级窗口回退 FileHandler（模板 make_logger 内部完成，含 mkdir）。
 # open_log_dir 是模板给的「打开日志目录」闭包，已接到托盘「打开区」。
-log, open_log_dir = make_logger(LOG_DIR)
+# 日志初始化失败绝不能弄死主流程（模板 log_kit 自己承诺「任何日志失败都静默」）：日志目录
+# 路径被另一实例/升级窗口占住时 make_logger 会抛，这里退化为无操作闭包——托盘照常启动，
+# 只是这一轮没有日志文件。
+def _noop_log(*parts):
+    """print 形态的无操作日志：接受任意个位置参数。"""
+    return None
+
+
+def _noop_open_log_dir():
+    return None
+
+
+try:
+    log, open_log_dir = make_logger(LOG_DIR)
+except Exception as exc:  # noqa: BLE001 - 日志永远不能把主流程弄死
+    try:
+        print("log init failed: %s" % exc, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    log, open_log_dir = _noop_log, _noop_open_log_dir
 
 
 def write_log_file(name: str, text: str) -> Path:
