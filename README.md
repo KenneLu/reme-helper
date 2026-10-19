@@ -124,15 +124,15 @@ build.bat norun    :: build without launching it
 release.bat        :: tag v<version> and push; CI publishes the zip
 ```
 
-`src/` holds the application, `tests/` the test files (18 in all; 16 of them run as build gate sections),
+`src/` holds the application, `tests/` the test files (19 in all; 17 of them run as build gate sections),
 `scripts/` the build and the release-config generator, and `doc/` the documentation the app reads at runtime.
-The version lives in `src/main.py` (`VERSION`, currently `1.2.13`) — the single source of truth for the app,
+The version lives in `src/main.py` (`VERSION`, currently `1.2.14`) — the single source of truth for the app,
 the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
 [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 **Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
-folder is allowed. `VERSION` is currently `1.2.13`, and the frozen `1.2.13` build has been produced
+folder is allowed. `VERSION` is currently `1.2.14`, and the frozen `1.2.14` build has been produced
 and installed locally for field replacement; the release folder is a local artifact and is not committed. Published
 artifacts still come from CI on a clean checkout, so a repository without a release folder is an
 expected state, not a lost artifact.
@@ -148,9 +148,9 @@ a schedule is not a permission. `src/template/` is a git submodule borrow pinned
 kit does not cover. The supported ReMe version is **0.4.1.13** (full-adaptation target:
 job-table shape, the `proactive` → `proactive_read` rename, the `enable_serve: false`
 gate for `proactive_refresh`, the new `list_tags` tool, and the agentscope pin); 0.4.2.0
-is intentionally not followed until it is released and evaluated. `VERSION` is `1.2.13`; the frozen
-`1.2.13` build has been produced and installed, and the build runs 16 gate sections drawn from the
-18 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
+is intentionally not followed until it is released and evaluated. `VERSION` is `1.2.14`; the frozen
+`1.2.14` build has been produced and installed, and the build runs 17 gate sections drawn from the
+19 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
 instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
 ## License

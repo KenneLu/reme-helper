@@ -877,5 +877,6 @@
  "startup_failed": "程序启动失败：",
  "the_log_directory_is_also_not_writable_possibly": "日志目录也不可写（可能被受限环境启动），本次没有写出日志文件。",
  "details_copy_and_send_to_the_maintainer": "详细信息（可复制发给维护者）：",
- "reme_helper_startup_failed": "ReMe 助手 启动失败"
+ "reme_helper_startup_failed": "ReMe 助手 启动失败",
+  "already_running_2": "ReMe 助手已在运行"
 }

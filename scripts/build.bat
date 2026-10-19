@@ -325,7 +325,17 @@ echo [TEST] tray menu - spaced labels + two bold default items ...
 "%PY%" tests\test_tray_menu.py
 if errorlevel 1 (
   echo [ERROR] Tray menu test failed - Chinese/Latin spacing or the default-item pair broke.
-  echo         "ReMe 控制台..." must stay first; "Open ReMe Studio" is the second bold item.
+  echo         "ReMe 设置..." and "Open ReMe Studio" must both be bold default items.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
+echo [TEST] duplicate launch - second instance silently asks for the settings window ...
+"%PY%" tests\test_single_instance.py
+if errorlevel 1 (
+  echo [ERROR] Single-instance test failed - the second instance must never show a modal,
+  echo         it writes show.request and the resident instance opens/raises settings.
   if not defined NOPAUSE pause
   call :drop_data_dir
   exit /b 1

@@ -877,5 +877,6 @@
  "startup_failed": "Startup failed: ",
  "the_log_directory_is_also_not_writable_possibly": "The log directory is also not writable (possibly started in a restricted environment); no log file was written this time.",
  "details_copy_and_send_to_the_maintainer": "Details (copy and send to the maintainer):",
- "reme_helper_startup_failed": "ReMe Helper - Startup Failed"
+ "reme_helper_startup_failed": "ReMe Helper - Startup Failed",
+  "already_running_2": "ReMe Helper is already running"
 }

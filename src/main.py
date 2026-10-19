@@ -50,6 +50,7 @@ except ImportError:  # pragma: no cover - Windows 一定有；非 Windows 源码
 # reme 专有派生：模板 paths.py 只出四区正本与稳定安装位，下面这些由四区派生，不进模板件。
 DIAG_LOG_DIR = RUN_DIR / "log"        # 诊断输出跟「这次跑的那个包」走（构建脚本在这里读/清）
 QUIT_REQUEST_PATH = USER_DATA_DIR / "quit.request"   # --quit 请求文件（与 tray_kit 契约同形）
+SHOW_REQUEST_PATH = USER_DATA_DIR / "show.request"   # 第二实例请求常驻实例打开/前置设置页（1.2.14）
 # `<APP>_CONFIG` 显式钉配置与 `<APP>_DATA_DIR` 数据根重定向都由模板 paths 1.1.3 提供
 # （CONFIG_PATH / USER_DATA_DIR）；main.py 不再自己接管 env。
 # 图标资产与多帧渲染参数（reme 专有：运行态着色 + 任务栏高 DPI 帧表，G5）
@@ -77,7 +78,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.13"
+VERSION = "1.2.14"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -5518,6 +5519,17 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                 model=emb_model_var.get().strip(),
                 dimensions=clamp_int(emb_dims_var.get(), 64, 8192, PRESET_EMBEDDING["dimensions"]),
             )
+            # 密钥字段不进草稿就永远不算「未保存改动」：改了 Key 要立刻计入，未改则沿用
+            # 已保存值（没有 key 字段就保持没有，避免启动即误报两条）。
+            for _section, _key_var in (("llm", llm_key_var), ("embedding", emb_key_var)):
+                if key_field_untouched(_key_var.get()):
+                    _saved = saved_snapshot[0].get(_section, {})
+                    if "api_key" in _saved:
+                        draft[_section]["api_key"] = str(_saved.get("api_key") or "")
+                    else:
+                        draft[_section].pop("api_key", None)
+                else:
+                    draft[_section]["api_key"] = _key_var.get().strip()
             draft["pipeline"].update(
                 scan_days=clamp_int(scan_days_var.get(), 1, 14, 2),
                 max_units=clamp_int(max_units_var.get(), 1, 20, 5),
@@ -6125,6 +6137,51 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         refresh_dream_history()
         translate_tree(root)
         restyle_widgets(root)   # plain tk widgets need the palette applied at build time too
+
+        # ---- 输入即识别「未保存改动」：可编辑变量的 write 事件 → 150 ms 去抖 → 重算 ----
+        # 以前只在 FocusOut / 按钮事件后 collect_widgets()+refresh_state()，于是用户正在输入
+        # 时计数、悬浮明细和保存按钮都不动（用户反馈「改了 Base URL 不显示待保存」）。
+        # trace 里只调度、不直接重算：输入很快时合并成一次；refresh_state 不回写这些变量，
+        # 所以不会递归。
+        instant_change = {"timer": None}
+
+        def _apply_instant_change() -> None:
+            instant_change["timer"] = None
+            try:
+                collect_widgets()
+                refresh_state()
+            except Exception as exc:  # noqa: BLE001 - 刷新失败不该打断输入
+                log(f"instant change refresh failed: {exc}")
+
+        def _schedule_instant_change(*_args) -> None:
+            timer = instant_change["timer"]
+            if timer is not None:
+                try:
+                    root.after_cancel(timer)
+                except Exception:  # noqa: BLE001
+                    pass
+            instant_change["timer"] = root.after(150, _apply_instant_change)
+
+        def _flush_instant_change() -> bool:
+            """测试用：取消未到期的去抖计时并立即应用；返回是否真有挂起变更。"""
+            timer = instant_change["timer"]
+            if timer is None:
+                return False
+            try:
+                root.after_cancel(timer)
+            except Exception:  # noqa: BLE001
+                pass
+            _apply_instant_change()
+            return True
+
+        for _var in (root_var, llm_base_var, llm_model_var, llm_key_var, llm_tokens_var,
+                     llm_thinking_var, llm_effort_var, emb_base_var, emb_model_var, emb_key_var,
+                     emb_dims_var, scan_days_var, max_units_var, cron_choice_var, cron_custom_var,
+                     *feature_vars.values(), *expose_vars.values()):
+            try:
+                _var.trace_add("write", _schedule_instant_change)
+            except Exception:  # noqa: BLE001 - trace 只影响即时性，不该阻止窗口构建
+                pass
         if env_merge["corrected"]:
             toast("已按 .env 校正：" + "、".join(env_merge["corrected"])
                   + "（ReMe 读的是 .env，保存后会写回配置）", seconds=6.5)
@@ -6212,6 +6269,16 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                         "emb_status": emb_status.cget("text"),
                         "chips": {name: widget.cget("text") for name, widget in chips.items()},
                     },
+                    "instant_pending": lambda: instant_change["timer"] is not None,
+                    "instant_flush": lambda: _flush_instant_change(),
+                    "pending_count": lambda: len(changed_items()),
+                    "pending_details": lambda: list(settings_pending_details(
+                        draft, saved_snapshot[0], saved_snapshot[1], saved_snapshot[2], targets_data)),
+                    "set_flag": lambda name, value: {
+                        "llm_thinking": llm_thinking_var,
+                        **{"feature:" + key: var for key, var in feature_vars.items()},
+                        **{"expose:" + job: var for job, var in expose_vars.items()},
+                    }[name].set(bool(value)),
                     "close": root.destroy,
                 })
             except Exception as exc:  # noqa: BLE001 - a broken harness must not break the window
@@ -6894,32 +6961,82 @@ def monitor_loop() -> None:
             return
 
 
-def quit_watch_loop() -> None:
-    """`--quit` 的接收端：轮询请求文件，发现就删掉它并走退出路径。
+def request_show_existing() -> int:
+    """第二个实例：不弹任何模态框，只写 show.request 请常驻实例打开/前置设置页。
 
+    写失败也静默退出（返回 0）：第二实例的目标只是「让用户看到已有实例的设置页」，
+    绝不能反过来用对话框/报错吓用户——1.2.14 的重复启动体验修复。
+    """
+    try:
+        SHOW_REQUEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SHOW_REQUEST_PATH.write_text(time.strftime("%Y-%m-%dT%H:%M:%S\n"), encoding="utf-8")
+        log(f"duplicate instance: asked the resident instance to show settings ({SHOW_REQUEST_PATH})")
+    except OSError as exc:
+        log(f"duplicate instance: cannot write {SHOW_REQUEST_PATH}: {exc}")
+    return 0
+
+
+def consume_show_request() -> bool:
+    """常驻实例侧：消费 show.request → 前置/打开设置页；窗口不可用时退化为托盘气泡。"""
+    try:
+        if not SHOW_REQUEST_PATH.exists():
+            return False
+        SHOW_REQUEST_PATH.unlink()
+    except OSError as exc:  # noqa: BLE001 - 读不到就下一轮再看
+        log(f"show request unreadable: {exc}")
+        return False
+    log("settings requested by another instance")
+    window_available = False
+    try:
+        root = UI_HOST.get("root")
+        window_available = root is not None and bool(root.winfo_exists())
+    except Exception:  # noqa: BLE001
+        window_available = False
+    if window_available:
+        try:
+            show_settings()
+            return True
+        except Exception as exc:  # noqa: BLE001 - 窗口打不开就退化为气泡
+            log(f"show request: settings unavailable ({exc})")
+    try:
+        if TRAY_ICON is not None:
+            TRAY_ICON.notify(t("ReMe 助手已在运行"), t(APP_NAME))
+    except Exception:  # noqa: BLE001 - 气泡失败只能记日志
+        pass
+    return True
+
+
+def quit_watch_loop() -> None:
+    """`--quit` / 重复启动请求的接收端：轮询请求文件，发现就处理。
+
+    quit.request 优先（退出不能被 show 请求挡住）；没有 quit 请求时再看 show.request：
+    第二个实例被单实例守卫挡住后只写文件、不弹窗，这里把它 → 设置页带到前台。
     为什么**单开一个循环**：monitor_loop 的节拍是 `probe_interval_sec`（可配置，默认 300 s / 5 分钟），
     满足不了「`--quit` 后 2 秒内退出」的判据；这里用 1.0 s，且不碰探测节拍。
     """
     while not STOP_EVENT.wait(1.0):
+        quit_requested = False
         try:
-            if not QUIT_REQUEST_PATH.exists():
-                continue
-            QUIT_REQUEST_PATH.unlink()
+            if QUIT_REQUEST_PATH.exists():
+                QUIT_REQUEST_PATH.unlink()
+                quit_requested = True
         except OSError as exc:  # noqa: BLE001 - 读不到就下一轮再看，别把线程弄死
             log(f"quit request unreadable: {exc}")
             continue
-        log("quit requested via --quit")
-        if TRAY_ICON is not None:
-            # ⚠ `--quit` 是**无 UI 的外部入口**（外部工具/脚本在用，见 `--quit` 的发送端
-            # 与本函数 docstring）：**没有任何人**被问过。
-            # ⇒ 不得让它沿用"用户在**有确认框**的语境下保存的勾选"去执行破坏性动作
-            #   （停服务/停隧道）——这正是 §4.1.43 / 判据·不可用不停服 禁止的形态，与 dsh/ocx 末级
-            #   `return True, False` 同形：**"没问到"与"用户选了"必须分开**。
-            # 旧实现调 `shutdown_tray(TRAY_ICON)` 不传 kwargs ⇒ `stop_reme/stop_tunnels`
-            # 落 `None` ⇒ 回读 `CFG["quit_stop_*"]` ⇒ **勾过一次的用户会被静默停服务**。
-            # 托盘菜单那条路径不受影响：它走 `quit_app`，用户**确实被问到了**。
-            shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
-        return
+        if quit_requested:
+            log("quit requested via --quit")
+            if TRAY_ICON is not None:
+                # ⚠ `--quit` 是**无 UI 的外部入口**（外部工具/脚本在用，见 `--quit` 的发送端
+                # 与本函数 docstring）：**没有任何人**被问过。
+                # ⇒ 不得让它沿用"用户在**有确认框**的语境下保存的勾选"去执行破坏性动作
+                #   （停服务/停隧道）——这正是 §4.1.43 / 判据·不可用不停服 禁止的形态，与 dsh/ocx 末级
+                #   `return True, False` 同形：**"没问到"与"用户选了"必须分开**。
+                # 旧实现调 `shutdown_tray(TRAY_ICON)` 不传 kwargs ⇒ `stop_reme/stop_tunnels`
+                # 落 `None` ⇒ 回读 `CFG["quit_stop_*"]` ⇒ **勾过一次的用户会被静默停服务**。
+                # 托盘菜单那条路径不受影响：它走 `quit_app`，用户**确实被问到了**。
+                shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
+            return
+        consume_show_request()
 
 
 def refresh_aux_windows() -> None:
@@ -8169,8 +8286,9 @@ def main() -> int:
         time.sleep(1.5)
         os._exit(0)
     if not acquire_single_instance(APP_ID, mutex_name=SINGLE_INSTANCE_NAME, log=log):
-        warn_duplicate_instance()
-        return 0
+        # 第二个实例：不弹任何模态框，只写 show.request 请常驻实例把设置页带到前台，
+        # 然后静默退出（1.2.14；用户从 release 目录双击时不再看到「已在运行」的报错感）。
+        return request_show_existing()
     # 判据·启动自证（§4.1.38 的**唯一正本样例**，勿自创变体）：启动标记 + 两行**解析后**的数据根/配置。
     # 位置：单实例守卫**通过之后**（走到这里才叫"本次启动成功"），且在 exe-delete-guard 持句柄之前
     # （保持"唯一合法窗口"那段注释的约束不被挪动）。

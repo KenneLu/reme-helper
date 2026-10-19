@@ -82,6 +82,44 @@ def build_steps(api):
         check("初始：footer 无改动", "没有未保存的改动" in state["footer"], state["footer"])
 
     @step
+    def instant_dirty_detection():
+        """输入即识别未保存改动（1.2.14）：trace → 去抖 → 计数/明细/按钮即时更新。"""
+        before = api["pending_count"]()
+        check("即时识别：初始无未保存改动", before == 0, before)
+        original_base = api["field"]("llm_base")
+        original_key = api["field"]("llm_key")
+
+        api["set_field"]("llm_base", "https://instant.example/v1")
+        check("即时识别：输入后已安排去抖刷新", api["instant_pending"]() is True,
+              api["instant_pending"]())
+        check("即时识别：去抖刷新可应用", api["instant_flush"]() is True)
+        count = api["pending_count"]()
+        check("即时识别：文本改动计入未保存", count >= 1, count)
+        details = api["pending_details"]()
+        check("即时识别：悬浮明细出现 LLM 地址项",
+              any(sec == "LLM 与模型" and ("地址" in label or "URL" in label) for sec, label, _o, _n in details),
+              details)
+        state = api["ui_state"]()
+        check("即时识别：footer 显示待保存", "待保存" in state["footer"], state["footer"])
+        check("即时识别：保存按钮已启用", state["save_button"] != "disabled", state["save_button"])
+
+        # 密钥：改成真实 Key 后必须计入，但明细按掩码显示（不能泄漏明文）
+        api["set_field"]("llm_key", "sk-instant-secret-123456")
+        api["instant_flush"]()
+        key_rows = [row for row in api["pending_details"]() if "key" in row[1].lower() or "Key" in row[1]]
+        check("即时识别：密钥改动计入未保存", len(key_rows) >= 1, api["pending_details"]())
+        check("即时识别：密钥明细已掩码（无明文）",
+              all("•" in row[2] or "•" in row[3] for row in key_rows)
+              and all("sk-instant-secret" not in row[2] + row[3] for row in key_rows),
+              key_rows)
+
+        # 清空恢复：改回初值后未保存项消失
+        api["set_field"]("llm_base", original_base)
+        api["set_field"]("llm_key", original_key)
+        api["instant_flush"]()
+        check("即时识别：清空后未保存项归零", api["pending_count"]() == 0, api["pending_count"]())
+
+    @step
     def preset_minimal():
         api["set_mode"]("minimal")
         state = api["ui_state"]()
