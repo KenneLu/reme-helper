@@ -141,7 +141,7 @@ in the template (`autostart` 1.1.1, `icons` 2.0.0, `update_helper` 1.0.1) but re
 adopted them - they live inline in `src/main.py`, and `service_link` is adopted but not
 wired. Having no feature is a **gap that must be closed**, not a conflict to be tolerated;
 a schedule is not a permission. `src/template/` is a git submodule borrow pinned to
-`my-diy-tool-template` (one source for all family modules; a fresh clone needs
+`diy-tool-kit` (one source for all family modules; a fresh clone needs
 `git clone --recurse-submodules`); tool differences live in the tool-owned card
 `src/app_params.py` — including the proprietary `SUPPORTED_REME_VERSION` pin, which the
 kit does not cover. Unreleased work has no local build: `VERSION` stays at

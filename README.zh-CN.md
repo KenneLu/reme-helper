@@ -118,7 +118,7 @@ release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 **已知缺口（不是"允许的差异"）**：模板已有 `autostart` 1.1.1 / `icons` 2.0.0 /
 `update_helper` 1.0.1，reme 未采纳（内联在 `src/main.py`）；`service_link` 已整文件夹采纳但
 **未接线**。**"没有功能"是必须补齐的缺口，不是可以容忍的冲突；排期不等于许可。**
-`src/template/` 是钉住 `my-diy-tool-template` 的 git submodule 借条（家族模块只有一份来源；
+`src/template/` 是钉住 `diy-tool-kit` 的 git submodule 借条（家族模块只有一份来源；
 全新 clone 需 `git clone --recurse-submodules`）；工具差异参数住在工具自持的参数卡
 `src/app_params.py`——含 kit 不覆盖的专有键 `SUPPORTED_REME_VERSION`。**未发版的改动在本机没有构建产物**：
 开发期不动版本号（`VERSION` 停在最后已发布的 `1.2.5`），且 工程·运行检测串 闸门在常驻托盘运行时
