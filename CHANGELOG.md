@@ -3,6 +3,9 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `doc/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## Unreleased
+- **模板件拷贝改 git submodule 借条 + 参数卡（Wave 2，2026-10-19）**：`src/template/` 下的 11 个家族模块副本摘除，改为 `git submodule add https://github.com/KenneLu/my-diy-tool-template.git src/template`，钉 kit commit `c600cec`（家族模块只有一份来源）。工具差异参数搬入工具自持的 `src/app_params.py`，由 `template.appconfig` 运行时 `try: import app_params` 覆盖；**专有键 `SUPPORTED_REME_VERSION = "0.4.1.11"` 由本卡持有**（kit 参数卡不覆盖专有键），`main.py` 的 import 拆为「`APP_NAME, APP_ID` 仍来自 `template.appconfig`」+「`SUPPORTED_REME_VERSION` 来自 `app_params`」，L7366 的「单一真源」一致性校验改为对 `app_params` 同一取值校验（注释说明保留语义）；`tests/test_reme_version_pin.py` 的解析路径同步改为 `app_params`。`VERSION` 不入卡（单一事实源仍是 `src/main.py`）。`scripts/build.bat`：删除随拷贝模式退休的 `conformance_check.py` temp-leak 段（含 `build\_tmpbase.txt` 相关），保留 `sync_check.py` 借条检查。CI：`.github/workflows/tests.yml` 与 `release.yml` 的 checkout 改为 `submodules: recursive`（借条模式下裸 checkout 的测试/构建必红）。无运行时行为变化。
+
 ## 1.2.7
 - **Semantic IDs across docs, comments and bat annotations** (2026-10-08, W9): single-letter reference codes (criterion IDs, spec section anchors, checklist entry IDs, bat step tags) replaced with semantic names throughout; machine-facing checker interface now uses kebab-case slugs. Documentation/comment/naming layer only - no runtime behavior change; gate re-run green (conformance 0 FAIL, sync 0 drift, full-suite compile pass).
 

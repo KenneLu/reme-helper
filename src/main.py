@@ -28,7 +28,9 @@ from tkinter import messagebox as _raw_messagebox
 import guide
 import icon_pipeline
 from template import appconfig   # noqa: F402  appconfig 参数区（REPO/EXE 经模块引用）
-from template.appconfig import APP_NAME, APP_ID, SUPPORTED_REME_VERSION   # noqa: F402
+from template.appconfig import APP_NAME, APP_ID   # noqa: F402
+import app_params   # noqa: F402  专有键 SUPPORTED_REME_VERSION（kit 参数卡不覆盖的工具差异）
+from app_params import SUPPORTED_REME_VERSION   # noqa: F402
 from template.i18n import i18n   # noqa: F402  i18n 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语言态同步
 from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
@@ -7362,9 +7364,12 @@ def smoke() -> int:
               mutex_name_is_valid(APP_ID, mutex_name=SINGLE_INSTANCE_NAME))
         # ReMe 适配版本必须随包分发且非空（用户 2026-09-19 定：不再跟随 PyPI 最新）。
         # 升级/安装提示词与四象限判定全靠它；冻结环境里取不到 = 没有升级目标。
+        # Wave 2：专有键已搬入工具自持参数卡 src/app_params.py（kit 参数卡不覆盖专有键）。
+        # 本条仍是「单一真源」校验：只有 app_params 一处定义，此处核对已导入的名字与
+        # 卡内取值一致——将来谁把 pin 复制成第二份字面量/在 main.py 重绑，这条会红。
         check("ReMe pin present",
               bool(SUPPORTED_REME_VERSION)
-              and SUPPORTED_REME_VERSION == appconfig.SUPPORTED_REME_VERSION)
+              and SUPPORTED_REME_VERSION == app_params.SUPPORTED_REME_VERSION)
         failed = [name for name, ok in checks if not ok]
         detail = "PASS" if not failed else "FAIL missing=" + ",".join(failed)
     except Exception as exc:  # noqa: BLE001 - 通过日志文件上报

@@ -6,7 +6,8 @@
 一发新版，托盘就提示"有新版本"并把用户往未验证的组合上引。
 
 本测试把新语义钉死成机械判据：
-  ① **单点定义**：版本号只写在 appconfig（参数区），main.py 里没有第二份字面量；
+  ① **单点定义**：版本号只写在工具自持参数卡 `src/app_params.py`（Wave 2：kit 参数卡
+     不覆盖专有键，故本键由 app_params 持有），main.py 里没有第二份字面量；
   ② **四象限文案**：本机 < pin（提示升级，且目标就是 pin）/ == pin（已最新）/
      > pin（越界警告，**不**给升级引导）/ 上游 > pin（只提示"尚未适配"，绝不引导升级）；
   ③ **提示词锁版本**：安装 / 升级两份提示词都含 `==<pin>`，**不含**「最新稳定版」，
@@ -36,13 +37,13 @@ PIN = main.SUPPORTED_REME_VERSION
 
 # ---------- ① 单点定义 ----------
 check("pin is non-empty", bool(PIN), repr(PIN))
-check("pin comes from the appconfig parameter file",
-      main.appconfig.SUPPORTED_REME_VERSION == PIN, repr(main.appconfig.SUPPORTED_REME_VERSION))
+check("pin comes from the app_params parameter card",
+      main.app_params.SUPPORTED_REME_VERSION == PIN, repr(main.app_params.SUPPORTED_REME_VERSION))
 
 source = (SRC_DIR / "main.py").read_text(encoding="utf-8", errors="replace")
 assignments = [line.strip() for line in source.splitlines()
                if line.strip().startswith("SUPPORTED_REME_VERSION")]
-check("main.py holds no second literal definition (single source in appconfig)",
+check("main.py holds no second literal definition (single source in app_params)",
       assignments == [], "found: %s" % assignments)
 
 # ---------- ② 四象限 ----------
