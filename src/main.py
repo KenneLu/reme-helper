@@ -151,10 +151,9 @@ CRON_RE = re.compile(r"^\s*\S+(\s+\S+){4}\s*$")
 # ---------------- MCP 暴露允许列表 ----------------
 # 白名单里的名字必须**逐字**等于 ReMe 真实注册的 job 名。base_service.add_jobs() 会先做
 # self.jobs.difference(app.context.jobs)，有一个对不上就 raise KeyError，服务直接起不来；
-# 加不进去的 job 则是 raise TypeError。官方「功能名」与「job 名」不一定一致——0.4.1.13 起
-# 功能与 job 同名 proactive_read（更早版本 job 叫 proactive）——所以这里绝不手抄名单：
-# 候选一律由 servable_job_names() 从官方 default.yaml 推导，写盘前再按这份配置真正产出的
-# job 表过滤。
+# 加不进去的 job 则是 raise TypeError。官方「功能名」与「job 名」不一定一致（本工具适配的
+# job 名是 proactive_read），所以这里绝不手抄名单：候选一律由 servable_job_names() 从官方
+# default.yaml 推导，写盘前再按这份配置真正产出的 job 表过滤。
 EXPOSE_JOB_GROUPS = (
     ("记忆读写", ("read", "write", "edit", "save", "load", "daily_write", "read_image",
                   "frontmatter_read", "frontmatter_update", "frontmatter_delete")),
@@ -946,9 +945,8 @@ def is_servable(spec) -> bool:
     """这个 job 能否被服务层注册。
 
     判据就是 base_service.add_jobs() 的那一条：background / cron 的 job 被强制
-    enable_serve=False，永远不会对外服务，写进白名单反而会 raise；0.4.1.13 起还有
-    **显式声明 `enable_serve: false` 的 base job**（`proactive_refresh` 就是：backend=base
-    但要靠调度跑、不对外服务）——同样不能写进白名单。
+    enable_serve=False，永远不会对外服务；**显式声明 `enable_serve: false` 的 base job**
+    （例如靠调度跑的 proactive_refresh）同样不对外服务——这两类写进白名单都会 raise。
     """
     if not isinstance(spec, dict):
         return True
@@ -1035,8 +1033,8 @@ def expose_job_rows() -> tuple:
 def expose_values() -> dict:
     """写进配置的暴露设置。
 
-    顺手丢掉已经不存在的 job 名——老配置里的旧名字（例如 0.4.1.13 之前叫 `proactive`）
-    就是这样退场的，留着它下次生成配置会让 ReMe 起不来。
+    顺手丢掉已经不存在的 job 名——老配置里的旧 job 名（例如已改名的 `proactive`）就是这样
+    退场的，留着它下次生成配置会让 ReMe 起不来。
     """
     expose = CFG.get("expose") or {}
     jobs = [item for item in (expose.get("jobs") or []) if isinstance(item, str) and item.strip()]
@@ -1582,9 +1580,9 @@ def official_default_path() -> Path:
     return reme_root() / "venv" / "Lib" / "site-packages" / "reme" / "config" / "default.yaml"
 
 
-# 0.4.1.13 的依赖 pin（README/CHANGELOG 之外的唯一展示点：升级提示词里的「依赖变化」）。
-# 优先读 ReMe 自己的 venv 里**实际装的** agentscope 版本（helper 进程里没有 agentscope，
-# 与 `_run_model_library_effort_script` 同一手法：短超时子进程）；读不到回退这个常量。
+# 升级提示词「依赖变化」一项要展示的 agentscope pin。优先读 ReMe 自己的 venv 里**实际装的**
+# agentscope 版本（helper 进程里没有 agentscope，与 `_run_model_library_effort_script`
+# 同一手法：短超时子进程）；读不到回退这个常量。
 # 一次性缓存：提示词可能连开两次，不值得每次都起子进程。
 AGENTSCOPE_PIN_FALLBACK = "2.0.9"
 _AGENTSCOPE_PIN_CACHE: dict = {"value": None}

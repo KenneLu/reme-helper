@@ -28,7 +28,7 @@ runs:
     - name: Install ReMe into H:\Tools\ReMe
       shell: pwsh
       env:
-        REME_VERSION: "0.4.1.11"
+        REME_VERSION: "0.4.1.13"
       run: |
         $ErrorActionPreference = "Stop"
         New-Item -ItemType Directory -Force -Path C:\reme-root-drive | Out-Null

@@ -124,17 +124,18 @@ build.bat norun    :: build without launching it
 release.bat        :: tag v<version> and push; CI publishes the zip
 ```
 
-`src/` holds the application, `tests/` the suites (all of them gates in the build), `scripts/` the build and
-the release-config generator, and `doc/` the documentation the app reads at runtime. The version lives in
-`src/main.py` (`VERSION`) — the single source of truth for the app, the folder name, and the git tag; pushing
-a `v*` tag is what publishes a release. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+`src/` holds the application, `tests/` the test files (15 in all; 13 of them run as build gate sections),
+`scripts/` the build and the release-config generator, and `doc/` the documentation the app reads at runtime.
+The version lives in `src/main.py` (`VERSION`, currently `1.2.8`) — the single source of truth for the app,
+the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
+[CHANGELOG.md](CHANGELOG.md) for what changed.
 
 **Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
-folder is allowed. Locally that still means no new artifact: `VERSION` stays at the published
-`1.2.5` during development, so the target folder exists and the earlier 工程·拒重复构建 check stops the
-build first. Releases come from CI on a clean checkout, so "no local release folder for this
-work" is an expected state, not a lost artifact.
+folder is allowed. `VERSION` is currently `1.2.8`, and the frozen `1.2.8` build has been produced
+and installed locally; the release folder is a local artifact and is not committed. Published
+artifacts still come from CI on a clean checkout, so a repository without a release folder is an
+expected state, not a lost artifact.
 
 **Known gaps (not "allowed differences").** Three family mechanism modules already exist
 in the template (`autostart` 1.1.1, `icons` 2.0.0, `update_helper` 1.0.1) but reme has not
@@ -147,11 +148,10 @@ a schedule is not a permission. `src/template/` is a git submodule borrow pinned
 kit does not cover. The supported ReMe version is **0.4.1.13** (full-adaptation target:
 job-table shape, the `proactive` → `proactive_read` rename, the `enable_serve: false`
 gate for `proactive_refresh`, the new `list_tags` tool, and the agentscope pin); 0.4.2.0
-is intentionally not followed until it is released and evaluated. Unreleased work has no local build: `VERSION` stays at
-the last published `1.2.5` until a release (dev-time rule), and the 工程·运行检测串 gate blocks build
-runs while the resident tray is up. The tray item and the build-gate fix are verified in dev
-only (8 suites + `--smoke` + isolated-start probe), not through a frozen build; tagging `v*`
-lets `release.yml` build from a clean checkout.
+is intentionally not followed until it is released and evaluated. `VERSION` is `1.2.8`; the frozen
+`1.2.8` build has been produced and installed, and the build runs 13 gate sections drawn from the
+15 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
+instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
 ## License
 

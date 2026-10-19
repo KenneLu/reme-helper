@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""ReMe 0.4.1.13 适配的纯逻辑判据（无窗口、无网络、不碰真 ReMe 安装）。
+"""MCP 暴露 job 表的纯逻辑判据（无窗口、无网络、不碰真 ReMe 安装）。
 
 覆盖三件事：
-  ① `is_servable()` 必须排除**显式 `enable_serve: false` 的 base job**
-     （0.4.1.13 的 `proactive_refresh`：backend=base 但不对外服务；
-     旧逻辑把它当可服务 ⇒ 可能写进 MCP 白名单 ⇒ ReMe add_jobs() raise）。
-  ② job 改名：`proactive` → `proactive_read`（EXPOSE 分组/标签/信息/removals 只认新名）。
-  ③ 新 job `list_tags`（backend=base、可服务、只读）进入候选名单与「检索与浏览」组，
-     且等级/标签/说明齐备。
+  ① `is_servable()` 必须排除**显式 `enable_serve: false` 的 base job**（例如靠调度跑的
+     `proactive_refresh`）——否则会被当可服务写进 MCP 白名单，ReMe add_jobs() raise。
+  ② job 名 `proactive_read` 与 EXPOSE 分组/标签/信息/removals 一致；兼容旧版 job 名时
+     由 `expose_values()` 在写盘前过滤。
+  ③ `list_tags`（backend=base、可服务、只读）进入候选名单与「检索与浏览」组，且等级/
+     标签/说明齐备。
 
 用**合成 default.yaml 表**（monkeypatch `official_jobs`）跑，不受本机装的 ReMe 版本影响；
 真安装表读不到时（CI）同样可跑。
