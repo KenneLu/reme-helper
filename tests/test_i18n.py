@@ -4,7 +4,11 @@
 i18n_bridge（键反查 + 片段兜底）在英文模式下翻成不含中文的英文。
 界面上的**动态**文案（刷新时才写进去的状态、页脚、表格行）由
 test_en_mode.py 的英文模式全树扫描兜底。
+
+另加一条空格门禁：zh 词表值里汉字与拉丁字母之间必须有一个半角空格
+（URL / 路径 / 命令 / 格式占位符按白名单原样保留，白名单在下方列明）。
 """
+import re
 import sys
 from pathlib import Path
 
@@ -13,6 +17,32 @@ import i18n_bridge  # noqa: E402
 from i18n_bridge import i18n  # noqa: E402
 
 CHECKS: list = []
+
+
+# ---------------- 空格规则（机械门禁） ----------------
+# 规则：汉字与拉丁字母 / 英文词之间留**一个**半角空格；URL / 命令 / 代码 / 路径 /
+# 格式占位符按原样保留。白名单在下面逐条列明——先把这些"本来就允许原样"的片段
+# 剥成空格，再看剩余文本里还有没有「汉字紧邻拉丁字母」。
+SPACING_EXEMPT = (
+    r"https?://[^\s，。；：、（）【】]+",          # URL
+    r"[A-Za-z]:\\[^\s，。；：、（）【】]*",       # Windows 路径（D:\ReMe\...）
+    r"(?:~|\.{1,2})/[^\s，。；：、（）【】]*",    # POSIX / 相对路径（~/.ssh、./logs）
+    r"%[-+ #0-9.]*[sdifr]",                      # printf 占位符（%s / %d）
+    r"\{[^{}]*\}",                               # format / f-string 占位符（{version}）
+    r"(?<![\w-])--?[A-Za-z][\w-]*",              # 命令行参数（--release / -h）
+)
+# 整条词条白名单：只有"整句本来就是命令/路径"这类无法局部剥离的才允许进来，
+# 每条都写明理由。当前为空——正常文案一律加空格，别往这里塞。
+SPACING_WHITELIST: dict = {}
+HAN_LATIN_GLUE = re.compile(r"[\u4e00-\u9fff][A-Za-z]|[A-Za-z][\u4e00-\u9fff]")
+
+
+def spacing_residue(value: str) -> str:
+    """剥掉允许原样保留的片段后，返回仍「汉字紧邻拉丁字母」的文本（空 = 合格）。"""
+    text = value
+    for pattern in SPACING_EXEMPT:
+        text = re.sub(pattern, " ", text)
+    return text if HAN_LATIN_GLUE.search(text) else ""
 
 
 def check(name, ok, detail="") -> None:
@@ -35,6 +65,10 @@ def run() -> int:
     check("词条数量合理（>300）", len(zh_items) > 300, str(len(zh_items)))
     check("zh/en 键集一致", set(zh_items) == set(en_items),
           str(sorted(set(zh_items) ^ set(en_items))[:5]))
+    glued = [(key, value) for key, value in zh_items.items()
+             if key not in SPACING_WHITELIST and spacing_residue(value)]
+    check("中文词表值里汉字与拉丁字母之间都有空格", not glued,
+          "; ".join(f"{key}: {value[:40]}" for key, value in glued[:6]))
 
     # ---------------- 源码覆盖 ----------------
     report = i18n_bridge.audit([SRC / "main.py", SRC / "guide.py"])

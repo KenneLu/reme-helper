@@ -78,7 +78,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.14"
+VERSION = "1.2.15"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -286,29 +286,29 @@ FEATURES = {
         "name": "Auto Memory",
         "official": True,
         "requires": "LLM",
-        "effect": "把对话整理为daily记忆卡片",
-        "impact": "每批对话产生模型调用；更及时也更耗token",
+        "effect": "把对话整理为 daily 记忆卡片",
+        "impact": "每批对话产生模型调用；更及时也更耗 token",
     },
     "auto_memory_cc": {
         "name": "Auto Memory CC",
         "official": True,
         "requires": "Claude Code + LLM",
-        "effect": "从Claude Code会话生成daily记忆",
-        "impact": "不用Claude Code时没有价值；被调用时产生模型费用",
+        "effect": "从 Claude Code 会话生成 daily 记忆",
+        "impact": "不用 Claude Code 时没有价值；被调用时产生模型费用",
     },
     "auto_resource": {
         "name": "Auto Resource",
         "official": True,
         "requires": "LLM；图像需视觉模型",
-        "effect": "监听resource并自动生成资料卡片",
-        "impact": "大文件或批量资料可能显著增加token、内存和处理时间",
+        "effect": "监听 resource 并自动生成资料卡片",
+        "impact": "大文件或批量资料可能显著增加 token、内存和处理时间",
     },
     "auto_dream": {
         "name": "Auto Dream",
         "official": True,
         "requires": "LLM",
-        "effect": "每天把变化的daily提炼、关联和纠正到digest",
-        "impact": "抽取一次且每个unit再调用Agent；默认最多5个unit",
+        "effect": "每天把变化的 daily 提炼、关联和纠正到 digest",
+        "impact": "抽取一次且每个 unit 再调用 Agent；默认最多 5 个 unit",
     },
     "proactive_read": {
         "name": "Proactive Read",
@@ -321,15 +321,15 @@ FEATURES = {
         "name": "ReMe Chat",
         "official": True,
         "requires": "LLM",
-        "effect": "提供ReMe内部只读Agent聊天入口",
-        "impact": "Codex/DSH已有Agent时通常不需要，会增加模型调用",
+        "effect": "提供 ReMe 内部只读 Agent 聊天入口",
+        "impact": "Codex/DSH 已有 Agent 时通常不需要，会增加模型调用",
     },
     "embedding": {
         "name": "Embedding",
         "official": False,
-        "requires": "Embedding模型或API",
+        "requires": "Embedding 模型或 API",
         "effect": "增强近义、中英混合和改写召回",
-        "impact": "新增/修改和查询需要向量计算；可能产生API费用",
+        "impact": "新增/修改和查询需要向量计算；可能产生 API 费用",
     },
     "faiss": {
         "name": "FAISS HNSW",
@@ -343,14 +343,14 @@ FEATURES = {
         "official": True,
         "requires": "reme_studio",
         "effect": "浏览、编辑、搜索和查看运行状态",
-        "impact": "少量Web服务开销，不调用LLM",
+        "impact": "少量 Web 服务开销，不调用 LLM",
     },
     "mcp": {
         "name": "MCP Server",
         "official": True,
         "requires": "无",
-        "effect": "让Codex和其他MCP客户端使用ReMe工具",
-        "impact": "只注册工具；实际成本由调用的Job决定",
+        "effect": "让 Codex 和其他 MCP 客户端使用 ReMe 工具",
+        "impact": "只注册工具；实际成本由调用的 Job 决定",
     },
 }
 
@@ -2214,11 +2214,11 @@ def validate_install(mode: str | None = None) -> tuple[bool, str]:
     python = reme_python()
     config = mode_config_path(selected)
     if not root.is_dir():
-        return False, f"ReMe目录不存在：{root}"
+        return False, f"ReMe 目录不存在：{root}"
     if not exe.is_file():
         return False, f"找不到命令：{exe}"
     if not python.is_file():
-        return False, f"找不到ReMe虚拟环境Python：{python}"
+        return False, f"找不到 ReMe 虚拟环境 Python：{python}"
     if mode_needs_llm(selected):
         # 保存/启动前先拦住：非法档位的失败发生在本地组件构造，日志里只是一串
         # pydantic 报错，用户很难自己连回到"思考强度选错了"。
@@ -2278,9 +2278,9 @@ def validate_install(mode: str | None = None) -> tuple[bool, str]:
         )
         version = result.stdout.strip()
         if result.returncode != 0 or not version:
-            return False, f"ReMe版本校验失败：{result.stdout.strip()[-300:]}"
+            return False, f"ReMe 版本校验失败：{result.stdout.strip()[-300:]}"
     except Exception as exc:
-        return False, f"ReMe命令校验失败：{exc}"
+        return False, f"ReMe 命令校验失败：{exc}"
     return True, f"{MODE_NAMES[selected]}配置有效（ReMe {version}）"
 
 
@@ -2337,10 +2337,10 @@ def official_default_config() -> dict:
         key = (str(source), None)
     if _OFFICIAL_CONFIG_CACHE["key"] != key:
         if not source.is_file():
-            raise FileNotFoundError(f"官方default配置不存在：{source}")
+            raise FileNotFoundError(f"官方 default 配置不存在：{source}")
         config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
         if not isinstance(config, dict):
-            raise ValueError(f"官方default配置结构异常：{source}")
+            raise ValueError(f"官方 default 配置结构异常：{source}")
         _OFFICIAL_CONFIG_CACHE["key"] = key
         _OFFICIAL_CONFIG_CACHE["config"] = config
     return deep_copy(_OFFICIAL_CONFIG_CACHE["config"])
@@ -2940,7 +2940,7 @@ def start_service(mode: str | None = None) -> tuple[bool, str]:
         return False, detail
     if probe_health():
         refresh_service_state()
-        return True, "ReMe已经运行"
+        return True, "ReMe 已经运行"
     config = mode_config_path(selected)
     if STOP_EVENT.is_set():
         return False, "应用正在退出，已取消启动 ReMe"
@@ -2975,7 +2975,7 @@ def start_service(mode: str | None = None) -> tuple[bool, str]:
             SERVICE_LOG_HANDLE.close()
             SERVICE_LOG_HANDLE = None
         set_state(phase="error", message="health timeout")
-        return False, f"启动后健康检查失败，请查看{log_file}"
+        return False, f"启动后健康检查失败，请查看 {log_file}"
     set_state(phase="running", healthy=True, pid=SERVICE_PROCESS.pid, managed=True, message="")
     log(f"ReMe started mode={selected} pid={SERVICE_PROCESS.pid} config={config}")
     if CFG.get("start_tunnels_with_reme"):
@@ -3012,7 +3012,7 @@ def stop_service(include_tunnels: bool = True, only_attached: bool = True) -> tu
         processes = [proc for proc in processes if proc.pid == attached] if attached else []
     if not processes and not probe_health():
         set_state(phase="stopped", healthy=False, pid=None, managed=False, message="")
-        return True, "ReMe已经停止"
+        return True, "ReMe 已经停止"
     set_state(phase="stopping")
     for proc in processes:
         terminate_process_tree(proc.pid)
@@ -3025,7 +3025,7 @@ def stop_service(include_tunnels: bool = True, only_attached: bool = True) -> tu
         SERVICE_LOG_HANDLE = None
     healthy = probe_health()
     set_state(phase="error" if healthy else "stopped", healthy=healthy, pid=None, managed=False)
-    return (not healthy), ("停止失败，2333端口仍响应" if healthy else "ReMe已停止")
+    return (not healthy), ("停止失败，2333端口仍响应" if healthy else "ReMe 已停止")
 
 
 def restart_service() -> tuple[bool, str]:
@@ -3136,12 +3136,12 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
     if STOP_EVENT.is_set():
         return False, f"应用正在退出，已取消启动 {target['name']} 隧道"
     if not probe_health():
-        return False, "ReMe尚未运行"
+        return False, "ReMe 尚未运行"
     # 进入这里就是「希望它连着」；随后调用的 stop_tunnel 会清掉这个标记，所以要在这里先立起来。
     TUNNEL_WANTED[key] = True
     if probe_tunnel(target):
         set_tunnel_state(target, True)
-        return True, f"{target['name']}隧道已经连接"
+        return True, f"{target['name']} 隧道已经连接"
     stop_tunnel(target)
     TUNNEL_WANTED[key] = True
     try:
@@ -3154,7 +3154,7 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
         )
         TUNNEL_PROCS[key] = process
     except OSError as exc:
-        return False, f"SSH启动失败：{exc}"
+        return False, f"SSH 启动失败：{exc}"
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and process.poll() is None:
         if STOP_EVENT.is_set():
@@ -3163,10 +3163,10 @@ def start_tunnel(target: dict) -> tuple[bool, str]:
         if probe_tunnel(target):
             set_tunnel_state(target, True)
             log(f"tunnel started target={key} pid={process.pid}")
-            return True, f"{target['name']}隧道已连接"
+            return True, f"{target['name']} 隧道已连接"
         time.sleep(1)
     stop_tunnel(target)
-    return False, f"{target['name']}隧道连接失败，请检查SSH密钥和VM"
+    return False, f"{target['name']} 隧道连接失败，请检查 SSH 密钥和 VM"
 
 
 def stop_tunnel(target: dict) -> None:
@@ -3195,7 +3195,7 @@ def stop_tunnel(target: dict) -> None:
 def start_all_tunnels() -> tuple[bool, str]:
     targets = [target for target in CFG["targets"] if target.get("enabled", True)]
     if not targets:
-        return False, "没有启用的ssh 目标"
+        return False, "没有启用的 ssh 目标"
     failures = []
     for target in targets:
         ok, detail = start_tunnel(target)
@@ -3260,7 +3260,7 @@ def refresh_tunnels() -> None:
 def seed_tunnels_wanted() -> None:
     """启动时按配置播种「这些隧道应该连着」。
 
-    只有打开了「ReMe启动后启动隧道」才播种；用户随后在托盘里单独停掉某条隧道，
+    只有打开了「ReMe 启动后启动隧道」才播种；用户随后在托盘里单独停掉某条隧道，
     stop_tunnel 会把该目标的标记清掉，不会被这里重新拉起。
     """
     wanted = bool(CFG.get("start_tunnels_with_reme"))
@@ -3712,17 +3712,17 @@ def validate_targets(targets: list[dict]) -> None:
     seen = set()
     for target in targets:
         if not str(target.get("host") or "").strip():
-            raise ValueError("ssh 目标的主机 / IP不能为空")
+            raise ValueError("ssh 目标的主机 / IP 不能为空")
         for field, default in (("port", 22), ("remote_port", 22333)):
             try:
                 target[field] = int(target.get(field, default))
             except (TypeError, ValueError) as exc:
-                raise ValueError("SSH端口和VM映射端口必须是数字") from exc
+                raise ValueError("SSH 端口和 VM 映射端口必须是数字") from exc
             if not 1 <= target[field] <= 65535:
                 raise ValueError("端口必须在1到65535之间")
         identity = (str(target["host"]).lower(), target["port"], target["remote_port"])
         if identity in seen:
-            raise ValueError("同一ssh 目标不能重复使用同一个映射端口")
+            raise ValueError("同一 ssh 目标不能重复使用同一个映射端口")
         seen.add(identity)
 
 
@@ -3732,14 +3732,14 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
         "port": 22, "remote_port": 22333, "key": "", "enabled": True,
     })
     window = toplevel(parent)
-    window.title("编辑ssh 目标" if target else "添加ssh 目标")
+    window.title("编辑 ssh 目标" if target else "添加 ssh 目标")
     window.geometry("520x350")
     attach_dialog(parent, window)
     window.grab_set()
     body = ttk.Frame(window, padding=14)
     body.pack(fill="both", expand=True)
-    fields = (("名称", "name"), ("用户名", "user"), ("主机 / IP / SSH别名", "host"),
-              ("SSH端口", "port"), ("VM映射端口", "remote_port"), ("私钥路径（留空使用 ~/.ssh）", "key"))
+    fields = (("名称", "name"), ("用户名", "user"), ("主机 / IP / SSH 别名", "host"),
+              ("SSH 端口", "port"), ("VM 映射端口", "remote_port"), ("私钥路径（留空使用 ~/.ssh）", "key"))
     variables = {}
     for row, (label, key) in enumerate(fields):
         ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=5)
@@ -3778,7 +3778,7 @@ def edit_target_dialog(parent, target: dict | None = None) -> dict | None:
 def choose_target_dialog(title: str) -> dict | None:
     targets = CFG.get("targets", [])
     if not targets:
-        notify("还没有ssh 目标")
+        notify("还没有 ssh 目标")
         return None
     if len(targets) == 1:
         return targets[0]
@@ -3849,7 +3849,7 @@ def edit_target(_icon=None, _item=None) -> None:
         parent = ui_parent()
         if parent is None:
             return
-        selected = choose_target_dialog("选择要编辑的ssh 目标")
+        selected = choose_target_dialog("选择要编辑的 ssh 目标")
         if not selected:
             return
         candidate = edit_target_dialog(parent, selected)
@@ -3872,7 +3872,7 @@ def delete_target(_icon=None, _item=None) -> None:
         parent = ui_parent()
         if parent is None:
             return
-        selected = choose_target_dialog("选择要删除的ssh 目标")
+        selected = choose_target_dialog("选择要删除的 ssh 目标")
         if not selected:
             return
         accepted = messagebox.askyesno(APP_NAME, f"确定删除 {selected['name']}（{selected['host']}）？", parent=parent)
@@ -3887,7 +3887,7 @@ def delete_target(_icon=None, _item=None) -> None:
 
 def rescan_keys(_icon=None, _item=None) -> None:
     keys = scan_local_keys()
-    notify("已扫描本机SSH密钥：" + ("、".join(Path(item).name for item in keys) if keys else "未发现"))
+    notify("已扫描本机 SSH 密钥：" + ("、".join(Path(item).name for item in keys) if keys else "未发现"))
     refresh_tray_menu()
 
 
@@ -5201,7 +5201,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         targets_data = deep_copy(CFG.get("targets", []))
         columns = ("enabled", "name", "connection", "remote_port", "key")
         tree = ttk.Treeview(vm_holder, columns=columns, show="headings", height=4, selectmode="browse")
-        headings = {"enabled": "启用", "name": "名称", "connection": "SSH连接", "remote_port": "VM映射端口", "key": "密钥"}
+        headings = {"enabled": "启用", "name": "名称", "connection": "SSH 连接", "remote_port": "VM 映射端口", "key": "密钥"}
         widths = {"enabled": 55, "name": 150, "connection": 280, "remote_port": 110, "key": 240}
         for key in columns:
             tree.heading(key, text=t(headings[key]))
@@ -5239,7 +5239,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         def edit_vm():
             index = selected_index()
             if index is None:
-                messagebox.showinfo(APP_NAME, "请先选择一个ssh 目标", parent=root)
+                messagebox.showinfo(APP_NAME, "请先选择一个 ssh 目标", parent=root)
                 return
             candidate = edit_target_dialog(root, targets_data[index])
             if candidate:
@@ -5255,7 +5255,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         def delete_vm():
             index = selected_index()
             if index is None:
-                messagebox.showinfo(APP_NAME, "请先选择一个ssh 目标", parent=root)
+                messagebox.showinfo(APP_NAME, "请先选择一个 ssh 目标", parent=root)
                 return
             if messagebox.askyesno(APP_NAME, f"确定删除 {targets_data[index]['name']}？", parent=root):
                 targets_data.pop(index)
@@ -5363,7 +5363,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
 
         # ================= 逻辑 =================
         def browse_root():
-            selected = filedialog.askdirectory(initialdir=root_var.get(), title="选择ReMe安装根目录")
+            selected = filedialog.askdirectory(initialdir=root_var.get(), title="选择 ReMe 安装根目录")
             if selected:
                 root_var.set(selected)
                 collect_widgets()
@@ -6071,7 +6071,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
                     return
             was_running = service_is_healthy()
             if was_running and Path(draft["reme_root"]).resolve() != reme_root().resolve():
-                messagebox.showerror(APP_NAME, "ReMe运行中不能切换安装根目录；请先停止服务", parent=root)
+                messagebox.showerror(APP_NAME, "ReMe 运行中不能切换安装根目录；请先停止服务", parent=root)
                 return
             if was_running and not messagebox.askyesno(
                 APP_NAME, f"保存会重启 ReMe（约 10 秒）。\n\n待保存改动：{len(pending)} 项。继续？", parent=root
