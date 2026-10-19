@@ -311,6 +311,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] startup guard - tray creation failure must be readable, not a traceback ...
+"%PY%" tests\test_startup_guard.py
+if errorlevel 1 (
+  echo [ERROR] Startup guard test failed - tray retry, readable failure text and traceback
+  echo         import must keep working; a startup failure must never surface as NameError.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
 "%PY%" tests\test_quit_failopen.py
 if errorlevel 1 (

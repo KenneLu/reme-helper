@@ -76,6 +76,11 @@ jobs:
       - name: Log init fail-open
         run: python tests/test_log_failopen.py
 
+      # Startup guard: tray creation can be denied in restricted sessions; retry and
+      # surface a readable message instead of a traceback (and never NameError).
+      - name: Startup guard (tray fail-open)
+        run: python tests/test_startup_guard.py
+
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
 

@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 import webbrowser
@@ -41,6 +42,10 @@ from template.log_kit import make_logger  # noqa: F402  log_kit 日志（模板�
 from template.paths import (  # noqa: F402  paths 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + exe-delete-guard）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH, hold_exe_delete_guard)
+try:
+    import ctypes
+except ImportError:  # pragma: no cover - Windows 一定有；非 Windows 源码态降级为无弹窗
+    ctypes = None
 
 # reme 专有派生：模板 paths.py 只出四区正本与稳定安装位，下面这些由四区派生，不进模板件。
 DIAG_LOG_DIR = RUN_DIR / "log"        # 诊断输出跟「这次跑的那个包」走（构建脚本在这里读/清）
@@ -72,7 +77,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.9"
+VERSION = "1.2.10"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -829,6 +834,10 @@ def settings_reset_all(draft: dict, saved_cfg: dict) -> None:
 # 日志初始化失败绝不能弄死主流程（模板 log_kit 自己承诺「任何日志失败都静默」）：日志目录
 # 路径被另一实例/升级窗口占住时 make_logger 会抛，这里退化为无操作闭包——托盘照常启动，
 # 只是这一轮没有日志文件。
+# 日志初始化失败的原因（None = 正常）。启动失败弹窗文案会据此说明「日志目录也不可写」。
+LOG_INIT_ERROR = None
+
+
 def _noop_log(*parts):
     """print 形态的无操作日志：接受任意个位置参数。"""
     return None
@@ -841,6 +850,7 @@ def _noop_open_log_dir():
 try:
     log, open_log_dir = make_logger(LOG_DIR)
 except Exception as exc:  # noqa: BLE001 - 日志永远不能把主流程弄死
+    LOG_INIT_ERROR = exc
     try:
         print("log init failed: %s" % exc, file=sys.stderr, flush=True)
     except Exception:
@@ -7885,6 +7895,102 @@ def install_tray_trace() -> None:
     log("tray trace installed")
 
 
+class TrayStartupError(RuntimeError):
+    """托盘窗口创建在重试后仍失败（典型：受限终端/沙箱/远程会话里 PermissionError）。"""
+
+
+def _run_tray_with_retry(make_icon, setup, attempts=3, delays=(1.0, 2.0)):
+    """建托盘窗口并进入消息循环；失败时换一个**新** Icon 重试。
+
+    pystray 的窗口创建失败后旧对象不能复用；最后一次异常包成 ``TrayStartupError``，
+    由调用方转成给用户看的可读提示（而不是把 traceback 甩给用户）。
+    """
+    last = None
+    for attempt in range(1, attempts + 1):
+        icon = make_icon()
+        try:
+            icon.run(setup=setup)
+            return
+        except Exception as exc:  # noqa: BLE001 - 逐次记录后重试，最后一次转可读错误
+            last = exc
+            try:
+                log("tray: run failed (attempt %d/%d): %r" % (attempt, attempts, exc))
+            except Exception:
+                pass
+            if attempt < attempts:
+                time.sleep(delays[min(attempt - 1, len(delays) - 1)])
+    raise TrayStartupError(last)
+
+
+def _startup_failure_text(exc, detail):
+    """把启动异常翻成用户能照着做的提示（含 traceback 尾部供维护者定位）。"""
+    if isinstance(exc, TrayStartupError):
+        lines = [
+            t("无法创建系统托盘图标（拒绝访问）。"),
+            "",
+            t("常见原因：程序从受限终端/沙箱/远程会话启动，或系统托盘暂不可用。"),
+            t("请从 Windows 文件资源管理器直接双击本程序启动；"),
+            t("若仍失败，请重启资源管理器或电脑后重试。"),
+        ]
+    else:
+        lines = [t("程序启动失败：") + str(exc)]
+    if LOG_INIT_ERROR is not None:
+        lines.extend(["", t("日志目录也不可写（可能被受限环境启动），本次没有写出日志文件。")])
+    lines.extend(["", t("详细信息（可复制发给维护者）："), str(detail)[-1500:]])
+    return "\n".join(lines)
+
+
+def _write_startup_failure_log(text):
+    """best-effort 写崩溃信息：LOG_DIR -> DIAG_LOG_DIR -> %TEMP%；全失败返回 None。"""
+    candidates = [
+        LOG_DIR / (APP_ID + ".log"),
+        DIAG_LOG_DIR / "startup-error.log",
+        Path(tempfile.gettempdir()) / (APP_ID + "-startup-error.log"),
+    ]
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))
+            return path
+        except Exception:  # noqa: BLE001 - 换下一个落点
+            continue
+    return None
+
+
+def _message_box(text, title=None):
+    """MessageBoxW 兜底；任何失败都静默（没有桌面/没有 user32 时不能反过来崩）。"""
+    title = title or t("ReMe 助手 启动失败")
+    if ctypes is None:
+        return False
+    try:
+        ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _show_startup_failure(exc, detail):
+    """启动失败的可读提示：尽力写日志 + MessageBoxW + stderr；本身绝不能抛。"""
+    text = _startup_failure_text(exc, detail)
+    try:
+        _write_startup_failure_log(text)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        print(text, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+    # 无头入口（CI/构建/命令行诊断）不弹窗：那里没有用户可看，弹窗只会把流水线挂住。
+    headless = {"--smoke", "--ui-check", "--release", "--lang-audit",
+                "--make-icon", "--quit", "--check-helper-update", "--helper-update"}
+    if not headless.intersection(sys.argv):
+        try:
+            _message_box(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main() -> int:
     global TRAY_ICON
     started = time.monotonic()
@@ -7965,16 +8071,30 @@ def main() -> int:
     # 它要给每台 VM 起 ssh 并等探测结果，VM 不在线时实测 ≥20 秒。挡在这里的后果是
     # 启动后 20 多秒内**没有任何托盘图标**（详见 monitor_loop 的说明）。
     tray_icons.init()
-    TRAY_ICON = pystray.Icon(APP_ID,
-                             tray_icons.get(_tray_state_key(bool(STATE["healthy"]),
-                                                            any(TUNNEL_STATE.values()))),
-                             t(APP_NAME), build_menu())
-    log(f"tray: icon created (elapsed {time.monotonic() - started:.2f}s)")
-    threading.Thread(target=monitor_loop, daemon=True).start()
-    threading.Thread(target=menu_refresh_loop, daemon=True).start()
-    threading.Thread(target=quit_watch_loop, daemon=True).start()
+    install_tray_identity()   # 身份参数：pystray 传的 hID 会被忽略，实际一直是 uID=0
+    install_tray_trace()
+    loops_started = {"done": False}
+
+    def start_background_loops(icon):
+        """后台循环只随**成功进入消息循环的那一个** Icon 启动（重试不重复起线程）。"""
+        if loops_started["done"]:
+            return
+        loops_started["done"] = True
+        threading.Thread(target=monitor_loop, daemon=True).start()
+        threading.Thread(target=menu_refresh_loop, daemon=True).start()
+        threading.Thread(target=quit_watch_loop, daemon=True).start()
+
+    def make_tray_icon():
+        global TRAY_ICON
+        state = _tray_state_key(bool(STATE["healthy"]), any(TUNNEL_STATE.values()))
+        icon = pystray.Icon(APP_ID, tray_icons.get(state), t(APP_NAME), build_menu())
+        tray_icons.bind(icon, state)
+        TRAY_ICON = icon
+        log(f"tray: icon created (elapsed {time.monotonic() - started:.2f}s)")
+        return icon
 
     def setup(icon):
+        start_background_loops(icon)
         icon.visible = True
         # 这一行是「托盘图标真的注册进外壳了」的证据。启动路径上任何一处变慢，
         # 都能从它与上一行的时间差看出来（详见 monitor_loop 的说明）。
@@ -7988,9 +8108,9 @@ def main() -> int:
             run_action(start_service)
 
     # install_unique_tray_uid() 已证伪，不再调用（见它的 docstring）
-    install_tray_identity()   # 身份参数：pystray 传的 hID 会被忽略，实际一直是 uID=0
-    install_tray_trace()
-    TRAY_ICON.run(setup=setup)
+    # 托盘窗口创建可能被受限环境拒绝（ChangeWindowMessageFilterEx → WinError 5）：
+    # 失败换新 Icon 重试；最终失败抛 TrayStartupError，由 __main__ 转成可读弹窗。
+    _run_tray_with_retry(make_tray_icon, setup)
     # 正常情况走不到这里（run() 一直循环到退出）。真出现了，说明消息循环已经结束、
     # 进程却还活着 —— 那就是「图标还在、点什么都没反应」的另一种成因。
     log("tray: message loop ended")
@@ -8000,9 +8120,14 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         exit_code = main()
-    except Exception:
-        log("fatal application error:\n" + traceback.format_exc())
-        exit_code = 1
+    except Exception as exc:  # noqa: BLE001 - 启动失败必须给用户可读原因，而不是 traceback
+        exit_code = 2
+        detail = traceback.format_exc()
+        try:
+            log("fatal application error:\n" + detail)
+        except Exception:  # noqa: BLE001 - 日志已兜底；这里也不能再抛
+            pass
+        _show_startup_failure(exc, detail)
     # Flush by hand, and do it before os._exit for a reason that is easy to miss:
     # os._exit skips the interpreter's normal finalization, so it does not flush
     # stdio. When stdout is a console that hardly matters - the buffer is line

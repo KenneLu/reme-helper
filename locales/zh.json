@@ -869,5 +869,13 @@
  "auto_dream_off": "Auto Dream 未启用",
  "no_update_target_available_check_fai": "没有可用的更新目标（检查更新失败或已是最新）",
  "download_verify_update_package_faile": "下载/校验更新包失败：",
- "failed_to_launch_the_updater": "启动更新程序失败"
+ "failed_to_launch_the_updater": "启动更新程序失败",
+ "cannot_create_the_system_tray_icon_access_denied": "无法创建系统托盘图标（拒绝访问）。",
+ "common_causes_started_from_a_restricted_termina": "常见原因：程序从受限终端/沙箱/远程会话启动，或系统托盘暂不可用。",
+ "start_the_program_by_double_clicking_it_in_windows": "请从 Windows 文件资源管理器直接双击本程序启动；",
+ "if_it_still_fails_restart_explorer_or_the_computer": "若仍失败，请重启资源管理器或电脑后重试。",
+ "startup_failed": "程序启动失败：",
+ "the_log_directory_is_also_not_writable_possibly": "日志目录也不可写（可能被受限环境启动），本次没有写出日志文件。",
+ "details_copy_and_send_to_the_maintainer": "详细信息（可复制发给维护者）：",
+ "reme_helper_startup_failed": "ReMe 助手 启动失败"
 }

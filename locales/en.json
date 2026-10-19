@@ -869,5 +869,13 @@
  "auto_dream_off": "Auto Dream Off",
  "no_update_target_available_check_fai": "No update target available (check failed or already latest)",
  "download_verify_update_package_faile": "Download/verify update package failed: ",
- "failed_to_launch_the_updater": "Failed to launch the updater"
+ "failed_to_launch_the_updater": "Failed to launch the updater",
+ "cannot_create_the_system_tray_icon_access_denied": "Could not create the system tray icon (access denied).",
+ "common_causes_started_from_a_restricted_termina": "Common causes: the program was started from a restricted terminal/sandbox/remote session, or the system tray is temporarily unavailable.",
+ "start_the_program_by_double_clicking_it_in_windows": "Please start the program by double-clicking it in Windows File Explorer;",
+ "if_it_still_fails_restart_explorer_or_the_computer": "if it still fails, restart Explorer or the computer and try again.",
+ "startup_failed": "Startup failed: ",
+ "the_log_directory_is_also_not_writable_possibly": "The log directory is also not writable (possibly started in a restricted environment); no log file was written this time.",
+ "details_copy_and_send_to_the_maintainer": "Details (copy and send to the maintainer):",
+ "reme_helper_startup_failed": "ReMe Helper - Startup Failed"
 }
