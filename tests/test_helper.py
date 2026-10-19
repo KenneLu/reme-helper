@@ -516,7 +516,7 @@ assert main.extract_json_object('前缀 {"ok": true} 后缀')["ok"] is True
 assert main.extract_json_object("没有 JSON") is None
 assert main.extract_json_object("{不是合法 json") is None
 
-# 15) 托盘文案：窗口叫“控制台”，只读提示指向同一个名字
+# 15) 托盘文案：窗口叫“设置”，只读提示指向同一个名字
 menu_texts = []
 
 
@@ -542,7 +542,7 @@ def _menu_walk(menu):
 
 
 _menu_walk(main.build_menu())
-assert any("控制台" in text for text in menu_texts), menu_texts
+assert any("设置" in text for text in menu_texts), menu_texts
 assert any("打开 workspace" in text for text in menu_texts), menu_texts
 assert any("打开指引" in text for text in menu_texts), menu_texts
 assert any("状态刷新间隔" in text for text in menu_texts), menu_texts
@@ -566,7 +566,7 @@ guide_paths = {str(item["path"]) for item in main.path_guide_items()}
 assert len(guide_paths) >= 6, guide_paths
 assert any(str(main.reme_root()) == path for path in guide_paths), guide_paths
 assert not any("图形配置" in text for text in menu_texts), menu_texts
-assert "控制台" in main.mode_text()
+assert "设置" in main.mode_text()
 assert "图形配置" not in main.mode_text()
 
 # 状态刷新菜单六档与 opencodex-helper 一致；保存后唤醒监控，让新间隔立即生效。

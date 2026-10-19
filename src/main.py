@@ -77,7 +77,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.12"
+VERSION = "1.2.13"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -1544,7 +1544,7 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         t("2. 确认服务已停止（本机由 ReMe 助手的托盘菜单启停）。"),
         f"3. {t('用同一个 extra 升级到锁定版本：')}\"{root}\\venv\\Scripts\\python.exe\" -m pip install -U \"{reme_pip_spec()}\"",
         t("必须带 ==版本号：不带的话 pip 会去拿最新的，那正是本提示词要避免的事。"),
-        t("4. 打开 ReMe 助手控制台，逐项核对后点「验证并保存」，重新生成配置。"),
+        t("4. 打开 ReMe 助手设置页，逐项核对后点「验证并保存」，重新生成配置。"),
         t("5. 起服务验证：health_check、Studio 页面、reme version；"
           "再用助手跑一次「测试连接」确认 LLM / Embedding 仍可用。"),
         t("6. 回报新版本号，以及第 2 项里预判的差异是否属实。"),
@@ -2557,7 +2557,7 @@ STATE = {"phase": "stopped", "healthy": False, "pid": None, "managed": False, "m
 SERVICE_PROCESS: subprocess.Popen | None = None
 SERVICE_LOG_HANDLE = None
 SETTINGS_ROOT = None
-AUX_WINDOWS: list = []   # 非控制台的辅助窗口（路径指引 / 说明文档）
+AUX_WINDOWS: list = []   # 非设置的辅助窗口（路径指引 / 说明文档）
 GUIDE_WINDOW: dict = {"win": None}   # 「路径与入口」窗口：语言一变就整体重建
 TUNNEL_PROCS: dict[str, subprocess.Popen] = {}
 TUNNEL_STATE: dict[str, bool] = {}
@@ -2573,7 +2573,7 @@ TRAY_ICON = None
 # Tk 对象与创建它的线程绑定，而托盘回调跑在 pystray 自己的线程上。跨线程碰 Tcl 有两种
 # 致命后果：调用方（托盘线程）会卡死在 Tcl_ConditionWait 里永不返回；隐式默认根窗口
 # 会把 ttk.Style()/Toplevel()/StringVar() 引到别的解释器上，抛 “main thread is not in
-# main loop”，窗口建到一半就死掉——这两种都会表现为「点控制台没反应」。
+# main loop”，窗口建到一半就死掉——这两种都会表现为「点设置没反应」。
 # 规则：
 #   * 只有 UI 线程碰 Tk，其它线程一律通过 ui_post() 投递请求（只碰 Python 队列）；
 #   * Tk 解释器只创建一次并常驻，语言/主题切换只重建窗口内容，不重建解释器。
@@ -2648,9 +2648,9 @@ def ui_call(work, timeout: float = 20.0):
 
 
 def console_widgets(include_aux: bool = True) -> list[dict]:
-    """当前控制台里每个控件的类型/文字/颜色/几何（主题一致性与布局测试用）。
+    """当前设置里每个控件的类型/文字/颜色/几何（主题一致性与布局测试用）。
 
-    ``include_aux`` 为 False 时只看控制台窗口本身，用于严格的布局比对
+    ``include_aux`` 为 False 时只看设置窗口本身，用于严格的布局比对
     （辅助窗口和主窗口的 Toplevel/TFrame 在按类型归并时会撞在一起）。
     """
     def collect() -> list[dict]:
@@ -2697,7 +2697,7 @@ def console_widgets(include_aux: bool = True) -> list[dict]:
 
 
 def console_texts() -> list[tuple[str, str]]:
-    """当前控制台里所有控件的文字（测试/英文模式审查用）。
+    """当前设置里所有控件的文字（测试/英文模式审查用）。
 
     返回 [(控件类, 文字)]：标签、按钮、勾选/单选、下拉框选项与当前值、表格表头与行。
     """
@@ -2743,7 +2743,7 @@ def console_texts() -> list[tuple[str, str]]:
 
 
 def ui_parent():
-    """对话框的父窗口：优先控制台，否则用隐藏的根窗口。"""
+    """对话框的父窗口：优先设置，否则用隐藏的根窗口。"""
     win = UI_HOST.get("win")
     try:
         if win is not None and win.winfo_exists():
@@ -2793,7 +2793,7 @@ def restyle_all() -> None:
     if host is not None:
         try:
             if host.winfo_exists():
-                restyle_widgets(host)     # host 的子窗口包含控制台与指引/说明
+                restyle_widgets(host)     # host 的子窗口包含设置与指引/说明
         except tk.TclError:
             pass
     run_theme_hooks()
@@ -2802,7 +2802,7 @@ def restyle_all() -> None:
 def apply_pending_theme() -> None:
     """把挂起的主题切换在当前（UI）线程里落地。
 
-    托盘切主题时只是置了 PENDING_THEME，由**控制台窗口**的轮询负责落地；如果这时控制台
+    托盘切主题时只是置了 PENDING_THEME，由**设置窗口**的轮询负责落地；如果这时设置
     没开着，就没人消费它——接着打开的「打开指引」/说明文档/VM 对话框会用旧样式，看着还是
     上一个主题的样子（用户报的「切了深色，指引还是浅色」）。所以进入 UI 线程的请求泵里先补上。
     """
@@ -3426,7 +3426,7 @@ def copy_integration_doc() -> None:
 
 
 def _console_guide_markdown() -> str:
-    """控制台说明的正文（内容随工具分发，见 guide.py）。"""
+    """设置说明的正文（内容随工具分发，见 guide.py）。"""
     return guide.guide_markdown({
         "lang": ui_lang(),
         "reme_root": str(reme_root()),
@@ -3440,8 +3440,8 @@ def _console_guide_markdown() -> str:
     })
 
 
-def show_doc_viewer(build_markdown=None, title_suffix: str = " · 控制台说明") -> None:
-    """在内置窗口里渲染控制台说明。
+def show_doc_viewer(build_markdown=None, title_suffix: str = " · 设置说明") -> None:
+    """在内置窗口里渲染设置说明。
 
     内容随工具分发（``guide.py``），不再依赖 ReMe 安装目录里的 Markdown 文件——那份文件
     是某台机器上写的、普通用户装完 ReMe 并不会带着它，而且里面的路径不具备通用性。
@@ -3563,7 +3563,7 @@ def path_guide_items() -> list[dict]:
          "path": root, "action": lambda: open_path(root)},
         {"name": "workspace", "desc": "你的记忆文件（Markdown），可以直接翻看或备份",
          "path": root / "workspace", "action": lambda: open_path(root / "workspace")},
-        {"name": "当前配置", "desc": "控制台保存后生效的 app*.yaml；一般不用手改",
+        {"name": "当前配置", "desc": "设置页保存后生效的 app*.yaml；一般不用手改",
          "path": mode_config_path(), "action": lambda: open_path(mode_config_path())},
         {"name": "官方 default 配置", "desc": "ReMe 自带的默认配置，只读参考",
          "path": official_default_path(), "action": lambda: open_path(official_default_path())},
@@ -3571,7 +3571,7 @@ def path_guide_items() -> list[dict]:
          "path": root / ".env", "action": open_env_template},
         {"name": "日志目录", "desc": "出问题时看这里的 *.log",
          "path": root / "logs", "action": lambda: open_path(root / "logs")},
-        {"name": "控制台说明", "desc": "内置的接入与排障说明（在窗口里打开，不依赖 ReMe 目录）",
+        {"name": "设置说明", "desc": "内置的接入与排障说明（在窗口里打开，不依赖 ReMe 目录）",
          "path": "（内置文档）", "action": show_doc_viewer},
         {"name": "接入 Agent 文档", "desc": "怎么把 Codex、Claude Code、DSH 接到 ReMe 上（可阅读，也可复制给 AI，由它探测后逐端接上）",
          "path": "（内置文档）", "action": show_integration_doc},
@@ -3603,7 +3603,7 @@ def _open_path_guide() -> None:
     win.minsize(780, 380)
     body = ttk.Frame(win, padding=16)
     body.pack(fill="both", expand=True)
-    ttk.Label(body, text=t("这些文件在哪、点一下就能打开；平时改配置请用控制台，这里只是帮你找到它们。"),
+    ttk.Label(body, text=t("这些文件在哪、点一下就能打开；平时改配置请用设置页，这里只是帮你找到它们。"),
               font=FONT_UI, foreground=THEME["muted"], wraplength=920, justify="left").grid(
         row=0, column=0, columnspan=5, sticky="w", pady=(0, 12))
     for index, item in enumerate(items, start=1):
@@ -3623,7 +3623,7 @@ def _open_path_guide() -> None:
     body.columnconfigure(1, weight=1)
     footer = ttk.Frame(body)
     footer.grid(row=len(items) + 1, column=0, columnspan=5, sticky="ew", pady=(16, 0))
-    ttk.Label(footer, text=t("密钥只放在 .env；改完配置记得回控制台保存。"),
+    ttk.Label(footer, text=t("密钥只放在 .env；改完配置记得回设置页保存。"),
               font=FONT_HINT, foreground=THEME["muted"]).pack(side="left")
     ttk.Button(footer, text=t("关闭"), command=win.destroy).pack(side="right")
     restyle_widgets(win)
@@ -4319,7 +4319,7 @@ def set_language(lang: str, reopen: bool = True) -> None:
 
 
 def reload_console() -> None:
-    """重建控制台内容（切换语言后用它整体换文案）。解释器与 UI 线程都保持不变。"""
+    """重建设置内容（切换语言后用它整体换文案）。解释器与 UI 线程都保持不变。"""
     def work() -> None:
         win = UI_HOST.get("win")
         if win is not None:
@@ -4486,7 +4486,7 @@ class Tooltip:
 
 
 def show_settings(autoclose_ms: int | None = None, harness=None) -> None:
-    """打开控制台。
+    """打开设置。
 
     可以从任意线程调用（托盘回调、测试、命令行都走这里）：真正的构建被投递到 UI 线程，
     因为 Tk 对象只能由创建它的线程操作。
@@ -4498,13 +4498,13 @@ def show_settings(autoclose_ms: int | None = None, harness=None) -> None:
 
 
 def open_console(autoclose_ms: int | None = None, harness=None) -> None:
-    """在 UI 线程里打开控制台：已经开着就前置，否则构建一个（不新建解释器）。"""
+    """在 UI 线程里打开设置：已经开着就前置，否则构建一个（不新建解释器）。"""
     host = UI_HOST.get("root")
     if host is None:
         detail = UI_HOST.get("error") or "Tk 解释器未能创建"
         log(f"console: cannot open ({detail})")
         try:
-            messagebox.showerror(APP_NAME, f"控制台无法打开：{detail}\n\n详见日志：{LOG_PATH}")
+            messagebox.showerror(APP_NAME, f"设置页无法打开：{detail}\n\n详见日志：{LOG_PATH}")
         except Exception:  # noqa: BLE001 - 连对话框都弹不出来时只能记日志
             pass
         return
@@ -4524,10 +4524,10 @@ def open_console(autoclose_ms: int | None = None, harness=None) -> None:
 
 
 def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
-    """构建控制台窗口（必须在 UI 线程里调用）。
+    """构建设置窗口（必须在 UI 线程里调用）。
 
     窗口是常驻解释器的一个 Toplevel：关闭只销毁它，切语言只重建它，解释器始终活着。
-    这正是「切换几次后控制台打不开」的根因修复——旧实现每次开窗都新建一个 Tk 解释器，
+    这正是「切换几次后设置打不开」的根因修复——旧实现每次开窗都新建一个 Tk 解释器，
     跨线程的隐式默认根窗口会让新解释器抛 “main thread is not in main loop”。
     """
     PENDING_THEME["dirty"] = False   # 新窗口直接读当前配置，用不到挂起的切换
@@ -4539,7 +4539,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         UI_HOST["win"] = root
         SETTINGS_ROOT = root
         apply_theme()
-        root.title(app_title() + t(" · 控制台"))
+        root.title(app_title() + t(" · 设置"))
         root.geometry("1040x820")
         root.minsize(880, 560)
 
@@ -4619,7 +4619,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
         # **闭包变量**，未赋值时读取直接 NameError（不是 None）——实测：托盘线程在构建
         # 期间切主题会让 PENDING_THEME 变脏，下一次 pump 走到 configure 就抛
         # "cannot access free variable 'theme_button'"，异常从 ui() 冒到 UI 线程的
-        # mainloop 之外把线程打死：之后窗口引用永远清不掉、控制台再也打不开。
+        # mainloop 之外把线程打死：之后窗口引用永远清不掉、设置再也打不开。
         # 占位成 None 后，脏标记那一支会安全跳过；按钮随后按**当时的**主题创建，文案不会错。
         theme_button = None
 
@@ -6229,7 +6229,7 @@ def status_text(_item=None) -> str:
 
 
 def mode_text(_item=None) -> str:
-    return t("当前模式：") + t(MODE_NAMES[CFG["mode"]]) + t("（只读，请在 ReMe 控制台里修改）")
+    return t("当前模式：") + t(MODE_NAMES[CFG["mode"]]) + t("（只读，请在 ReMe 设置页里修改）")
 
 
 def tunnel_text(_item=None) -> str:
@@ -6248,7 +6248,7 @@ def attach_dialog(parent, dialog) -> None:
         不设 transient                 → ismapped=1  viewable=1  state=normal
         transient + deiconify()        → ismapped=0  viewable=0  state=withdrawn
 
-    本应用的常驻根窗口**一直是隐藏的**（它只当 Tk 解释器用，见 ui_thread_main），而控制台
+    本应用的常驻根窗口**一直是隐藏的**（它只当 Tk 解释器用，见 ui_thread_main），而设置
     没开着时 `ui_parent()` 返回的正是它 —— 所以「无脑 transient」的后果就是**对话框永不
     显示**，用户点了菜单什么都不出现。transient 只是「置顶于父窗口 + 不进任务栏」的
     锦上添花，父窗口不可见时它毫无意义，因此直接跳过。
@@ -6465,7 +6465,7 @@ def copy_prompt_from_tray() -> None:
             copied = copy_to_clipboard(prompt)
         except Exception as exc:  # noqa: BLE001
             log(f"tray copy prompt failed: {exc}")
-        notify("安装提示词已复制，粘贴给 DSH / Codex 即可" if copied else "复制失败，请在控制台里点“复制安装提示词”")
+        notify("安装提示词已复制，粘贴给 DSH / Codex 即可" if copied else "复制失败，请在设置页里点“复制安装提示词”")
 
     ui_post(work)   # 剪贴板要一个活着的 Tk 窗口 → 只能在 UI 线程里做
 
@@ -6478,6 +6478,121 @@ def menu_text(source: str):
     会一直停在启动时的语言（这正是之前「切了英文右键还是中文」的原因）。
     """
     return lambda _item: t(source)
+
+
+# ---------------- 托盘菜单：双粗体（MFS_DEFAULT）patch ----------------
+# Windows 的 InsertMenuItem 只接受**一个** MFS_DEFAULT，第二个会失败（WinError 87，
+# 1.2.11 现场教训）。Lead 实测 SetMenuItemInfo 虽然返回 FALSE/err 87，但状态位会被置上；
+# 于是这里包一层：失败时先去掉状态位插入（保持位置），再补 Set + Get 复核。
+_MFS_DEFAULT = 0x00001000
+_MIIM_STATE = 0x00000001
+_DOUBLE_DEFAULT_STATE = {"installed": False, "warning": ""}
+
+
+def _menu_item_state(hmenu, index: int, bypos: bool = True):
+    """读回 Win32 菜单项的 fState（失败返回 None；测试与 patch 共用）。"""
+    try:
+        from ctypes import wintypes
+        from pystray._util import win32 as pystray_win32
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetMenuItemInfoW.argtypes = (wintypes.HMENU, wintypes.UINT, wintypes.BOOL, ctypes.c_void_p)
+        user32.GetMenuItemInfoW.restype = wintypes.BOOL
+        info = pystray_win32.MENUITEMINFO(
+            cbSize=ctypes.sizeof(pystray_win32.MENUITEMINFO),
+            fMask=_MIIM_STATE,
+        )
+        ok = user32.GetMenuItemInfoW(hmenu, index, bypos, ctypes.byref(info))
+        return info.fState if ok else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def install_double_default_workaround() -> bool:
+    """让菜单能显示**两个**粗体项（MFS_DEFAULT），并保证菜单绝不会因此坏掉。
+
+    pystray 调 `InsertMenuItem` 插第二个 MFS_DEFAULT 时会抛 WinError 87。这里包一层：
+    原调用失败且该项要 default 时，把状态位去掉按原位置插入（成功），再 SetMenuItemInfo
+    补状态位、GetMenuItemInfo 复核。任何一步异常都退化成「这一项不粗体」，但菜单本身
+    仍然可用——不允许 1.2.11 那种整份菜单创建失败的情况再出现。
+    """
+    if _DOUBLE_DEFAULT_STATE["installed"]:
+        return True
+    try:
+        from ctypes import wintypes
+        from pystray._util import win32 as pystray_win32
+
+        original = pystray_win32.InsertMenuItem
+        if getattr(original, "_reme_double_default", False):
+            _DOUBLE_DEFAULT_STATE["installed"] = True
+            return True
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SetMenuItemInfoW.argtypes = (wintypes.HMENU, wintypes.UINT, wintypes.BOOL, ctypes.c_void_p)
+        user32.SetMenuItemInfoW.restype = wintypes.BOOL
+
+        def mark_default(hmenu, index, bypos) -> bool:
+            set_info = pystray_win32.MENUITEMINFO(
+                cbSize=ctypes.sizeof(pystray_win32.MENUITEMINFO),
+                fMask=_MIIM_STATE,
+                fState=_MFS_DEFAULT,
+            )
+            user32.SetMenuItemInfoW(hmenu, index, bypos, ctypes.byref(set_info))
+            state = _menu_item_state(hmenu, index, bypos)
+            return state is not None and bool(state & _MFS_DEFAULT)
+
+        def patched(hmenu, index, bypos, byref_info):
+            info = getattr(byref_info, "_obj", None)
+            wants_default = bool(
+                info is not None
+                and (info.fMask & _MIIM_STATE)
+                and (info.fState & _MFS_DEFAULT))
+            if not wants_default:
+                return original(hmenu, index, bypos, byref_info)
+            saved_state = info.fState
+            try:
+                return original(hmenu, index, bypos, byref_info)
+            except OSError:
+                pass  # 第二个 default 被 Windows 拒绝 → 走降级路径
+            info.fState = saved_state & ~_MFS_DEFAULT
+            try:
+                inserted = original(hmenu, index, bypos, byref_info)
+            finally:
+                info.fState = saved_state
+            if not inserted:
+                return inserted
+            try:
+                if mark_default(hmenu, index, bypos):
+                    return True
+            except Exception:  # noqa: BLE001 - 粗体失败不能让菜单创建失败
+                pass
+            return True  # 至少这一项存在（只是不粗体），整份菜单仍可用
+
+        patched._reme_double_default = True  # type: ignore[attr-defined]
+        pystray_win32.InsertMenuItem = patched
+        _DOUBLE_DEFAULT_STATE["installed"] = True
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _DOUBLE_DEFAULT_STATE["warning"] = "%s: %s" % (type(exc).__name__, exc)
+        return False
+
+
+class TrayMenu(pystray.Menu):
+    """托盘菜单：两个粗体默认项时，双击固定落到「打开 ReMe Studio」。
+
+    pystray 的 Menu.__call__ 取**第一个** default 项；设置项在菜单顺序里更靠前，
+    所以要在这里显式优先 Studio，保证双击行为符合用户预期。
+    """
+
+    def __init__(self, *items, primary=None):
+        super().__init__(*items)
+        self._primary_item = primary
+
+    def __call__(self, icon):
+        primary = self._primary_item
+        if primary is not None and getattr(primary, "default", False):
+            return primary(icon)
+        return super().__call__(icon)
 
 
 MENU_DIRTY = {"dirty": False}
@@ -6521,8 +6636,17 @@ def tray_signature() -> tuple:
 
 
 def build_menu() -> pystray.Menu:
-    return pystray.Menu(
-        # 分组顺序 = 使用频率：状态(只读) → 控制台 → 服务 → ssh 隧道 → 打开 → 设置 → 退出。
+    # 用户拍板：Studio 使用频率更高 → 它是**主默认动作**（双击托盘图标打开 Studio）；
+    # 设置页也保持粗体。两个 default 在 Windows 上需要 install_double_default_workaround()
+    # 的 patch 才能同时立住；pystray 原生只认第一个，所以 TrayMenu 显式优先 Studio。
+    settings_item = pystray.MenuItem(menu_text("ReMe 设置…"), lambda _icon, _item: show_settings(), default=True)
+    studio_item = pystray.MenuItem(
+        menu_text("打开 ReMe Studio"),
+        lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"),
+        enabled=lambda _item: service_is_healthy(),
+        default=True)
+    return TrayMenu(
+        # 分组顺序 = 使用频率：状态(只读) → 更新 → 设置页 → 服务 → ssh 隧道 → 打开 → 偏好设置 → 退出。
         # 每个区内部也按常用度排；「未检测到 ReMe」只在该出现的时候出现。
         pystray.MenuItem(status_text, None, enabled=False),
         # 两个版本行分开：ReMe（服务）在前，ReMe 助手（本工具）在后。
@@ -6549,23 +6673,22 @@ def build_menu() -> pystray.Menu:
         pystray.MenuItem(menu_text("复制 ReMe 助手更新步骤（交给 AI 执行）"),
                          lambda _icon, _item: copy_helper_upgrade_prompt_from_tray()),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(menu_text("ReMe 控制台…"), lambda _icon, _item: show_settings(), default=True),
+        settings_item,
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("启动 ReMe"), lambda _icon, _item: run_action(start_service),
                          enabled=lambda _item: reme_installed() and not service_is_healthy()),
         pystray.MenuItem(menu_text("停止 ReMe"), lambda _icon, _item: run_action(stop_service), enabled=lambda _item: service_is_healthy()),
         pystray.MenuItem(menu_text("重启 ReMe"), lambda _icon, _item: run_action(restart_service), enabled=lambda _item: service_is_healthy()),
-        # 不加 default=True：Windows 的 InsertMenuItem 只接受**一个** MFS_DEFAULT 项，
-        # 第二个会让菜单创建报 WinError 87（参数错误），右键菜单直接不可用。
-        # 双击默认项仍是「ReMe 控制台…」（它排在所有 default 候选之前）。
-        pystray.MenuItem(menu_text("打开 ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy()),
+        # Studio 也是 default=True；第二个 MFS_DEFAULT 靠 install_double_default_workaround()
+        # 的 Set/Get 降级路径才立得住（Windows 原生 InsertMenuItem 只收一个）。
+        studio_item,
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("ssh 目标"), build_targets_menu()),
         pystray.MenuItem(menu_text("启动全部 ssh 隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
         pystray.MenuItem(menu_text("停止全部 ssh 隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
         pystray.MenuItem(menu_text("ReMe 启动后启动隧道"), toggle_tunnels_on_start, checked=lambda _item: bool(CFG.get("start_tunnels_with_reme"))),
         pystray.Menu.SEPARATOR,
-        # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
+        # 配置都在设置里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
         # 其余（目录 / .env / 官方 default / 当前配置 / 日志 / 说明）收进「打开指引」。
         pystray.MenuItem(menu_text("打开 workspace"), lambda _icon, _item: open_path(reme_root() / "workspace")),
         # /判据·打开日志项：本工具自己的日志目录（%LOCALAPPDATA%\reme-helper\log）。立即执行，按
@@ -6583,6 +6706,7 @@ def build_menu() -> pystray.Menu:
                          lambda _icon, _item: copy_prompt_from_tray(),
                          visible=lambda _item: not reme_installed()),
         pystray.MenuItem(menu_text("退出"), quit_app),
+        primary=studio_item,
     )
 
 
@@ -6811,13 +6935,13 @@ def refresh_aux_windows() -> None:
                 win.destroy()
                 _open_path_guide()
             else:
-                win.title(app_title() + t(" · 控制台说明"))
+                win.title(app_title() + t(" · 设置说明"))
         except tk.TclError:
             pass
 
 
 def close_settings_window() -> None:
-    """关闭控制台（可从任意线程调用，真正的 destroy 在 UI 线程里执行）。
+    """关闭设置（可从任意线程调用，真正的 destroy 在 UI 线程里执行）。
 
     跨线程销毁 Tk 对象会让解释器崩掉（"Tcl_AsyncDelete: async handler deleted by the
     wrong thread"），跨线程调用 Tcl 更会永久挂死调用方（托盘线程），所以统一走队列。
@@ -8076,6 +8200,7 @@ def main() -> int:
     tray_icons.init()
     install_tray_identity()   # 身份参数：pystray 传的 hID 会被忽略，实际一直是 uID=0
     install_tray_trace()
+    install_double_default_workaround()   # 双粗体（失败自动退化为单默认项，菜单不受影响）
     loops_started = {"done": False}
 
     def start_background_loops(icon):

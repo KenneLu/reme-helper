@@ -38,21 +38,21 @@ new service fails, it tries to restore the previous mode.
 
 ## Language and theme
 
-- Switched from the console's top-right corner or the tray; the dark-mode choice is remembered (dark uses the `clam`
+- Switched from the settings window's top-right corner or the tray; the dark-mode choice is remembered (dark uses the `clam`
   ttk theme because the native Windows theme ignores colours; light and dark share one ttk engine so switching does
   not shift the layout).
 - The translation table lives in `src/i18n.py`, one entry per line; untranslated text falls back to Chinese.
-- Window titles and tray hints follow the language (in English they read `ReMe Helper <version> · Console`, where the version comes from `VERSION` in `src/main.py`). `APP_ID` never changes, so the
+- Window titles and tray hints follow the language (in English they read `ReMe Helper <version> · Settings`, where the version comes from `VERSION` in `src/main.py`). `APP_ID` never changes, so the
   tray window class and the autostart registry entry are language-independent.
 
 ## Tray menu
 
 - Read-only status: ReMe state, current mode, tunnel count.
-- **ReMe console…** (the default item — double-clicking the tray icon opens it); mode switching and fine-tuning live
+- **ReMe Settings…** (the default item — double-clicking the tray icon opens it); mode switching and fine-tuning live
   there, and the tray no longer offers clickable mode items.
 - Start / stop / restart ReMe.
 - Open ReMe Studio, the workspace, and **"Where are the files"** — a small window listing the ReMe folder, workspace,
-  current config, official default config, `.env` (credentials), log folder, console guide, and the setup guide, each
+  current config, official default config, `.env` (credentials), log folder, settings guide, and the setup guide, each
   row with "open" or "copy path".
 - Start / stop all VM tunnels; a "VM targets" submenu adds, edits, deletes, enables and disables targets, and
   re-scans local SSH keys.

@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""托盘菜单文案与默认项（1.2.11 微调）。
+"""托盘菜单（1.2.13）：文案空格 + 双粗体（Studio 主默认、设置页同粗）+ 双击落到 Studio。
 
-1) 中文与英文/字母之间留一个空格（「启动ReMe」这类粘连不再出现）；
-2) 「打开 ReMe Studio」与「ReMe 控制台…」一样加粗：两者都带 default=True（Windows 的
-   MFS_DEFAULT → 粗体），且**控制台排在前面**，所以 pystray 双击默认项行为不变。
+1) 中文与英文/字母之间留一个空格；
+2) 「打开 ReMe Studio」与「ReMe 设置…」都带 default=True（Windows MFS_DEFAULT → 粗体）；
+   Windows 的 InsertMenuItem 只接受一个默认项，靠工具侧 patch（先去掉状态位插入，再
+   SetMenuItemInfo 补状态位并用 GetMenuItemInfo 复核）立住第二个；patch 失败也只退化为
+   单默认项，菜单本身仍可用；
+3) 双击托盘图标固定打开 Studio（TrayMenu.__call__ 显式优先 primary 项）。
 """
+import ctypes
 import sys
 from pathlib import Path
 
@@ -48,7 +52,7 @@ for old in GLUED:
 SPACED = (
     "启动 ReMe", "停止 ReMe", "重启 ReMe", "打开 ReMe Studio",
     "启动全部 ssh 隧道", "停止全部 ssh 隧道", "ReMe 启动后启动隧道",
-    "启动工具时启动 ReMe",
+    "启动工具时启动 ReMe", "ReMe 设置…",
 )
 for new in SPACED:
     check("spaced text present: %s" % new, new in joined)
@@ -57,36 +61,79 @@ check("status row spaced", "ReMe 状态：" in joined)
 check("ReMe version row spaced", "ReMe 版本：" in joined)
 check("helper version row spaced", "ReMe 助手版本：" in joined)
 
-# ---------------- ② 默认项：恰好一个（「ReMe 控制台…」） ----------------
-# 曾给「打开 ReMe Studio」也加 default=True 想做双粗体，但 Windows InsertMenuItem 只接受
-# 一个 MFS_DEFAULT 项，第二个会让菜单创建报 WinError 87（参数错误）——已回退。
-zh_defaults = default_items()
-check("zh: exactly one default item", len(zh_defaults) == 1, [item.text for item in zh_defaults])
-check("zh: the only default item is the console item",
-      bool(zh_defaults) and zh_defaults[0].text == "ReMe 控制台…",
-      zh_defaults[0].text if zh_defaults else None)
 
-items = menu_items()
-studio = next((item for item in items if item.text == "打开 ReMe Studio"), None)
-check("zh: Open ReMe Studio exists but is not a default item",
-      studio is not None and not studio.default,
-      None if studio is None else studio.default)
-check("zh: text assertions did not lose the Studio entry", studio is not None)
+# ---------------- ② 两个粗体默认项：设置页 + Studio（Studio 为主默认） ----------------
+def check_defaults(lang):
+    items = menu_items()
+    defaults = [item for item in items if item.default]
+    texts = [item.text for item in defaults]
+    expected_settings = "ReMe 设置…" if lang == "zh" else "ReMe Settings…"
+    expected_studio = "打开 ReMe Studio" if lang == "zh" else "Open ReMe Studio"
+    check("%s: exactly two default items" % lang, len(defaults) == 2, texts)
+    check("%s: settings item is a default item" % lang, expected_settings in texts, texts)
+    check("%s: Studio item is a default item" % lang, expected_studio in texts, texts)
+    return items, defaults
 
-# ---------------- ③ English mode keeps the same single default ----------------
+
+items_zh, defaults_zh = check_defaults("zh")
+
+menu = main.build_menu()
+check("build_menu returns the tool-side TrayMenu", isinstance(menu, main.TrayMenu), type(menu))
+check("double-click primary is the Studio default item",
+      menu._primary_item is not None and menu._primary_item.default
+      and menu._primary_item.text == "打开 ReMe Studio",
+      None if menu._primary_item is None else (menu._primary_item.text, menu._primary_item.default))
+
+# 双击行为：TrayMenu.__call__ 必须选中 primary，而不是 items 顺序里更靠前的设置项
+calls = []
+
+
+def _record(label):
+    return lambda _icon, _item: calls.append(label)
+
+
+fake_other = main.pystray.MenuItem("other", _record("other"), default=True)
+fake_primary = main.pystray.MenuItem("primary", _record("primary"), default=True)
+probe_menu = main.TrayMenu(fake_other, fake_primary, primary=fake_primary)
+probe_menu.__call__(None)
+check("double-click resolves to the primary (Studio) item, not the earlier default",
+      calls == ["primary"], calls)
+
+# ---------------- ③ 双默认 patch 的机械验证：两个 Win32 菜单项都含 MFS_DEFAULT ----------------
+check("double-default workaround installs", main.install_double_default_workaround())
+try:
+    from pystray._util import win32 as pystray_win32
+
+    hmenu = pystray_win32.CreatePopupMenu()
+    try:
+        for index in range(2):
+            info = pystray_win32.MENUITEMINFO(
+                cbSize=ctypes.sizeof(pystray_win32.MENUITEMINFO),
+                fMask=pystray_win32.MIIM_STATE | pystray_win32.MIIM_STRING,
+                fState=pystray_win32.MFS_DEFAULT,
+                dwTypeData="bold-%d" % index,
+            )
+            pystray_win32.InsertMenuItem(hmenu, index, True, ctypes.byref(info))
+        states = [main._menu_item_state(hmenu, index) for index in range(2)]
+        check("ctypes: both inserted items carry MFS_DEFAULT",
+              all(state is not None and (state & pystray_win32.MFS_DEFAULT) for state in states),
+              states)
+        check("ctypes: no third item exists",
+              main._menu_item_state(hmenu, 2) is None, main._menu_item_state(hmenu, 2))
+    finally:
+        pystray_win32.DestroyMenu(hmenu)
+except Exception as exc:  # noqa: BLE001
+    check("ctypes dual-default probe", False, repr(exc))
+
+# ---------------- ④ English mode keeps the same two defaults ----------------
 saved_lang = main.CFG.get("ui_lang")
 main.CFG["ui_lang"] = "en"
 main.i18n_bridge.sync_lang("en")
 try:
-    en_defaults = default_items()
-    check("en: exactly one default item", len(en_defaults) == 1, [item.text for item in en_defaults])
-    check("en: the only default item is the console item",
-          bool(en_defaults) and en_defaults[0].text == "ReMe console…",
-          en_defaults[0].text if en_defaults else None)
-    en_studio = next((item for item in menu_items() if item.text == "Open ReMe Studio"), None)
-    check("en: Open ReMe Studio is not a default item",
-          en_studio is not None and not en_studio.default,
-          None if en_studio is None else en_studio.default)
+    check_defaults("en")
+    check("en: double-click primary is the Studio item",
+          main.build_menu()._primary_item.text == "Open ReMe Studio",
+          main.build_menu()._primary_item.text)
 finally:
     main.CFG["ui_lang"] = saved_lang if saved_lang is not None else "zh"
     main.i18n_bridge.sync_lang("zh")

@@ -268,7 +268,7 @@ def build_steps(api):
     @step
     def window_is_called_console():
         title = api["window_title"]()
-        check("窗口标题叫“控制台”（不再是“配置”）", "控制台" in title and "配置" not in title, title)
+        check("窗口标题叫“设置”（不再是“配置”）", "设置" in title and "配置" not in title, title)
 
     @step
     def install_detection_and_onboarding():
