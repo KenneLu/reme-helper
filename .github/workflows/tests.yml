@@ -81,6 +81,10 @@ jobs:
       - name: Startup guard (tray fail-open)
         run: python tests/test_startup_guard.py
 
+      # 1.2.11 menu polish: Chinese/Latin spacing and the two bold default items.
+      - name: Tray menu labels and default items
+        run: python tests/test_tray_menu.py
+
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"
 

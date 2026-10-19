@@ -77,7 +77,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.10"
+VERSION = "1.2.11"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -6225,7 +6225,7 @@ def build_console(host, autoclose_ms: int | None = None, harness=None) -> None:
 def status_text(_item=None) -> str:
     state = state_copy()
     names = {"stopped": "已停止", "starting": "启动中", "running": "运行中", "stopping": "停止中", "error": "异常"}
-    return t("ReMe状态：") + t(names.get(state["phase"], state["phase"]))
+    return t("ReMe 状态：") + t(names.get(state["phase"], state["phase"]))
 
 
 def mode_text(_item=None) -> str:
@@ -6335,8 +6335,8 @@ def reme_version_text(_item=None) -> str:
     """
     version = reme_versions().get("reme-ai", "")
     if not version:
-        return t("ReMe版本：") + t("未安装")
-    text = t("ReMe版本：") + version
+        return t("ReMe 版本：") + t("未安装")
+    text = t("ReMe 版本：") + version
     state = reme_pin_state(version)
     if state == REME_PIN_OUTDATED:
         return text + t("（可升级到 ") + SUPPORTED_REME_VERSION + t("）")
@@ -6350,7 +6350,7 @@ def reme_version_text(_item=None) -> str:
 
 def helper_version_text(_item=None) -> str:
     """ReMe 助手自己的版本行 —— 以前它和 ReMe 的结论共用一份状态，两件事混成一句。"""
-    text = t("ReMe助手版本：") + VERSION
+    text = t("ReMe 助手版本：") + VERSION
     if not HELPER_UPDATE_STATE.get("checked"):
         return text
     if HELPER_UPDATE_STATE.get("detail"):
@@ -6551,16 +6551,18 @@ def build_menu() -> pystray.Menu:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("ReMe 控制台…"), lambda _icon, _item: show_settings(), default=True),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(menu_text("启动ReMe"), lambda _icon, _item: run_action(start_service),
+        pystray.MenuItem(menu_text("启动 ReMe"), lambda _icon, _item: run_action(start_service),
                          enabled=lambda _item: reme_installed() and not service_is_healthy()),
-        pystray.MenuItem(menu_text("停止ReMe"), lambda _icon, _item: run_action(stop_service), enabled=lambda _item: service_is_healthy()),
-        pystray.MenuItem(menu_text("重启ReMe"), lambda _icon, _item: run_action(restart_service), enabled=lambda _item: service_is_healthy()),
-        pystray.MenuItem(menu_text("打开ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy()),
+        pystray.MenuItem(menu_text("停止 ReMe"), lambda _icon, _item: run_action(stop_service), enabled=lambda _item: service_is_healthy()),
+        pystray.MenuItem(menu_text("重启 ReMe"), lambda _icon, _item: run_action(restart_service), enabled=lambda _item: service_is_healthy()),
+        # default=True：Windows 用 MFS_DEFAULT 状态位渲染**粗体**；pystray 的 Menu.__call__ 取
+        # 第一个 default 项，所以双击托盘图标仍是「ReMe 控制台…」（它必须排在本项之前）。
+        pystray.MenuItem(menu_text("打开 ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy(), default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("ssh 目标"), build_targets_menu()),
-        pystray.MenuItem(menu_text("启动全部ssh 隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
-        pystray.MenuItem(menu_text("停止全部ssh 隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
-        pystray.MenuItem(menu_text("ReMe启动后启动隧道"), toggle_tunnels_on_start, checked=lambda _item: bool(CFG.get("start_tunnels_with_reme"))),
+        pystray.MenuItem(menu_text("启动全部 ssh 隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),
+        pystray.MenuItem(menu_text("停止全部 ssh 隧道"), lambda _icon, _item: run_action(stop_all_tunnels, notify_result=False)),
+        pystray.MenuItem(menu_text("ReMe 启动后启动隧道"), toggle_tunnels_on_start, checked=lambda _item: bool(CFG.get("start_tunnels_with_reme"))),
         pystray.Menu.SEPARATOR,
         # 配置都在控制台里改，托盘不再堆一排「打开本地文件」：常用的 workspace 留一个，
         # 其余（目录 / .env / 官方 default / 当前配置 / 日志 / 说明）收进「打开指引」。
@@ -6572,7 +6574,7 @@ def build_menu() -> pystray.Menu:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("深色模式"), toggle_theme, checked=lambda _item: theme_name() == "dark"),
         pystray.MenuItem(menu_text("English / 中文"), toggle_language),
-        pystray.MenuItem(menu_text("启动工具时启动ReMe"), toggle_start_on_launch, checked=lambda _item: bool(CFG.get("start_on_launch"))),
+        pystray.MenuItem(menu_text("启动工具时启动 ReMe"), toggle_start_on_launch, checked=lambda _item: bool(CFG.get("start_on_launch"))),
         pystray.MenuItem(menu_text("开机自启"), toggle_autostart, checked=lambda _item: autostart.is_autostart_enabled()),
         pystray.MenuItem(menu_text("状态刷新间隔"), build_probe_interval_menu()),
         pystray.Menu.SEPARATOR,

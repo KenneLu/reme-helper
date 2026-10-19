@@ -321,6 +321,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] tray menu - spaced labels + two bold default items ...
+"%PY%" tests\test_tray_menu.py
+if errorlevel 1 (
+  echo [ERROR] Tray menu test failed - Chinese/Latin spacing or the default-item pair broke.
+  echo         "ReMe 控制台..." must stay first; "Open ReMe Studio" is the second bold item.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
 "%PY%" tests\test_quit_failopen.py
 if errorlevel 1 (
