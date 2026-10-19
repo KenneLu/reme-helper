@@ -77,7 +77,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.11"
+VERSION = "1.2.12"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -6555,9 +6555,10 @@ def build_menu() -> pystray.Menu:
                          enabled=lambda _item: reme_installed() and not service_is_healthy()),
         pystray.MenuItem(menu_text("停止 ReMe"), lambda _icon, _item: run_action(stop_service), enabled=lambda _item: service_is_healthy()),
         pystray.MenuItem(menu_text("重启 ReMe"), lambda _icon, _item: run_action(restart_service), enabled=lambda _item: service_is_healthy()),
-        # default=True：Windows 用 MFS_DEFAULT 状态位渲染**粗体**；pystray 的 Menu.__call__ 取
-        # 第一个 default 项，所以双击托盘图标仍是「ReMe 控制台…」（它必须排在本项之前）。
-        pystray.MenuItem(menu_text("打开 ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy(), default=True),
+        # 不加 default=True：Windows 的 InsertMenuItem 只接受**一个** MFS_DEFAULT 项，
+        # 第二个会让菜单创建报 WinError 87（参数错误），右键菜单直接不可用。
+        # 双击默认项仍是「ReMe 控制台…」（它排在所有 default 候选之前）。
+        pystray.MenuItem(menu_text("打开 ReMe Studio"), lambda _icon, _item: webbrowser.open("http://127.0.0.1:2333/"), enabled=lambda _item: service_is_healthy()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(menu_text("ssh 目标"), build_targets_menu()),
         pystray.MenuItem(menu_text("启动全部 ssh 隧道"), lambda _icon, _item: run_action(start_all_tunnels, notify_result=False), enabled=lambda _item: service_is_healthy()),

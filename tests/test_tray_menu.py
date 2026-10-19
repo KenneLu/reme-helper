@@ -57,36 +57,36 @@ check("status row spaced", "ReMe 状态：" in joined)
 check("ReMe version row spaced", "ReMe 版本：" in joined)
 check("helper version row spaced", "ReMe 助手版本：" in joined)
 
-# ---------------- ② 加粗项：恰好两个 default，控制台在前、Studio 在后 ----------------
+# ---------------- ② 默认项：恰好一个（「ReMe 控制台…」） ----------------
+# 曾给「打开 ReMe Studio」也加 default=True 想做双粗体，但 Windows InsertMenuItem 只接受
+# 一个 MFS_DEFAULT 项，第二个会让菜单创建报 WinError 87（参数错误）——已回退。
 zh_defaults = default_items()
-check("zh: exactly two default items", len(zh_defaults) == 2, [item.text for item in zh_defaults])
-check("zh: first default is the console item",
+check("zh: exactly one default item", len(zh_defaults) == 1, [item.text for item in zh_defaults])
+check("zh: the only default item is the console item",
       bool(zh_defaults) and zh_defaults[0].text == "ReMe 控制台…",
       zh_defaults[0].text if zh_defaults else None)
-check("zh: second default is Open ReMe Studio",
-      len(zh_defaults) > 1 and zh_defaults[1].text == "打开 ReMe Studio",
-      zh_defaults[1].text if len(zh_defaults) > 1 else None)
 
 items = menu_items()
-console_index = next((i for i, item in enumerate(items) if item.text == "ReMe 控制台…"), None)
-studio_index = next((i for i, item in enumerate(items) if item.text == "打开 ReMe Studio"), None)
-check("console comes before studio, so double-click still opens the console",
-      console_index is not None and studio_index is not None and console_index < studio_index,
-      (console_index, studio_index))
+studio = next((item for item in items if item.text == "打开 ReMe Studio"), None)
+check("zh: Open ReMe Studio exists but is not a default item",
+      studio is not None and not studio.default,
+      None if studio is None else studio.default)
+check("zh: text assertions did not lose the Studio entry", studio is not None)
 
-# ---------------- ③ English mode keeps the same default order ----------------
+# ---------------- ③ English mode keeps the same single default ----------------
 saved_lang = main.CFG.get("ui_lang")
 main.CFG["ui_lang"] = "en"
 main.i18n_bridge.sync_lang("en")
 try:
     en_defaults = default_items()
-    check("en: exactly two default items", len(en_defaults) == 2, [item.text for item in en_defaults])
-    check("en: first default is the console item",
+    check("en: exactly one default item", len(en_defaults) == 1, [item.text for item in en_defaults])
+    check("en: the only default item is the console item",
           bool(en_defaults) and en_defaults[0].text == "ReMe console…",
           en_defaults[0].text if en_defaults else None)
-    check("en: second default is Open ReMe Studio",
-          len(en_defaults) > 1 and en_defaults[1].text == "Open ReMe Studio",
-          en_defaults[1].text if len(en_defaults) > 1 else None)
+    en_studio = next((item for item in menu_items() if item.text == "Open ReMe Studio"), None)
+    check("en: Open ReMe Studio is not a default item",
+          en_studio is not None and not en_studio.default,
+          None if en_studio is None else en_studio.default)
 finally:
     main.CFG["ui_lang"] = saved_lang if saved_lang is not None else "zh"
     main.i18n_bridge.sync_lang("zh")

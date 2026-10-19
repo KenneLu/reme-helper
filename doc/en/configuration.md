@@ -51,7 +51,7 @@ new service fails, it tries to restore the previous mode.
 - **ReMe console…** (the default item — double-clicking the tray icon opens it); mode switching and fine-tuning live
   there, and the tray no longer offers clickable mode items.
 - Start / stop / restart ReMe.
-- Open ReMe Studio (shown in bold, like the default item), the workspace, and **"Where are the files"** — a small window listing the ReMe folder, workspace,
+- Open ReMe Studio, the workspace, and **"Where are the files"** — a small window listing the ReMe folder, workspace,
   current config, official default config, `.env` (credentials), log folder, console guide, and the setup guide, each
   row with "open" or "copy path".
 - Start / stop all VM tunnels; a "VM targets" submenu adds, edits, deletes, enables and disables targets, and
