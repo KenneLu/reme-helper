@@ -38,7 +38,8 @@ from template.autostart import autostart  # noqa: F402  autostart 开机自启�
 from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.0
 from template.tray_icons import tray_icons
 from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
-from template.log_kit import make_logger  # noqa: F402  log_kit 日志（模板正本 1.0.3：named logger + 闭包；log 为 print 形态/可变参数）
+from template import log_kit as _log_kit  # noqa: F402  log_kit 模块（读 LAST_INIT_ERROR；1.0.5 起初始化失败在模板层静默）
+from template.log_kit import make_logger  # noqa: F402  log_kit 日志（模板正本 1.0.5：named logger + 闭包；log 为 print 形态/可变参数）
 from template.paths import (  # noqa: F402  paths 路径与数据区（模板正本 1.1.4：四区 + _CONFIG/_DATA_DIR env + exe-delete-guard）
     APP_DIR, RUN_DIR, USER_DATA_DIR, LEGACY_CONFIG_PATH, CONFIG_PATH,
     LOG_DIR, LOG_PATH, hold_exe_delete_guard)
@@ -850,6 +851,10 @@ def _noop_open_log_dir():
 
 try:
     log, open_log_dir = make_logger(LOG_DIR)
+    # log_kit 1.0.5 起初始化失败在模板层静默（NullHandler + LAST_INIT_ERROR）；
+    # 工具侧仍要保留「可见的失败信号 + LOG_INIT_ERROR」诊断契约，故把它转成异常走同一兜底。
+    if getattr(_log_kit, "LAST_INIT_ERROR", ""):
+        raise RuntimeError(_log_kit.LAST_INIT_ERROR)
 except Exception as exc:  # noqa: BLE001 - 日志永远不能把主流程弄死
     LOG_INIT_ERROR = exc
     try:
