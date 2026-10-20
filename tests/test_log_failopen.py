@@ -73,6 +73,7 @@ def main() -> int:
             "import main; "
             "print('IMPORT OK'); "
             "main.log('fallback', 'accepts', 3, 'parts'); "
+            "import os as _os; _os.startfile = lambda *a, **k: None; "  # 测试不得打开真实资源管理器（临时目录清理后会弹「位置不可用」）
             "main.open_log_dir(); "
             "print('FALLBACK CALL OK')" % str(SRC)
         )
