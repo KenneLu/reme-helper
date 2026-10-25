@@ -3410,7 +3410,7 @@ def integration_doc_markdown() -> str:
         if fallback.exists():
             path = fallback
     if not path.exists():
-        return t("接入文档缺失：请确认 docs 目录随工具一起分发。")
+        return t("setup_guide_is_missing_make_sure_the_doc_folder")
     body = path.read_text(encoding="utf-8")
     body = body.replace("<REME_PORT>", SERVICE_PORT_TEXT).replace(
         "<REME_WORKSPACE>", str(reme_root() / "workspace"))
@@ -7683,8 +7683,9 @@ def smoke() -> int:
                   (doc_dir / lang / INTEGRATION_DOC_NAME).is_file()
                   and (doc_dir / lang / INTEGRATION_DOC_NAME).stat().st_size > 8000)
             check(f"doc {lang} config", (doc_dir / lang / CONFIG_DOC_NAME).is_file())
+        capture_dir = capture_script_dir()
         for _, name in INTEGRATION_DOC_SCRIPTS:
-            check(f"doc script {name}", (doc_dir / name).is_file())
+            check(f"capture script {name}", (capture_dir / name).is_file())
         doc_text = integration_doc_markdown()
         check("doc text length", len(doc_text) > SETUP_GUIDE_MIN_CHARS)
         check("doc placeholders filled",
