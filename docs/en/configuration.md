@@ -7,7 +7,7 @@ connecting Codex / DSH to ReMe: [setup guide](setup.md).
 This document is the **technical reference** — fields, variable names, constraints, and validation rules. The
 in-app guide ("Where are the files") covers the same ground in operational terms; the two are kept in sync.
 
-> `H:\Tools\ReMe` appears below only as the **default example**. On first run you can choose another folder in the
+> `<ReMe root>` appears below only as the **default example**. On first run you can choose another folder in the
 > settings window, or click **Scan** to detect it.
 
 ## Modes

@@ -385,7 +385,8 @@ rem dropped as well.
   --icon "%CD%\reme-helper-taskbar.ico" ^
   --add-data "%CD%\reme-helper.ico;." ^
   --add-data "%CD%\reme-helper-taskbar.ico;." ^
-  --add-data "%CD%\doc;doc" ^
+  --add-data "%CD%\docs;docs" ^
+  --add-data "%CD%\skills;skills" ^
   --add-data "%CD%\locales;locales" ^
   --add-data "%CD%\resources;resources" ^
   --exclude-module numpy ^
@@ -435,9 +436,10 @@ if not exist "%RELEASE_DIR%\README.zh-CN.md" (
   exit /b 1
 )
 copy /y LICENSE "%RELEASE_DIR%\LICENSE" >nul
-xcopy /e /i /y "doc" "%RELEASE_DIR%\doc" >nul
+xcopy /e /i /y "docs" "%RELEASE_DIR%\docs" >nul
+xcopy /e /i /y "skills" "%RELEASE_DIR%\skills" >nul
 if errorlevel 1 (
-  echo [ERROR] doc copy failed.
+  echo [ERROR] docs copy failed.
   if not defined NOPAUSE pause
   call :drop_data_dir
   exit /b 1
@@ -453,8 +455,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Deliverable checks: exe + integration doc. The app looks in doc first and
-rem then in _internal\doc, so both layouts remain covered.
+rem Deliverable checks: exe + integration doc + capture skills. The app looks in docs first and
+rem then in _internal\docs, so both layouts remain covered.
 if not exist "%FROZEN_EXE%" (
   echo [ERROR] %APPNAME%.exe missing from the release.
   if not defined NOPAUSE pause
@@ -495,19 +497,19 @@ if not exist "%RELEASE_DIR%\_internal\_tcl_data" (
   call :drop_data_dir
   exit /b 1
 )
-if not exist "%RELEASE_DIR%\doc\zh\setup.md" (
+if not exist "%RELEASE_DIR%\docs\zh\setup.md" (
   echo [ERROR] integration doc missing from the release.
   if not defined NOPAUSE pause
   call :drop_data_dir
   exit /b 1
 )
-if not exist "%RELEASE_DIR%\doc\capture.mjs" (
+if not exist "%RELEASE_DIR%\skills\capture\capture.mjs" (
   echo [ERROR] capture script missing from the release.
   if not defined NOPAUSE pause
   call :drop_data_dir
   exit /b 1
 )
-if not exist "%RELEASE_DIR%\doc\capture_cc.mjs" (
+if not exist "%RELEASE_DIR%\skills\capture\capture_cc.mjs" (
   echo [ERROR] Claude Code capture script missing from the release.
   if not defined NOPAUSE pause
   call :drop_data_dir
@@ -519,7 +521,7 @@ if not exist "%RELEASE_DIR%\_internal\reme-helper-taskbar.ico" (
   call :drop_data_dir
   exit /b 1
 )
-if not exist "%RELEASE_DIR%\_internal\doc\en\setup.md" (
+if not exist "%RELEASE_DIR%\_internal\docs\en\setup.md" (
   echo [WARN] doc not found under _internal - the copy next to the exe still works.
 )
 

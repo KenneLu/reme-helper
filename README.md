@@ -104,7 +104,7 @@ log/           the app's own log, rotated at 1 MB with 3 backups
 _backup/       the previous build, kept by an in-place update
 ```
 
-Field-by-field reference: [doc/en/configuration.md](doc/en/configuration.md). Memory data stays in ReMe's
+Field-by-field reference: [docs/en/configuration.md](docs/en/configuration.md). Memory data stays in ReMe's
 workspace — deleting reme-helper never deletes memories. Quitting stops the ReMe process and the SSH tunnels
 it started.
 
@@ -125,7 +125,7 @@ release.bat        :: tag v<version> and push; CI publishes the zip
 ```
 
 `src/` holds the application, `tests/` the test files (19 in all; 17 of them run as build gate sections),
-`scripts/` the build and the release-config generator, and `doc/` the documentation the app reads at runtime.
+`scripts/` the build and the release-config generator, and `docs/` the documentation the app reads at runtime.
 The version lives in `src/main.py` (`VERSION`, currently `1.2.15`) — the single source of truth for the app,
 the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
 [CHANGELOG.md](CHANGELOG.md) for what changed.

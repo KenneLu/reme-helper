@@ -88,7 +88,7 @@ log/           应用自己的日志，1MB 滚动、保留 3 份备份
 _backup/       原地更新时留下的上一个版本
 ```
 
-逐字段的参考见 [doc/zh/configuration.md](doc/zh/configuration.md)。记忆数据仍在 ReMe 的 workspace——删除 reme-helper
+逐字段的参考见 [docs/zh/configuration.md](docs/zh/configuration.md)。记忆数据仍在 ReMe 的 workspace——删除 reme-helper
 不会删除记忆。退出工具会停止由它启动的 ReMe 进程与 SSH 隧道。
 
 ## 故障排查
@@ -106,7 +106,7 @@ build.bat norun    :: 只构建，不启动
 release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 ```
 
-`src/` 是应用源码，`tests/` 是测试脚本（共 19 个测试文件，其中 17 个作为构建门禁节运行），`scripts/` 是构建脚本与发布配置生成器，`doc/` 是应用运行时读取的文档。
+`src/` 是应用源码，`tests/` 是测试脚本（共 19 个测试文件，其中 17 个作为构建门禁节运行），`scripts/` 是构建脚本与发布配置生成器，`docs/` 是应用运行时读取的文档。
 版本号只写在 `src/main.py` 的 `VERSION` 里（当前 `1.2.15`）——应用、发布目录名、git 标签都从它来；**推一个 `v*` 标签就是发布**。
 历次改动见 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -79,7 +79,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.16"
+VERSION = "1.2.17"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -3362,11 +3362,11 @@ def choose_from_list(parent, title: str, options: list[str], prompt: str) -> str
 
 
 SERVICE_PORT_TEXT = "2333"
-# 随包文档的布局：doc/<lang>/setup.md + doc/<lang>/configuration.md，脚本共用 doc/ 下的两份 .mjs。
-# 只有一个 doc/ 目录——仓库里再放一个 docs/ 只会让人分不清「哪份是要发的、哪份是给人看的」。
+# 随包文档的布局：docs/<lang>/setup.md + docs/<lang>/configuration.md。
+# 文档只放文档；capture 脚本属于技能/运行资源，放在 skills/capture/。
 INTEGRATION_DOC_NAME = "setup.md"
 CONFIG_DOC_NAME = "configuration.md"
-# 脚本正文只在 doc/ 里存一份，复制时才按占位符拼进正文，避免两处内容漂移。
+# 脚本正文只在 skills/capture/ 里存一份，复制时才按占位符拼进正文，避免两处内容漂移。
 # 占位符是 ASCII，放在正文里（正文本身中英两份），因此这里不需要任何文案，也就不会与语言版本脱节。
 INTEGRATION_DOC_SCRIPTS: tuple[tuple[str, str], ...] = (
     ("<!--APPENDIX A-->", "capture.mjs"),
@@ -3377,24 +3377,32 @@ SETUP_GUIDE_MIN_CHARS = 20000
 
 
 def doc_file_dir() -> Path:
-    """随工具分发的文档目录（``doc/``）；打包后随 ``_internal`` 一起走。
+    """随工具分发的文档目录（``docs/``）；打包后随 ``_internal`` 一起走。
 
     开发态在仓库根（``APP_DIR``，模板 1.1.2 起四区同一锚点），打包态在 exe 目录。
     """
-    for candidate in (APP_DIR / "doc", APP_DIR / "_internal" / "doc"):
+    for candidate in (APP_DIR / "docs", APP_DIR / "_internal" / "docs"):
         if candidate.is_dir():
             return candidate
-    return APP_DIR / "doc"
+    return APP_DIR / "docs"
+
+def capture_script_dir() -> Path:
+    """capture 脚本目录（``skills/capture``）；不再放在 docs 下。"""
+    for candidate in (APP_DIR / "skills" / "capture", APP_DIR / "_internal" / "skills" / "capture"):
+        if candidate.is_dir():
+            return candidate
+    return APP_DIR / "skills" / "capture"
 
 
 def integration_doc_markdown() -> str:
-    """接入文档正文：按界面语言取 ``doc/<lang>/setup.md``，并把附录脚本按占位符拼进去。
+    """接入文档正文：按界面语言取 ``docs/<lang>/setup.md``，并把附录脚本按占位符拼进去。
 
     端口与 workspace 现场替换成当前配置的值；脚本在文件系统里各保留一份
-    （``doc/capture.mjs``、``doc/capture_cc.mjs``），复制时才拼接，避免两处内容漂移。
+    （``docs/capture.mjs``、``docs/capture_cc.mjs``），复制时才拼接，避免两处内容漂移。
     占位符若没被替换（脚本缺失），也要把它清掉：正文里留一个 HTML 注释对读者毫无意义。
     """
     directory = doc_file_dir()
+    scripts = capture_script_dir()
     lang = "en" if ui_lang() == "en" else "zh"
     path = directory / lang / INTEGRATION_DOC_NAME
     if not path.exists():
@@ -3402,17 +3410,17 @@ def integration_doc_markdown() -> str:
         if fallback.exists():
             path = fallback
     if not path.exists():
-        return t("接入文档缺失：请确认 doc 目录随工具一起分发。")
+        return t("接入文档缺失：请确认 docs 目录随工具一起分发。")
     body = path.read_text(encoding="utf-8")
     body = body.replace("<REME_PORT>", SERVICE_PORT_TEXT).replace(
         "<REME_WORKSPACE>", str(reme_root() / "workspace"))
     for marker, name in INTEGRATION_DOC_SCRIPTS:
-        script = directory / name
+        script = scripts / name
         if script.exists():
             block = "```javascript\n" + script.read_text(encoding="utf-8").rstrip() + "\n```"
         else:
             # 缺脚本时给一句可读的说明，但绝不留下占位符。
-            block = f"_(missing from doc/: {name})_"
+            block = f"_(missing from skills/capture/: {name})_"
         body = body.replace(marker, block)
     return body
 
