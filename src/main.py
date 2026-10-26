@@ -82,7 +82,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.19"
+VERSION = "1.2.20"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -6469,27 +6469,20 @@ def tray_check_reme_update() -> None:
 
 
 def tray_check_helper_update() -> None:
-    """托盘「检查 ReMe 助手更新…」：后台查询，结论用对话框呈现。"""
-    def work() -> None:
-        ok, detail = check_helper_update()
-        if not ok:
-            ui_dialog(t("检查 ReMe 助手更新"), detail,
-                      [(t("复制 ReMe 助手更新步骤（交给 AI 执行）"),
-                        copy_helper_upgrade_prompt_from_tray),
-                       (t("关闭"), None)])
-            return
-        if not HELPER_UPDATE_STATE.get("newer"):
-            ui_dialog(t("检查 ReMe 助手更新"), t("已是最新版本") + f"（{VERSION}）",
-                      [(t("好"), None)])
-            return
-        latest = str(HELPER_UPDATE_STATE.get("latest") or "")
-        ui_dialog(t("检查 ReMe 助手更新"),
-                  t("有新版本 ") + latest + t("（本机 ") + VERSION + t("）。") + "\n\n"
-                  + t("点「立即更新」会自动下载、校验，把当前版本留在 _backup，然后重启。"),
-                  [(t("立即更新"), run_helper_update),
-                   (t("稍后"), None)])
+    """托盘「检查 ReMe 助手更新…」：统一消息模式（模板 update_ui 1.1.0）。
 
-    threading.Thread(target=work, daemon=True).start()
+    点击后立即提示「正在检查更新…」，1 秒后真正查询，再按结果发消息（已是最新 /
+    发现新版本 / 检查失败）。检查是轻动作，不再弹结果对话框。
+    """
+    def check():
+        ok, detail = check_helper_update()
+        return {"newer": bool(HELPER_UPDATE_STATE.get("newer")),
+                "latest": str(HELPER_UPDATE_STATE.get("latest") or ""),
+                "error": "" if ok else detail}
+
+    update_ui.run_check_flow(
+        check, notify, VERSION, lang=i18n.current_lang(),
+        on_result=lambda _result: refresh_tray_menu(force=True))
 
 
 def _helper_update_icon():
