@@ -77,9 +77,11 @@ if not defined VERSION (
   exit /b 1
 )
 set PACKAGE=reme-helper-%VERSION%
-rem The release folder and the zip keep the version, but the exe inside must NOT:
-rem the autostart registry value stores the full path to the exe, so a versioned
-rem name would leave a stale entry behind on every in-place update.
+rem Naming rule (2026-10-26): the EXE name and every folder the app / updater /
+rem user sees are STABLE - no version number anywhere in the path. The version
+rem lives in the exe's PE metadata (--version-file below) and in the release
+rem ASSET name only (the download URL needs it). The versioned release build dir
+rem is an internal build artifact; it is never shipped as a folder layout.
 set APPNAME=reme-helper
 set RELEASE_DIR=release\%PACKAGE%
 set FROZEN_EXE=%RELEASE_DIR%\%APPNAME%.exe
@@ -88,6 +90,9 @@ set STAGING=%BUILD_CACHE%\dist
 set WRK=%BUILD_CACHE%\work
 set SPEC=%BUILD_CACHE%\spec
 set VENV=%BUILD_CACHE%\venv
+rem 必须用绝对路径：PyInstaller 的 --version-file / --add-data 在 --specpath 存在时
+rem 按 spec 目录解析相对路径，否则会被拼成 .cache\spec\.cache\version_info.txt（实测）。
+set VERSION_INFO=%CD%\%BUILD_CACHE%\version_info.txt
 
 echo [VERSION] %VERSION%  release: %RELEASE_DIR%
 
@@ -281,6 +286,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] local OTA acceptance (template ota_test) ...
+rem Template-owned test: package-root resolution + the REAL download_and_prepare()
+rem + REAL rendered bat replacement chain, no network / no real app / no visible
+rem window. It lives in the template so all four tools share one seam test.
+"%PY%" src\template\ota_test\run_local_ota_test.py --app-id reme-helper
+if errorlevel 1 (
+  echo [ERROR] local OTA acceptance test failed - package-root resolution, replacement,
+  echo         backup rotation or cleanup broke. See the test output above.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] ReMe supported-version pin (four states + prompts) ...
 "%PY%" tests\test_reme_version_pin.py
 if errorlevel 1 (
@@ -374,6 +392,16 @@ if errorlevel 1 (
 
 rem the i18n locale tables (locales/zh.json + en.json) must ship inside
 rem the package - frozen i18n loads them from _internal\locales\.
+echo [BUILD] version metadata (PE FileVersion/ProductVersion) ...
+rem The version is IN THE EXE'S FILE PROPERTIES, not in its name / folder name.
+"%PY%" src\template\build_release\version_file.py "%VERSION_INFO%" %VERSION% %APPNAME% KenneLu
+if errorlevel 1 (
+  echo [ERROR] version metadata generation failed.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [BUILD] PyInstaller onedir noconsole ...
 rem onedir (not onefile) keeps tray startup instant: onefile unpacks the whole
 rem runtime into %TEMP% on every launch.
@@ -382,6 +410,7 @@ rem about 34MB (package was ~70.7MB, becomes ~34.5MB). stdlib test/debug modules
 rem dropped as well.
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
   --name %APPNAME% ^
+  --version-file "%VERSION_INFO%" ^
   --icon "%CD%\reme-helper-taskbar.ico" ^
   --add-data "%CD%\reme-helper.ico;." ^
   --add-data "%CD%\reme-helper-taskbar.ico;." ^

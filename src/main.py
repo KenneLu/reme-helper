@@ -35,7 +35,7 @@ from app_params import SUPPORTED_REME_VERSION   # noqa: F402
 from template.i18n import i18n   # noqa: F402  i18n 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语言态同步
 from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
-from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.0
+from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.1
 from template.tray_icons import tray_icons
 from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
 from template import log_kit as _log_kit  # noqa: F402  log_kit 模块（读 LAST_INIT_ERROR；1.0.5 起初始化失败在模板层静默）
@@ -75,11 +75,13 @@ from PIL import Image, ImageDraw, ImageFont
 #     属许可的形态分叉，保留；appconfig 是参数文件（设计豁免）。
 #   autostart 已于 （2026-09-27）接入模板 1.2.0（键名参数化 AUTOSTART_KEY=APP_ID，
 #     migrate_autostart 自愈，config 镜像删除——doctor 直查注册表）；
-#   update_helper 已于 （2026-09-28）接线模板 1.5.0（marker 语义基准在模板 E 组；
-#     reme 保留：立即拉起交互、对话框文案 t()、无头入口、_rmtree_verified 失败清理）；
+#   update_helper 已于 （2026-09-28）接线模板 1.5.0；2026-10-26 随模板 1.5.1 修复
+#     包根解析（按内容判定，目录名/版本号不作判据）并确立命名规则：安装目录、exe、
+#     zip 内层都不带版本号，版本进 exe 的 PE 元数据（1.5.0 把资产名当解压目录名，
+#     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.17"
+VERSION = "1.2.18"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -7496,7 +7498,7 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
         return _fail(t("下载/校验更新包失败：") + str(exc))
     if not update_helper.launch_pending_cmd(log=log):
         return _fail(t("启动更新程序失败"))
-    log(f"update staged via template 1.5.0 -> {APP_DIR} (tag v{latest})")
+    log(f"update staged via template 1.5.1 -> {APP_DIR} (tag v{latest})")
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
 
 

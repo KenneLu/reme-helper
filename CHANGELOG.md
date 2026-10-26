@@ -3,6 +3,14 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `docs/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
+## 1.2.18
+- **修复在线更新（模板 update_helper 1.5.0 → 1.5.1）+ 确立命名规则：路径不携带版本号**（2026-10-26）：
+  - **故障**：1.2.16→1.2.17 的托盘自动更新实测失败——`download_and_prepare()` 把发布资产名（`reme-helper-1.2.17-windows-x64`）当成解压后目录名，而 zip 内层目录是 `reme-helper-1.2.17`；找不到后落入「扁平 zip」兜底，把 `update-staging` 根（里面还放着 zip 与 `.sha256`）当成包根，替换脚本的源前置校验因此 `STAGE INVALID`（安装目录分毫未动——失败是安全的，但更新永远装不上）。
+  - **修法**：`resolve_staged_dir()` 改为按**内容**解析包根——扁平 exe，或「恰好一个直接含 exe 的顶层目录」，目录名/版本号不作判据；0 个或多个候选即 fail-closed。`exe_name=` 同时透传到替换脚本渲染层。
+  - **命名规则（用户定）**：安装目录、exe 文件名、zip 内层目录**都不携带版本号**；版本只进 exe 的 PE 文件属性（FileVersion/ProductVersion）与发布资产名（下载 URL 需要）。`build.bat` 用模板 `version_file.py` + `PyInstaller --version-file` 写入；`release.yml` 把 zip 内层固定为 `reme-helper/`，并加 **OTA 布局门禁**（发布前断言顶层唯一 == `reme-helper`、含 exe、PE FileVersion == 版本），不符则构建失败、不发 Release。
+  - **本地 OTA 验收（模板自带，不跟 reme-helper 走）**：新增 `src/template/ota_test/run_local_ota_test.py`，无网络/无真应用/无可见窗口地跑完「包根解析 + 真 `download_and_prepare()` + 真渲染 bat」的完整替换链（快照/铺设/重启/备份轮转/收尾）；已挂进 `build.bat` 与 CI。
+  - **边界（如实记录）**：缺陷在旧版更新器里，新版代码替旧版修不了——1.2.16 及更早版本必须**手动替换一次**，1.2.18 之后自动更新才恢复。
+
 ## 1.2.17
 - Template pointer upgraded to diy-tool-kit v1.0.0; docs/capture migration included.
 

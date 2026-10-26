@@ -70,16 +70,44 @@ jobs:
         shell: pwsh
         run: |
           $pkg = "${{ steps.version.outputs.package }}"
+          $version = "${{ steps.version.outputs.version }}"
           $dir = "release/$pkg"
-          # The folder and the zip keep the version; the exe inside does not (
-          # the autostart registry value stores the full path to the exe, so a
-          # versioned name would strand it on every in-place update).
+          $appId = "reme-helper"
           if (-not (Test-Path "$dir/reme-helper.exe")) { throw "build produced no exe in $dir" }
-          # keep the version directory layer inside the zip - the template
-          # update_helper expects <APP_ID>-<ver>/ as the primary layout; the flat
-          # fallback would lay the zip+sha256 (~50MB) straight into the install dir.
-          Compress-Archive -Path "$dir" -DestinationPath "release/$pkg-windows-x64.zip"
-          Get-FileHash "release/$pkg-windows-x64.zip" -Algorithm SHA256 |
+          # Naming rule (2026-10-26): NO version in any path the app / updater / user
+          # resolves. The exe keeps its stable name and the zip's inner folder is the
+          # stable APP_ID. The version lives in the exe's PE metadata (build.bat's
+          # --version-file) and in the release ASSET name only (download URL).
+          $stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) "reme-ota-stage-$pkg"
+          $stage = Join-Path $stageRoot $appId
+          if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -Path "$dir/*" -Destination $stage -Recurse -Force
+          $zip = "release/$pkg-windows-x64.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip
+          Remove-Item $stageRoot -Recurse -Force
+          # OTA layout gate: the updater resolves the package root by CONTENT (the unique
+          # top-level folder holding the exe). Assert the contract on the REAL artifact:
+          # exactly one top-level folder == stable APP_ID (no version suffix), exe present.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          try {
+            $tops = @($archive.Entries | ForEach-Object { ($_.FullName -split '/')[0] } | Sort-Object -Unique)
+            if ($tops.Count -ne 1 -or $tops[0] -ne $appId) {
+              throw "OTA layout gate: zip top-level = [$($tops -join ', ')], expected [$appId] (stable, no version)"
+            }
+            if (-not ($archive.Entries | Where-Object { $_.FullName -eq "$appId/reme-helper.exe" })) {
+              throw "OTA layout gate: $appId/reme-helper.exe missing from zip"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          # The version must be discoverable WITHOUT reading folder/exe names.
+          $fv = (Get-Item "$dir/reme-helper.exe").VersionInfo.FileVersion
+          if (-not $fv -or -not $fv.StartsWith($version)) {
+            throw "PE version gate: FileVersion='$fv', expected '$version' (embed it via --version-file)"
+          }
+          Get-FileHash $zip -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $pkg-windows-x64.zip" } |
             Set-Content "release/$pkg-windows-x64.zip.sha256"
           Get-ChildItem release | Format-Table Name, Length

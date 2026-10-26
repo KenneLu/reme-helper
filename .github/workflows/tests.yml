@@ -67,6 +67,11 @@ jobs:
       - name: Update chain (real rendered bat)
         run: python tests/test_update_bat.py
 
+      # 1.2.18: template-owned local OTA acceptance - package-root resolution plus the
+      # REAL download_and_prepare() + rendered bat replacement chain (no network, no app).
+      - name: Local OTA acceptance (template ota_test)
+        run: python src/template/ota_test/run_local_ota_test.py --app-id reme-helper
+
       # 0.4.1.13 job-table adaptation: is_servable(enable_serve:false), the
       # proactive -> proactive_read rename and the new list_tags candidate.
       - name: Expose job table (0.4.1.13 adaptation)
