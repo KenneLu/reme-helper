@@ -82,7 +82,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.20"
+VERSION = "1.2.21"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -6475,7 +6475,7 @@ def tray_check_helper_update() -> None:
     发现新版本 / 检查失败）。检查是轻动作，不再弹结果对话框。
     """
     def check():
-        ok, detail = check_helper_update()
+        ok, detail = check_helper_update(force=True)
         return {"newer": bool(HELPER_UPDATE_STATE.get("newer")),
                 "latest": str(HELPER_UPDATE_STATE.get("latest") or ""),
                 "error": "" if ok else detail}
@@ -6518,7 +6518,7 @@ def run_helper_update() -> None:
     """
     latest = HELPER_UPDATE_STATE.get("latest")
     if not HELPER_UPDATE_STATE.get("newer") or not latest:
-        ok, detail = check_helper_update()
+        ok, detail = check_helper_update(force=True)
         if not ok or not HELPER_UPDATE_STATE.get("newer"):
             notify(detail or t("已是最新版本"))
             return
@@ -7439,14 +7439,14 @@ def http_error_hint(exc: Exception) -> str:
     return ""
 
 
-def check_helper_update() -> tuple[bool, str]:
+def check_helper_update(force: bool = False) -> tuple[bool, str]:
     """托盘「检查 ReMe 助手更新」：**只查、只提示**，绝不自动替换。
 
-    刻意与 ReMe 的检查保持同一种交互（只提示、不升级）：升级会动配置与配套工具，
-    该由用户决定什么时候做。后段起查询/节流走模板 update_helper.check_update
-    （24h 进程内节流白得）；对话框文案与 HELPER_UPDATE_STATE 是工具侧扩展。
+    ``force=True``：用户主动点了「检查更新」，必须无视 24h 节流真查一次——否则启动时
+    缓存的“当时最新”会让运行期间新发布的版本永远查不到（1.2.19 实测：1.2.20 发了仍显示
+    已是最新）。启动自动检查保持 force=False（省 GitHub 匿名配额）。
     """
-    result = update_helper.check_update(VERSION)
+    result = update_helper.check_update(VERSION, force=force)
     if result["error"]:
         HELPER_UPDATE_STATE.update(checked=True, latest="", newer=False, detail=result["error"])
         return False, t("检查更新失败：") + result["error"]
@@ -8324,7 +8324,7 @@ def main() -> int:
     # 没有它，自更新只能在源码态验证——而这台机器上合成输入完全不落地（同 --quit 的理由），
     # 菜单点不了；更要紧的是**发出去的那个 exe 才是要验的对象**，源码态验不到它。
     if "--check-helper-update" in sys.argv:
-        ok, detail = check_helper_update()
+        ok, detail = check_helper_update(force=True)
         print(detail)
         return 0 if ok else 1
     if "--helper-update" in sys.argv:
