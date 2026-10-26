@@ -35,7 +35,8 @@ from app_params import SUPPORTED_REME_VERSION   # noqa: F402
 from template.i18n import i18n   # noqa: F402  i18n 轻形态（locales/*.json；R 垫层见 i18n_bridge）
 import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语言态同步
 from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
-from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.1
+from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.3
+from template import update_ui  # noqa: F402  统一更新弹窗（进度/立即更新/稍后更新）
 from template.tray_icons import tray_icons
 from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
 from template import log_kit as _log_kit  # noqa: F402  log_kit 模块（读 LAST_INIT_ERROR；1.0.5 起初始化失败在模板层静默）
@@ -81,7 +82,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.18"
+VERSION = "1.2.19"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -6491,31 +6492,71 @@ def tray_check_helper_update() -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
-def run_helper_update() -> None:
-    """下载 → 校验 → 交给独立进程替换，然后本进程退出。结论全程走对话框。"""
-    left = {"done": False}
+def _helper_update_icon():
+    """统一更新弹窗的标题栏图标（各工具自己的 app 图标）。"""
+    for base in (Path(getattr(sys, "_MEIPASS", str(APP_DIR))), Path(str(APP_DIR))):
+        candidate = base / "resources" / "icons" / "default" / "48.png"
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
-    def leave() -> None:
-        if left["done"]:
+
+_UPDATE_LAUNCHED = {"value": False}
+
+
+def _launch_pending_update_once() -> bool:
+    """「立即更新」与「稍后更新→退出」共用的拉起点；保证只拉起一次。"""
+    if _UPDATE_LAUNCHED["value"]:
+        return True
+    if not update_helper.pending_cmd():
+        return False
+    ok = update_helper.launch_pending_cmd(log=log)
+    if ok:
+        _UPDATE_LAUNCHED["value"] = True
+        log("helper update: replacement script launched")
+    return ok
+
+
+def run_helper_update() -> None:
+    """托盘/设置页「下载并更新」：统一 update_ui 弹窗（进度 → 已完成 → 立即/稍后）。
+
+    1.19：替换旧的「下载后自己弹结果框」与「立即自动替换」两种 reme 私有形态；
+    文案与按钮全部来自模板 update_ui（四个工具同构）。
+    """
+    latest = HELPER_UPDATE_STATE.get("latest")
+    if not HELPER_UPDATE_STATE.get("newer") or not latest:
+        ok, detail = check_helper_update()
+        if not ok or not HELPER_UPDATE_STATE.get("newer"):
+            notify(detail or t("已是最新版本"))
             return
-        left["done"] = True
-        if TRAY_ICON is not None:
-            # 零中断更新：helper 换装期间 ReMe 与隧道保持运行，重启后自动重新接入
-            shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
+        latest = HELPER_UPDATE_STATE.get("latest")
 
     def work() -> None:
-        ok, detail = download_and_apply_helper_update()
-        if not ok:
-            ui_dialog(t("更新 ReMe 助手"), detail,
-                      [(t("复制 ReMe 助手更新步骤（交给 AI 执行）"),
-                        copy_helper_upgrade_prompt_from_tray),
-                       (t("关闭"), None)])
+        def download(progress):
+            update_helper.download_and_prepare(
+                latest, str(APP_DIR), str(HELPER_UPDATE_STAGING), log=log,
+                backup_dir=str(HELPER_UPDATE_BACKUP), progress=progress)
+            return update_helper.pending_cmd()
+
+        try:
+            decision = ui_call(lambda: update_ui.run_download_dialog(
+                download, lang=i18n.current_lang(), app_name=t(APP_NAME), log=log,
+                parent=ui_parent(), icon=_helper_update_icon()))
+        except Exception as exc:  # noqa: BLE001
+            log(f"helper update dialog failed: {exc}")
+            notify(t("下载/校验更新包失败：") + str(exc))
             return
-        ui_dialog(t("更新 ReMe 助手"),
-                  detail + "\n\n" + t("替换完成后新版本会自己启动；点「立即重启」马上开始。"),
-                  [(t("立即重启"), leave)])
-        # 没人点也要走：更新器正等着这个进程退出才能替换文件。
-        threading.Timer(30.0, leave).start()
+        if decision == "apply":
+            if not _launch_pending_update_once():
+                notify(t("启动更新程序失败"))
+                return
+            log("helper update: user chose apply; shutting down to replace files")
+            if TRAY_ICON is not None:
+                # 零中断更新：helper 换装期间 ReMe 与隧道保持运行，重启后自动重新接入
+                shutdown_tray(TRAY_ICON, stop_reme=False, stop_tunnels=False)
+            return
+        if decision == "later":
+            log("helper update: user chose later; applies when the tray exits")
 
     threading.Thread(target=work, daemon=True).start()
 
@@ -7176,6 +7217,8 @@ def shutdown_tray(icon, *, claimed: bool = False, stop_reme: bool | None = None,
     failsafe.daemon = True
     failsafe.start()
     log("shutdown: started; failsafe armed")
+    # 「稍后更新」路径：包已暂存但脚本还没拉起；退出收尾必须补拉，否则更新永远不落地。
+    _launch_pending_update_once()
 
     # Claiming shutdown prevents new run_action workers. STOP_EVENT asks a start already inside the
     # lock to abandon its health/tunnel wait. Taking the same lock then gives cleanup a stable final
@@ -7496,7 +7539,7 @@ def download_and_apply_helper_update() -> tuple[bool, str]:
             backup_dir=str(HELPER_UPDATE_BACKUP))
     except Exception as exc:  # noqa: BLE001
         return _fail(t("下载/校验更新包失败：") + str(exc))
-    if not update_helper.launch_pending_cmd(log=log):
+    if not _launch_pending_update_once():
         return _fail(t("启动更新程序失败"))
     log(f"update staged via template 1.5.1 -> {APP_DIR} (tag v{latest})")
     return True, t("更新已开始，本窗口会关闭；新版本会自己起来")
