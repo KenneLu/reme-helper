@@ -1493,7 +1493,9 @@ def reme_install_prompt(root_hint: str = DEFAULT_REME_ROOT) -> str:
         f"python -m venv \"{root_hint}\\venv\"\n"
         f"2) 安装：\"{root_hint}\\venv\\Scripts\\python.exe\" -m pip install -U \"{reme_pip_spec()}\""
         + t("（版本必须锁死，不要装更高版本、也不要写 latest；上游更新了也先别动）") + "\n"
-        f"3) 启动服务：\"{root_hint}\\venv\\Scripts\\reme.exe\" start service.backend=http"
+        f"3) 启动服务：先 cd 到安装目录再启动（0.4.2.1 会从 cwd 向上找 .env，在其它目录启动会报 "
+        "Config references undefined env var）："
+        f"cd \"{root_hint}\"；\"{root_hint}\\venv\\Scripts\\reme.exe\" start service.backend=http"
         "（默认 http://127.0.0.1:2333/，Studio 也在同一个地址）\n"
         f"4) 验证：请求 http://127.0.0.1:2333/health_check 应返回正常；浏览器打开 "
         "http://127.0.0.1:2333/ 能看到工作区界面\n"
@@ -1560,7 +1562,8 @@ def reme_upgrade_prompt(current: str = "", latest: str = "", root_hint: str = ""
         f"3. {t('用同一个 extra 升级到锁定版本：')}\"{root}\\venv\\Scripts\\python.exe\" -m pip install -U \"{reme_pip_spec()}\"",
         t("必须带 ==版本号：不带的话 pip 会去拿最新的，那正是本提示词要避免的事。"),
         t("4. 打开 ReMe 助手设置页，逐项核对后点「验证并保存」，重新生成配置。"),
-        t("5. 起服务验证：health_check、Studio 页面、reme version；"
+        t("5. 起服务验证：先 cd 到安装目录再启动（0.4.2.1 会从 cwd 向上找 .env，在其它目录启动会报 "
+          "Config references undefined env var），再验证 health_check、Studio 页面、reme version；"
           "再用助手跑一次「测试连接」确认 LLM / Embedding 仍可用。"),
         t("6. 回报新版本号，以及第 2 项里预判的差异是否属实。"),
         "",

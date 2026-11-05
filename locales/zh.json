@@ -234,6 +234,8 @@
  "search_by_node_a_consolidated_long_term_memory_u": "按节点（沉淀后的长期记忆单元）检索，比全文检索更聚焦。",
  "export_a_snapshot_of_the_link_graph_to_see_how_m": "导出关系图快照，用于整体查看记忆之间的连接。",
  "list_every_daily_card": "列出 daily 卡片（默认今天；可选日期范围与分页）。",
+ "_3_start_the_service_cd_into_the_install_dir_first_be": "\n3) 启动服务：先 cd 到安装目录再启动（0.4.2.1 会从 cwd 向上找 .env，在其它目录启动会报 Config references undefined env var）：cd \"",
+ "_5_start_the_service_and_verify_cd_into_the_install_di": "5. 起服务验证：先 cd 到安装目录再启动（0.4.2.1 会从 cwd 向上找 .env，在其它目录启动会报 Config references undefined env var），再验证 health_check、Studio 页面、reme version；再用助手跑一次「测试连接」确认 LLM / Embedding 仍可用。",
  "distill_a_conversation_into_memory_cards_the_dsh": "把一段对话提炼成记忆卡片。DSH 插件的后台工具会调它。",
  "distill_memory_from_a_claude_code_session_worthl": "从 Claude Code 会话提炼记忆。不用 Claude Code 时没有价值。",
  "consolidate_today_s_dailies_into_long_term_memor": "立刻把 daily 整理沉淀成长期记忆，相当于手动触发一次「做梦」。",

@@ -234,6 +234,8 @@
  "search_by_node_a_consolidated_long_term_memory_u": "Search by node (a consolidated long-term memory unit); more focused than full-text search.",
  "export_a_snapshot_of_the_link_graph_to_see_how_m": "Export a snapshot of the link graph, to see how memories connect.",
  "list_every_daily_card": "List daily cards (defaults to today; optional date range and pagination).",
+ "_3_start_the_service_cd_into_the_install_dir_first_be": "\n3) Start the service: cd into the install directory first (0.4.2.1 discovers .env upward from the cwd; starting elsewhere fails with Config references undefined env var): cd \"",
+ "_5_start_the_service_and_verify_cd_into_the_install_di": "5. Start the service and verify: cd into the install directory first (0.4.2.1 discovers .env upward from the cwd; starting elsewhere fails with Config references undefined env var), then verify health_check, the Studio page, and reme version; then run the helper's \"Test connection\" once to confirm LLM / Embedding still work.",
  "distill_a_conversation_into_memory_cards_the_dsh": "Distill a conversation into memory cards. The DSH plugin's background tool calls it.",
  "distill_memory_from_a_claude_code_session_worthl": "Distill memory from a Claude Code session. Worthless if you do not use Claude Code.",
  "consolidate_today_s_dailies_into_long_term_memor": "Consolidate today's dailies into long-term memory now - a manual \"dream\".",
