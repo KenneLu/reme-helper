@@ -82,7 +82,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.21"
+VERSION = "1.2.22"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
