@@ -2720,7 +2720,7 @@ def console_widgets(include_aux: bool = True) -> list[dict]:
                 pass
         return out
 
-    return ui_call(collect)
+    return ui_call(collect, timeout=20.0)
 
 
 def console_texts() -> list[tuple[str, str]]:
@@ -2766,7 +2766,7 @@ def console_texts() -> list[tuple[str, str]]:
                 pass
         return out
 
-    return ui_call(collect)
+    return ui_call(collect, timeout=20.0)
 
 
 def ui_parent():
@@ -7346,7 +7346,7 @@ def quit_app(icon, _item) -> None:
     stop_tunnels = bool(CFG.get("quit_stop_tunnels", False))
     confirmed = True
     try:
-        confirmed, stop_reme, stop_tunnels = ui_call(QUIT_CONFIRM)
+        confirmed, stop_reme, stop_tunnels = ui_call(QUIT_CONFIRM, timeout=60.0)
     except Exception as exc:
         # 降级链（G4.1 条款 4 × G4.2 条款 5 互补，禁止跳过确认）：
         # 富对话框失败 → 原生确认框（清理按持久化配置）→ 原生也失败（无 UI 的纯托盘
@@ -7357,7 +7357,7 @@ def quit_app(icon, _item) -> None:
                 APP_NAME,
                 "确定退出 ReMe 助手？清理选项按配置（退出后可在配置中修改）。",
                 parent=ui_parent(),
-            )))
+            ), timeout=60.0))
         except Exception as exc2:
             log(f"native confirm failed ({type(exc2).__name__}: {exc2}); "
                 f"proceeding without confirmation (services untouched by default)")

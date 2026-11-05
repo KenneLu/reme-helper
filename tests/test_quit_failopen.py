@@ -60,7 +60,7 @@ def _run(rich, native):
     CALLS["notify"].clear()
     CALLS["log"].clear()
     main.SHUTDOWN_STARTED.clear()
-    main.ui_call = lambda work, timeout=20.0: work()
+    main.ui_call = lambda work, timeout=None: work()
     main.QUIT_CONFIRM = rich
     main.messagebox.askyesno = native
     main.quit_app(object(), None)

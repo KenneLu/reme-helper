@@ -705,7 +705,7 @@ main.SHUTDOWN_STARTED.clear()
 _saved_ui_call = main.ui_call
 _saved_save_config = main.save_config
 main.save_config = lambda: None          # 测试不得写真配置
-main.ui_call = lambda work, timeout=20.0: (True, False, False)   # 用户确认退出、不清理
+main.ui_call = lambda work, timeout=None: (True, False, False)   # 用户确认退出、不清理
 
 
 def _record_shutdown(icon, *, claimed=False, stop_reme=None, stop_tunnels=None):
@@ -725,7 +725,7 @@ assert _shutdown_args == [(_quit_icon, True, False, False)], _shutdown_args
 main.SHUTDOWN_STARTED.clear()
 _shutdown_args.clear()
 _shutdown_called.clear()
-main.ui_call = lambda work, timeout=20.0: (False, False, False)
+main.ui_call = lambda work, timeout=None: (False, False, False)
 main.quit_app(_quit_icon, None)
 assert not _shutdown_called.wait(0.3), "取消确认后不得进入清理"
 assert _shutdown_args == [], _shutdown_args
@@ -733,7 +733,7 @@ assert _shutdown_args == [], _shutdown_args
 # 18c) 确认框本身失败（无显示环境等）→ 宁可放行也不锁死退出通道。
 main.SHUTDOWN_STARTED.clear()
 _shutdown_args.clear()
-main.ui_call = lambda work, timeout=20.0: (_ for _ in ()).throw(TimeoutError("no ui"))
+main.ui_call = lambda work, timeout=None: (_ for _ in ()).throw(TimeoutError("no ui"))
 main.quit_app(_quit_icon, None)
 assert _shutdown_called.wait(1.0), "弹窗失败时应放行退出"
 assert _shutdown_args == [(_quit_icon, True, False, False)], _shutdown_args
@@ -741,7 +741,7 @@ assert _shutdown_args == [(_quit_icon, True, False, False)], _shutdown_args
 # 18d) 勾选“顺便关闭”→ 开关透传给 shutdown_tray（G4.2：清理只限自己启动的实例）。
 main.SHUTDOWN_STARTED.clear()
 _shutdown_args.clear()
-main.ui_call = lambda work, timeout=20.0: (True, True, True)
+main.ui_call = lambda work, timeout=None: (True, True, True)
 main.quit_app(_quit_icon, None)
 assert _shutdown_called.wait(1.0), "勾选清理后应进入清理"
 assert _shutdown_args == [(_quit_icon, True, True, True)], _shutdown_args
