@@ -319,6 +319,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [TEST] ui_call timeout contract (download dialog unbounded, non-user calls bounded) ...
+"%PY%" tests\test_ui_call.py
+if errorlevel 1 (
+  echo [ERROR] ui_call timeout test failed - the download dialog must stay unbounded
+  echo         (default timeout=None) while console_*/quit calls pass an explicit timeout.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
+
 echo [TEST] log init fail-open - a blocked log path must never block startup ...
 "%PY%" tests\test_log_failopen.py
 if errorlevel 1 (

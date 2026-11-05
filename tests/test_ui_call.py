@@ -11,11 +11,14 @@
   ② 下载对话框的 ``ui_call(...)`` **不含** ``timeout=``（用户节拍，不该被限）；
   ③ 非用户节拍的调用（``console_widgets`` / ``console_texts`` / 退出确认）
      **显式**传了超时，以防 UI 线程真死时门禁/退出 fail-open 永久挂死。
+
+实现用 AST 按函数体切片，避免「同名调用点」互相满足（红队复审 R2），
+并用括号配平提取 ``ui_call(...)`` 实参区间，避免非贪婪正则的捕获逃逸（R1）。
 """
 from __future__ import annotations
 
+import ast
 import inspect
-import re
 import sys
 from pathlib import Path
 
@@ -33,6 +36,17 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 SRC = (Path(__file__).resolve().parents[1] / "src" / "main.py").read_text(encoding="utf-8")
+TREE = ast.parse(SRC)
+
+
+def call_args_segment(call: ast.Call) -> str:
+    """调用的完整实参源码（含嵌套括号），用 AST 的 end 位置截取。"""
+    return ast.get_source_segment(SRC, call) or ""
+
+
+def has_timeout_kw(call: ast.Call) -> bool:
+    return any(kw.arg == "timeout" for kw in call.keywords)
+
 
 # ---------- ① 默认超时为 None ----------
 sig = inspect.signature(main.ui_call)
@@ -42,23 +56,45 @@ if param is not None:
     check("ui_call default timeout is None (no fixed business timeout)",
           param.default is None, repr(param.default))
 
-# ---------- ② 下载对话框走默认（不含 timeout=） ----------
-match = re.search(r"ui_call\(lambda:\s*update_ui\.run_download_dialog\((.*?)\)\)",
-                  SRC, re.S)
-check("download dialog is invoked through ui_call",
-      match is not None, "" if match else "ui_call(...run_download_dialog...) not found")
-if match is not None:
-    check("download dialog ui_call carries NO timeout= (user-paced)",
-          "timeout=" not in match.group(1), match.group()[:80])
+# ---------- 收集全部 ui_call 调用，按所在线程/函数分类 ----------
+ui_calls = [n for n in ast.walk(TREE)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "ui_call"]
+check("source has ui_call call sites", len(ui_calls) >= 5, len(ui_calls))
 
-# ---------- ③ 非用户节拍的调用显式传超时 ----------
-check("console_widgets passes an explicit timeout",
-      "ui_call(collect, timeout=" in SRC)
-check("quit confirm passes an explicit timeout",
-      "ui_call(QUIT_CONFIRM, timeout=" in SRC)
-native_match = re.search(r"ui_call\(lambda: messagebox\.askyesno\(.*?\), timeout=", SRC, re.S)
-check("native confirm fallback passes an explicit timeout",
-      native_match is not None, "" if native_match else "pattern not found")
+# 找到每个调用所属的最近函数定义
+def enclosing_function(node: ast.AST) -> str:
+    # ast.walk 不给出父指针，这里用位置区间匹配
+    best = ""
+    best_span = None
+    for fn in ast.walk(TREE):
+        if isinstance(fn, ast.FunctionDef):
+            span = (fn.lineno, fn.end_lineno or fn.lineno)
+            if span[0] <= node.lineno <= span[1]:
+                if best_span is None or (span[1] - span[0]) < (best_span[1] - best_span[0]):
+                    best = fn.name
+                    best_span = span
+    return best
+
+
+download_calls = [c for c in ui_calls if "run_download_dialog" in call_args_segment(c)]
+check("download dialog call site found", len(download_calls) == 1, len(download_calls))
+for call in download_calls:
+    check("download dialog ui_call carries NO timeout= (user-paced)",
+          not has_timeout_kw(call), call_args_segment(call)[:80])
+
+# ---------- ③ 非用户节拍的调用显式传超时（按函数体切片，R2） ----------
+for fname in ("console_widgets", "console_texts"):
+    fn_calls = [c for c in ui_calls if enclosing_function(c) == fname]
+    check(f"{fname} has exactly one ui_call", len(fn_calls) == 1, len(fn_calls))
+    for call in fn_calls:
+        check(f"{fname} ui_call passes explicit timeout=",
+              has_timeout_kw(call), call_args_segment(call)[:80])
+
+quit_calls = [c for c in ui_calls if enclosing_function(c) == "quit_app"]
+check("quit_app has two ui_call sites (rich + native)", len(quit_calls) == 2, len(quit_calls))
+for call in quit_calls:
+    check("quit_app ui_call passes explicit timeout=",
+          has_timeout_kw(call), call_args_segment(call)[:80])
 
 print("UI CALL TIMEOUT TEST " + ("FAILED: " + ", ".join(FAILS) if FAILS else "OK"), flush=True)
 sys.exit(1 if FAILS else 0)

@@ -77,6 +77,12 @@ jobs:
       - name: Expose job table (0.4.2.1 adaptation)
         run: python tests/test_expose_jobs.py
 
+      # ui_call timeout contract: the modal download dialog must stay unbounded
+      # (default timeout=None); non-user-paced calls (console_*/quit) must pass an
+      # explicit timeout so build gates / quit fail-open cannot hang forever.
+      - name: ui_call timeout contract
+        run: python tests/test_ui_call.py
+
       # Startup hotfix: a blocked/locked log path must not crash module import.
       - name: Log init fail-open
         run: python tests/test_log_failopen.py
