@@ -153,7 +153,7 @@ was released on 2026-10-27 and has been evaluated: its job table is identical to
 EXPOSE whitelist logic carries over unchanged. 0.4.2.2 is unreleased and not followed.
 `VERSION` is `1.2.22`; the frozen
 `1.2.22` build has been produced and installed, and the build runs 18 gate sections drawn from the
-19 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
+20 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
 instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
 ## License

@@ -56,12 +56,7 @@ if param is not None:
     check("ui_call default timeout is None (no fixed business timeout)",
           param.default is None, repr(param.default))
 
-# ---------- 收集全部 ui_call 调用，按所在线程/函数分类 ----------
-ui_calls = [n for n in ast.walk(TREE)
-            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "ui_call"]
-check("source has ui_call call sites", len(ui_calls) >= 5, len(ui_calls))
-
-# 找到每个调用所属的最近函数定义
+# ---------- 找到每个调用所属的最近函数定义 ----------
 def enclosing_function(node: ast.AST) -> str:
     # ast.walk 不给出父指针，这里用位置区间匹配
     best = ""
@@ -76,11 +71,25 @@ def enclosing_function(node: ast.AST) -> str:
     return best
 
 
+# ---------- 收集全部 ui_call 调用，按所在线程/函数分类 ----------
+ui_calls = [n for n in ast.walk(TREE)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "ui_call"]
+# 精确计数 + 白名单：防止新增调用点逃逸（红队 N3），也防止已知站点被删。
+# run_helper_update 的 ui_call 位于其内部 ``work()`` 中，故白名单含 "work"。
+ALLOWED_ENCLOSING = {"console_widgets", "console_texts", "quit_app", "work"}
+check("ui_call call site count is exactly 5", len(ui_calls) == 5, len(ui_calls))
+_actual_enclosing = {enclosing_function(c) for c in ui_calls}
+check("ui_call call sites are within the known whitelist",
+      _actual_enclosing <= ALLOWED_ENCLOSING, sorted(_actual_enclosing))
+
+
 download_calls = [c for c in ui_calls if "run_download_dialog" in call_args_segment(c)]
 check("download dialog call site found", len(download_calls) == 1, len(download_calls))
 for call in download_calls:
-    check("download dialog ui_call carries NO timeout= (user-paced)",
-          not has_timeout_kw(call), call_args_segment(call)[:80])
+    # 只接受 ``ui_call(lambda: ...)``：一个位置参数、无 timeout 关键字（红队 N2：
+    # 位置超时 ``ui_call(lambda: ..., 60.0)`` 也必须被抓）。
+    check("download dialog ui_call carries NO timeout (keyword or positional, user-paced)",
+          not has_timeout_kw(call) and len(call.args) == 1, call_args_segment(call)[:80])
 
 # ---------- ③ 非用户节拍的调用显式传超时（按函数体切片，R2） ----------
 for fname in ("console_widgets", "console_texts"):
