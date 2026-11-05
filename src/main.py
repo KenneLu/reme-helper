@@ -1687,7 +1687,7 @@ def site_packages_dir(root: Path | None = None) -> Path | None:
 def installed_package_version(dist: str, root: Path | None = None) -> str:
     """从 site-packages 的 *.dist-info 里读版本号，不起子进程。
 
-    METADATA 里的 Version 是权威值；读不到才退回解析目录名（reme_ai-0.4.1.11.dist-info）。
+    METADATA 里的 Version 是权威值；读不到才退回解析目录名（reme_ai-0.4.2.1.dist-info）。
     """
     site = site_packages_dir(root)
     if site is None:
@@ -1719,7 +1719,7 @@ def installed_package_version(dist: str, root: Path | None = None) -> str:
 
 
 def reme_versions() -> dict:
-    """``{"reme-ai": "0.4.1.11", "reme_studio": "0.1.1"}``，带目录 mtime 缓存。"""
+    """``{"reme-ai": "0.4.2.1", "reme_studio": "0.1.1"}``，带目录 mtime 缓存。"""
     site = site_packages_dir()
     try:
         key = (str(site), site.stat().st_mtime_ns if site else None)
@@ -1742,7 +1742,7 @@ def is_prerelease(value: str) -> bool:
 
 
 def version_key(value: str) -> tuple:
-    """把版本号拆成可比较的元组（``0.4.1.11`` → ``(0, 4, 1, 11)``）。"""
+    """把版本号拆成可比较的元组（``0.4.2.1`` → ``(0, 4, 2, 1)``）。"""
     parts = []
     for chunk in re.split(r"[.\-+]", str(value or "").strip()):
         match = re.match(r"^(\d+)", chunk)
