@@ -12,8 +12,10 @@
   ③ 非用户节拍的调用（``console_widgets`` / ``console_texts`` / 退出确认）
      **显式**传了超时，以防 UI 线程真死时门禁/退出 fail-open 永久挂死。
 
-实现用 AST 按函数体切片，避免「同名调用点」互相满足（红队复审 R2），
-并用括号配平提取 ``ui_call(...)`` 实参区间，避免非贪婪正则的捕获逃逸（R1）。
+实现改用 **universal rule**（只钉行为、不钉代码结构）：AST 解析源码，按**调用内容**
+识别下载弹窗（含 ``run_download_dialog``），其余调用一律要求**有界**超时。这样
+重命名嵌套函数、改用 ``work=`` 关键字写法都不会假红，``**{}`` 解包、显式
+``timeout=None``、``functools.partial``/别名也都会被挡（红队复审 B1/B2/B3/N4）。
 """
 from __future__ import annotations
 
@@ -48,6 +50,24 @@ def has_timeout_kw(call: ast.Call) -> bool:
     return any(kw.arg == "timeout" for kw in call.keywords)
 
 
+def has_bounded_timeout(call: ast.Call) -> bool:
+    """是否传了「有界」的 timeout（值不是显式 ``None``）。
+
+    只看关键字在不在会被 ``timeout=None`` 绕过（红队 N4）——而 ``ui_call`` 里
+    ``None`` 就是**无界等待**（``done.wait(None)``），与不写 ``timeout=`` 等价。
+    非用户节拍的调用（构建门禁 / quit fail-open）必须传**有界**超时，否则
+    UI 线程真死时会重新变成永久挂死（P2 那类事故）。
+    """
+    for kw in call.keywords:
+        if kw.arg != "timeout":
+            continue
+        value = kw.value
+        if isinstance(value, ast.Constant) and value.value is None:
+            return False      # 显式 None = 无界，不算有界超时
+        return True           # 数字 / 名字 / 表达式 = 有界
+    return False
+
+
 # ---------- ① 默认超时为 None ----------
 sig = inspect.signature(main.ui_call)
 param = sig.parameters.get("timeout")
@@ -78,11 +98,12 @@ if download_calls:
 for call in ui_calls:
     if download_calls and call is download_calls[0]:
         continue
-    check(f"ui_call at line {call.lineno} passes an explicit timeout=",
-          has_timeout_kw(call), call_args_segment(call)[:60])
+    check(f"ui_call at line {call.lineno} passes a bounded explicit timeout",
+          has_bounded_timeout(call), call_args_segment(call)[:60])
 
-# ---------- ④ 已知站点未被删除（单独断言，保留 N3 的原始意图）----------
-check("ui_call call site count is exactly 5 (no known site removed)",
+# ---------- ④ 已知站点集合未变（单独断言，保留 N3 的原始意图）----------
+# 注意：``== 5`` 同时拒绝「新增」与「删除」——两者都应触发评审，不是单向保护。
+check("ui_call call site count is exactly 5 (no addition/removal without review)",
       len(ui_calls) == 5, len(ui_calls))
 
 print("UI CALL TIMEOUT TEST " + ("FAILED: " + ", ".join(FAILS) if FAILS else "OK"), flush=True)

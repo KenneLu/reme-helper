@@ -126,13 +126,13 @@ release.bat        :: tag v<version> and push; CI publishes the zip
 
 `src/` holds the application, `tests/` the test files (20 in all; 18 of them run as build gate sections),
 `scripts/` the build and the release-config generator, and `docs/` the documentation the app reads at runtime.
-The version lives in `src/main.py` (`VERSION`, currently `1.2.22`) — the single source of truth for the app,
+The version lives in `src/main.py` (`VERSION`, currently `1.2.23`) — the single source of truth for the app,
 the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
 [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 **Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
-folder is allowed. `VERSION` is currently `1.2.22`, and the frozen `1.2.22` build has been produced
+folder is allowed. `VERSION` is currently `1.2.23`, and the frozen `1.2.23` build has been produced
 and installed locally for field replacement; the release folder is a local artifact and is not committed. Published
 artifacts still come from CI on a clean checkout, so a repository without a release folder is an
 expected state, not a lost artifact.
@@ -151,8 +151,8 @@ gate for `proactive_refresh`, the new `list_tags` tool, and the agentscope pin).
 was released on 2026-10-27 and has been evaluated: its job table is identical to
 0.4.1.13 (no additions, removals or renames — only incremental field changes), so the
 EXPOSE whitelist logic carries over unchanged. 0.4.2.2 is unreleased and not followed.
-`VERSION` is `1.2.22`; the frozen
-`1.2.22` build has been produced and installed, and the build runs 18 gate sections drawn from the
+`VERSION` is `1.2.23`; the frozen
+`1.2.23` build has been produced and installed, and the build runs 18 gate sections drawn from the
 20 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
 instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
