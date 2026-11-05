@@ -56,54 +56,34 @@ if param is not None:
     check("ui_call default timeout is None (no fixed business timeout)",
           param.default is None, repr(param.default))
 
-# ---------- 找到每个调用所属的最近函数定义 ----------
-def enclosing_function(node: ast.AST) -> str:
-    # ast.walk 不给出父指针，这里用位置区间匹配
-    best = ""
-    best_span = None
-    for fn in ast.walk(TREE):
-        if isinstance(fn, ast.FunctionDef):
-            span = (fn.lineno, fn.end_lineno or fn.lineno)
-            if span[0] <= node.lineno <= span[1]:
-                if best_span is None or (span[1] - span[0]) < (best_span[1] - best_span[0]):
-                    best = fn.name
-                    best_span = span
-    return best
-
-
-# ---------- 收集全部 ui_call 调用，按所在线程/函数分类 ----------
+# ---------- 收集全部 ui_call 调用 ----------
 ui_calls = [n for n in ast.walk(TREE)
             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "ui_call"]
-# 精确计数 + 白名单：防止新增调用点逃逸（红队 N3），也防止已知站点被删。
-# run_helper_update 的 ui_call 位于其内部 ``work()`` 中，故白名单含 "work"。
-ALLOWED_ENCLOSING = {"console_widgets", "console_texts", "quit_app", "work"}
-check("ui_call call site count is exactly 5", len(ui_calls) == 5, len(ui_calls))
-_actual_enclosing = {enclosing_function(c) for c in ui_calls}
-check("ui_call call sites are within the known whitelist",
-      _actual_enclosing <= ALLOWED_ENCLOSING, sorted(_actual_enclosing))
 
-
+# ---------- ② 下载弹窗：无超时（任何形式都算超时）----------
+# universal rule：只钉行为，不钉代码结构（函数名/参数写法）。红队 B1/B2/B3：
+# 不看函数名 → 重命名嵌套 work() 不假红；len(args) <= 1 → work= 关键字写法不假红；
+# 挡 ``**{}`` 解包 → ``ui_call(lambda: ..., **{"timeout": 60.0})`` 不逃逸。
 download_calls = [c for c in ui_calls if "run_download_dialog" in call_args_segment(c)]
 check("download dialog call site found", len(download_calls) == 1, len(download_calls))
-for call in download_calls:
-    # 只接受 ``ui_call(lambda: ...)``：一个位置参数、无 timeout 关键字（红队 N2：
-    # 位置超时 ``ui_call(lambda: ..., 60.0)`` 也必须被抓）。
-    check("download dialog ui_call carries NO timeout (keyword or positional, user-paced)",
-          not has_timeout_kw(call) and len(call.args) == 1, call_args_segment(call)[:80])
+if download_calls:
+    dl = download_calls[0]
+    check("download dialog has no timeout in any form (user-paced)",
+          not has_timeout_kw(dl)
+          and not any(kw.arg is None for kw in dl.keywords)
+          and len(dl.args) <= 1,
+          call_args_segment(dl)[:80])
 
-# ---------- ③ 非用户节拍的调用显式传超时（按函数体切片，R2） ----------
-for fname in ("console_widgets", "console_texts"):
-    fn_calls = [c for c in ui_calls if enclosing_function(c) == fname]
-    check(f"{fname} has exactly one ui_call", len(fn_calls) == 1, len(fn_calls))
-    for call in fn_calls:
-        check(f"{fname} ui_call passes explicit timeout=",
-              has_timeout_kw(call), call_args_segment(call)[:80])
+# ---------- ③ 其他所有 ui_call 必须显式传超时（用户节拍只有下载弹窗）----------
+for call in ui_calls:
+    if download_calls and call is download_calls[0]:
+        continue
+    check(f"ui_call at line {call.lineno} passes an explicit timeout=",
+          has_timeout_kw(call), call_args_segment(call)[:60])
 
-quit_calls = [c for c in ui_calls if enclosing_function(c) == "quit_app"]
-check("quit_app has two ui_call sites (rich + native)", len(quit_calls) == 2, len(quit_calls))
-for call in quit_calls:
-    check("quit_app ui_call passes explicit timeout=",
-          has_timeout_kw(call), call_args_segment(call)[:80])
+# ---------- ④ 已知站点未被删除（单独断言，保留 N3 的原始意图）----------
+check("ui_call call site count is exactly 5 (no known site removed)",
+      len(ui_calls) == 5, len(ui_calls))
 
 print("UI CALL TIMEOUT TEST " + ("FAILED: " + ", ".join(FAILS) if FAILS else "OK"), flush=True)
 sys.exit(1 if FAILS else 0)
