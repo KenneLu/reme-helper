@@ -309,7 +309,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [TEST] expose job table - ReMe 0.4.1.13 adaptation ...
+echo [TEST] expose job table - ReMe 0.4.2.1 adaptation ...
 "%PY%" tests\test_expose_jobs.py
 if errorlevel 1 (
   echo [ERROR] expose job table test failed - check the is_servable enable_serve:false gate,

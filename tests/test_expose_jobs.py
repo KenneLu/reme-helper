@@ -2,8 +2,9 @@
 """MCP 暴露 job 表的纯逻辑判据（无窗口、无网络、不碰真 ReMe 安装）。
 
 覆盖三件事：
-  ① `is_servable()` 必须排除**显式 `enable_serve: false` 的 base job**（例如靠调度跑的
-     `proactive_refresh`）——否则会被当可服务写进 MCP 白名单，ReMe add_jobs() raise。
+  ① `is_servable()` 必须排除**显式 `enable_serve: false` 或 `enabled: false` 的 base job**
+     （例如靠调度跑的 `proactive_refresh`）——否则会被当可服务写进 MCP 白名单，
+     ReMe add_jobs() raise（判据与 `not job.enabled or not job.enable_serve` 一致）。
   ② job 名 `proactive_read` 与 EXPOSE 分组/标签/信息/removals 一致；兼容旧版 job 名时
      由 `expose_values()` 在写盘前过滤。
   ③ `list_tags`（backend=base、可服务、只读）进入候选名单与「检索与浏览」组，且等级/
@@ -28,19 +29,23 @@ def check(name, ok, detail=""):
         FAILS.append(name)
 
 
-# ---------- ① is_servable：enable_serve:false 的 base job 不可服务 ----------
+# ---------- ① is_servable：enable_serve:false / enabled:false 的 base job 不可服务 ----------
 check("is_servable: base + enable_serve:false -> False",
       main.is_servable({"backend": "base", "enable_serve": False}) is False)
 check("is_servable: base + enable_serve:true -> True",
       main.is_servable({"backend": "base", "enable_serve": True}) is True)
 check("is_servable: base without enable_serve -> True",
       main.is_servable({"backend": "base"}) is True)
+check("is_servable: base + enabled:false -> False",
+      main.is_servable({"backend": "base", "enabled": False}) is False)
+check("is_servable: base + enabled:true -> True",
+      main.is_servable({"backend": "base", "enabled": True}) is True)
 check("is_servable: background -> False", main.is_servable({"backend": "background"}) is False)
 check("is_servable: cron -> False", main.is_servable({"backend": "cron"}) is False)
 check("is_servable: non-dict spec stays permitted (defensive, old behavior)",
       main.is_servable(None) is True)
 
-# ---------- ②③ 候选名单 / 分组 / 标签 / removals（合成 0.4.1.13 表） ----------
+# ---------- ②③ 候选名单 / 分组 / 标签 / removals（合成 0.4.2.1 表） ----------
 _FAKE_DECLARED = {
     "search": {"backend": "base"},
     "read": {"backend": "base"},

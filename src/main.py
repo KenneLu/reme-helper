@@ -242,7 +242,7 @@ EXPOSE_JOB_INFO = {
     "frontmatter_update": ("可选", "修改文件头字段，不动正文。"),
     "node_search": ("可选", "按节点（沉淀后的长期记忆单元）检索，比全文检索更聚焦。"),
     "graph_snapshot": ("可选", "导出关系图快照，用于整体查看记忆之间的连接。"),
-    "daily_list": ("可选", "列出所有 daily 卡片。"),
+    "daily_list": ("可选", "列出 daily 卡片（默认今天；可选日期范围与分页）。"),
     "list_tags": ("可选", "列出活跃标签及文件数（只读）。"),
     "auto_memory": ("可选", "把一段对话提炼成记忆卡片。DSH 插件的后台工具会调它。"),
     "auto_memory_cc": ("可选", "从 Claude Code 会话提炼记忆。不用 Claude Code 时没有价值。"),
@@ -982,12 +982,16 @@ def official_jobs() -> dict:
 def is_servable(spec) -> bool:
     """这个 job 能否被服务层注册。
 
-    判据就是 base_service.add_jobs() 的那一条：background / cron 的 job 被强制
-    enable_serve=False，永远不会对外服务；**显式声明 `enable_serve: false` 的 base job**
-    （例如靠调度跑的 proactive_refresh）同样不对外服务——这两类写进白名单都会 raise。
+    判据就是 base_service.add_jobs() 的那一条（`reme/components/service/base_service.py`）：
+    `not job.enabled or not job.enable_serve` 的 job 若被写进白名单会 raise ValueError；
+    background / cron 的 job 被强制 enable_serve=False，永远不会对外服务；**显式声明
+    `enable_serve: false` 的 base job**（例如靠调度跑的 proactive_refresh）同样不对外服务。
+    三类都不可服务，必须挡在白名单之外。
     """
     if not isinstance(spec, dict):
         return True
+    if spec.get("enabled") is False:
+        return False
     if spec.get("enable_serve") is False:
         return False
     return spec.get("backend") not in ("background", "cron")
@@ -1622,12 +1626,13 @@ def official_default_path() -> Path:
 # agentscope 版本（helper 进程里没有 agentscope，与 `_run_model_library_effort_script`
 # 同一手法：短超时子进程）；读不到回退这个常量。
 # 一次性缓存：提示词可能连开两次，不值得每次都起子进程。
-AGENTSCOPE_PIN_FALLBACK = "2.0.9"
+# 回退值随适配版本走：0.4.2.1 的 pyproject 钉 `agentscope[model-ollama]==2.0.10`。
+AGENTSCOPE_PIN_FALLBACK = "2.0.10"
 _AGENTSCOPE_PIN_CACHE: dict = {"value": None}
 
 
 def agentscope_pin() -> str:
-    """已装 ReMe venv 里的 agentscope 版本；读不到回退 2.0.9。仅用于提示词展示。"""
+    """已装 ReMe venv 里的 agentscope 版本；读不到回退 2.0.10（0.4.2.1 的 pyproject pin）。仅用于提示词展示。"""
     cached = _AGENTSCOPE_PIN_CACHE.get("value")
     if cached:
         return cached

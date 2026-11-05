@@ -233,7 +233,7 @@
  "change_header_fields_without_touching_the_body": "Change header fields without touching the body.",
  "search_by_node_a_consolidated_long_term_memory_u": "Search by node (a consolidated long-term memory unit); more focused than full-text search.",
  "export_a_snapshot_of_the_link_graph_to_see_how_m": "Export a snapshot of the link graph, to see how memories connect.",
- "list_every_daily_card": "List every daily card.",
+ "list_every_daily_card": "List daily cards (defaults to today; optional date range and pagination).",
  "distill_a_conversation_into_memory_cards_the_dsh": "Distill a conversation into memory cards. The DSH plugin's background tool calls it.",
  "distill_memory_from_a_claude_code_session_worthl": "Distill memory from a Claude Code session. Worthless if you do not use Claude Code.",
  "consolidate_today_s_dailies_into_long_term_memor": "Consolidate today's dailies into long-term memory now - a manual \"dream\".",

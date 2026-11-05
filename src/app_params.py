@@ -18,8 +18,8 @@ EXE_NAME = "reme-helper.exe"
 # 本助手**适配**的 ReMe 版本（用户 2026-09-19 定：不再跟随 PyPI 最新）。
 #
 # 为什么固定：助手要生成三份配置、内省思考强度档位、核对 MCP 工具白名单——这些都依赖
-# 目标版本 default.yaml 的 job 表与依赖 pin（如 agentscope==2.0.9）。上游一发新版
-# 就引导用户升，等于让"生成配置 / 白名单"跑在未验证的组合上。
+# 目标版本 default.yaml 的 job 表与依赖 pin（当前 pin 对应 agentscope==2.0.10）。上游
+# 一发新版就引导用户升，等于让"生成配置 / 白名单"跑在未验证的组合上。
 #
 # 单点定义：安装提示词、升级提示词、检查更新的四象限判定、界面提示全部读这里；换适配
 # 版本只改这一行。升级目标**恒为**它，PyPI 上更新的版本永远不会成为升级目标。
@@ -27,7 +27,15 @@ EXE_NAME = "reme-helper.exe"
 # 专有键：kit 参数卡（template/appconfig/appconfig.py）不覆盖本键——kit 是通用共享库，
 # 不知道任何工具的目标版本；本键只属于 reme-helper，故由本卡持有。main.py 经
 # `from app_params import SUPPORTED_REME_VERSION` 取用（单一真源），冻结环境同样生效。
-SUPPORTED_REME_VERSION = "0.4.1.13"
+#
+# 推进历史：0.4.1.13（1.2.8）适配了 job 改名 `proactive` → `proactive_read`、新增
+# `list_tags`、`proactive_refresh` 的 `enable_serve: false` 判定与 agentscope==2.0.9 pin。
+# 2026-10-27 发布的 0.4.2.1 已逐字复核：job 表完全一致（无新增/删除/改名），仅增量字段
+# 变化（`watch_mode: awatch`、`auto_memory.request_id`、`daily_list` 日期范围/分页、
+# `search.min_score` 描述、注释掉的 `as_decision_model`），故 EXPOSE 白名单逻辑无需改动，
+# pin 推进到 0.4.2.1；0.4.2.1 的 pyproject 把 agentscope 钉到 2.0.10（main.py 的
+# AGENTSCOPE_PIN_FALLBACK 同步）。
+SUPPORTED_REME_VERSION = "0.4.2.1"
 
 # W6 状态贴图：4 形态全量图（D6）。绘制器在构建侧 src/icon_pipeline.py（与 main.py
 # 归一后零共享——运行时 tray_icons 只按档加载，包内零绘制代码）。
