@@ -40,6 +40,10 @@ check("is_servable: base + enabled:false -> False",
       main.is_servable({"backend": "base", "enabled": False}) is False)
 check("is_servable: base + enabled:true -> True",
       main.is_servable({"backend": "base", "enabled": True}) is True)
+check("is_servable: base + enabled:0 -> False (falsy, same as add_jobs not)",
+      main.is_servable({"backend": "base", "enabled": 0}) is False)
+check("is_servable: base + enable_serve:0 -> False (falsy, same as add_jobs not)",
+      main.is_servable({"backend": "base", "enable_serve": 0}) is False)
 check("is_servable: background -> False", main.is_servable({"backend": "background"}) is False)
 check("is_servable: cron -> False", main.is_servable({"backend": "cron"}) is False)
 check("is_servable: non-dict spec stays permitted (defensive, old behavior)",

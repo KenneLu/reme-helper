@@ -986,13 +986,15 @@ def is_servable(spec) -> bool:
     `not job.enabled or not job.enable_serve` 的 job 若被写进白名单会 raise ValueError；
     background / cron 的 job 被强制 enable_serve=False，永远不会对外服务；**显式声明
     `enable_serve: false` 的 base job**（例如靠调度跑的 proactive_refresh）同样不对外服务。
-    三类都不可服务，必须挡在白名单之外。
+    三类都不可服务，必须挡在白名单之外。两个开关都用 `not spec.get(..., True)` 判定，
+    与 `not job.enabled` / `not job.enable_serve` 完全等价（`0` / `None` 也算关闭），
+    缺省 True 保持「未声明即可服务」的既有语义。
     """
     if not isinstance(spec, dict):
         return True
-    if spec.get("enabled") is False:
+    if not spec.get("enabled", True):
         return False
-    if spec.get("enable_serve") is False:
+    if not spec.get("enable_serve", True):
         return False
     return spec.get("backend") not in ("background", "cron")
 
