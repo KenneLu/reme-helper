@@ -2638,10 +2638,18 @@ def report_ui_exception(exc_type, exc_value, exc_tb) -> None:
         pass
 
 
-def ui_call(work, timeout: float = 20.0):
+def ui_call(work, timeout: float | None = None):
     """在 UI 线程里执行 work 并等它返回结果（测试与需要同步结果的调用用）。
 
     和 ui_post 一样只碰 Python 队列，唯一区别是等结果：绝不在调用线程碰 Tcl。
+
+    ``timeout`` 默认 ``None``（无限等）。**这是有意的**：本函数的等待对象可能是
+    模态对话框（下载 + 等用户点按钮），耗时由用户决定，任何固定业务超时都会把
+    「用户还在操作」误判成「UI 线程没响应」（2026-11-05 实测：17.5MB 下载超过
+    20s → 误报 → 调用方退出 → 对话框成孤儿 → 点【立即更新】无人接收）。网络极差
+    时下载更慢，固定超时只会更频繁地误伤。下载请求本身的错误由 update_helper
+    的 HTTP 超时（120s）负责，那一层才是「请求没响应」的正确判据。
+    确实需要超时的高端场景（例如探测 UI 是否卡死）再显式传 ``timeout=``。
     """
     box: dict = {}
     done = threading.Event()
