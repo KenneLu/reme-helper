@@ -207,7 +207,6 @@ if errorlevel 1 (
   echo [ERROR] test_helper.py failed.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] baseline snapshot ...
@@ -216,7 +215,6 @@ if errorlevel 1 (
   echo [ERROR] test_baseline.py failed.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 rem The suites write their logs to log\tests\, not to the repository root - see
@@ -232,7 +230,6 @@ if errorlevel 1 (
   echo [ERROR] test_i18n.py failed. See %TEST_LOGS%\i18n-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\i18n-test.log" type "%TEST_LOGS%\i18n-test.log"
 
@@ -242,7 +239,6 @@ if errorlevel 1 (
   echo [ERROR] test_key_field.py failed. See %TEST_LOGS%\key-field-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\key-field-test.log" type "%TEST_LOGS%\key-field-test.log"
 
@@ -252,7 +248,6 @@ if errorlevel 1 (
   echo [ERROR] test_settings_ui.py failed. See %TEST_LOGS%\settings-ui-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\settings-ui-test.log" type "%TEST_LOGS%\settings-ui-test.log"
 
@@ -262,7 +257,6 @@ if errorlevel 1 (
   echo [ERROR] test_theme_ui.py failed. See %TEST_LOGS%\theme-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\theme-test.log" type "%TEST_LOGS%\theme-test.log"
 
@@ -272,7 +266,6 @@ if errorlevel 1 (
   echo [ERROR] test_en_mode.py failed. See %TEST_LOGS%\en-mode-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\en-mode-test.log" type "%TEST_LOGS%\en-mode-test.log"
 
@@ -282,7 +275,6 @@ if errorlevel 1 (
   echo [ERROR] test_console_lifecycle.py failed. See %TEST_LOGS%\console-lifecycle-test.log
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-lifecycle-test.log"
 
@@ -292,7 +284,6 @@ if errorlevel 1 (
   echo [ERROR] update bat test failed.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] local OTA acceptance (template ota_test) ...
@@ -305,7 +296,6 @@ if errorlevel 1 (
   echo         backup rotation or cleanup broke. See the test output above.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] ReMe supported-version pin (four states + prompts) ...
@@ -315,7 +305,6 @@ if errorlevel 1 (
   echo         single source in app_params.py and that both prompts pin ==that version.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] expose job table - ReMe 0.4.2.1 adaptation ...
@@ -325,17 +314,15 @@ if errorlevel 1 (
   echo         the proactive to proactive_read rename and the list_tags candidate.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] ui_call timeout contract (download dialog unbounded, non-user calls bounded) ...
 "%PY%" tests\test_ui_call.py
 if errorlevel 1 (
   echo [ERROR] ui_call timeout test failed - the download dialog must stay unbounded
-  echo         (default timeout=None) while console_*/quit calls pass an explicit timeout.
+  echo         default timeout=None while console_*/quit calls pass an explicit timeout.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] log init fail-open - a blocked log path must never block startup ...
@@ -345,7 +332,6 @@ if errorlevel 1 (
   echo         never propagate out of module import.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] startup guard - tray creation failure must be readable, not a traceback ...
@@ -355,7 +341,6 @@ if errorlevel 1 (
   echo         import must keep working; a startup failure must never surface as NameError.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] tray menu - spaced labels + two bold default items ...
@@ -365,7 +350,6 @@ if errorlevel 1 (
   echo         "ReMe 设置..." and "Open ReMe Studio" must both be bold default items.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] duplicate launch - second instance silently asks for the settings window ...
@@ -375,7 +359,6 @@ if errorlevel 1 (
   echo         it writes show.request and the resident instance opens/raises settings.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
@@ -384,7 +367,6 @@ if errorlevel 1 (
   echo [ERROR] Quit fail-open test failed - a broken dialog chain must NOT trap the user.
   if not defined NOPAUSE pause
   call :test_failed
-          rem (原 exit /b 1 已改为 call :test_failed——失败也要跑门禁)
 )
 
 echo [TEST] exe-delete-guard wired in the right window ...
