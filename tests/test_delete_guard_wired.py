@@ -17,14 +17,14 @@ l-s2t 的同类用例用 `ORDER == ['guard','overlay','tray']` 钉住；reme 的
 """
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 from conftest import TOOL  # noqa: E402, F401  (puts src/ on sys.path)
+from _cleanup import rmtree_cleanup, scratch_dir  # noqa: E402  (temp_kit 薄封装)
 
 # 实例隔离：必须在 import main 之前钉住数据根与配置，否则导入期的
 # seed_config() 会写用户真实的 %LOCALAPPDATA%\reme-helper\。
-_TMP = tempfile.mkdtemp(prefix="reme-guard-order-")
+_TMP = scratch_dir("reme-guard-order-")
 os.environ["REME_HELPER_DATA_DIR"] = _TMP
 os.environ["REME_HELPER_CONFIG"] = str(Path(_TMP) / "config.json")
 
@@ -123,29 +123,7 @@ else:
           "无法判定（有调用点没跑到）：%s" % ORDER)
 
 
-def _cleanup(path):
-    """删数据根并**回读确认**。
-
-    先 `logging.shutdown()` 再删：`log()` 用的文件 handler 在进程内一直持有日志文件，
-    不先关掉，Windows 会拒绝删除**包含该文件的目录**——那时用例会报"泄漏"，
-    而真正的泄漏只是本进程自己没放手（不是工具写坏东西）。
-    """
-    import logging
-    import shutil
-    import time
-    logging.shutdown()
-    for attempt in range(10):
-        try:
-            shutil.rmtree(path)
-        except OSError:
-            pass
-        if not os.path.exists(path):
-            return True
-        time.sleep(0.2)
-    return not os.path.exists(path)
-
-
-check("temp dir cleaned up (no %TEMP% leak)", _cleanup(_TMP), _TMP)
+check("temp dir cleaned up (no %TEMP% leak)", rmtree_cleanup(_TMP), _TMP)
 print("DELETE GUARD WIRED TEST "
       + ("FAILED: " + ",".join(FAILS) if FAILS else "OK"), flush=True)
 sys.exit(1 if FAILS else 0)
