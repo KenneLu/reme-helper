@@ -34,6 +34,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Temp-dir gate self-check (temp_kit)
+        run: python tests/temp_gate_selfcheck.py
+
+      - name: Temp-dir leak gate - baseline
+        run: python tests/temp_gate.py --save
+
       # Each suite is its own step so a failure names the suite in the UI.
       # tests/conftest.py puts src/ on sys.path; run them from the repo root.
       - name: Unit tests and settings matrix
@@ -99,6 +105,9 @@ jobs:
       # 1.2.14 duplicate launch: second instance writes show.request, never a modal.
       - name: Duplicate launch (show request)
         run: python tests/test_single_instance.py
+
+      - name: Temp-dir leak gate - check (new entries = 0)
+        run: python tests/temp_gate.py
 
       - name: Release config template carries no local data
         run: python scripts/make_release_config.py "${{ runner.temp }}\config.json"

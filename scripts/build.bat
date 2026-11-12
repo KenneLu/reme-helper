@@ -192,6 +192,15 @@ if not defined NOPAUSE pause
 exit /b 1
 :sync_done
 
+rem 门禁自证（放最前）：自证内部会 gate_save 覆盖基线、且会建注入目录。
+rem 放测试前跑完并回滚——注入目录不污染基线，也不掩测试期的泄漏。
+"%PY%" tests\temp_gate_selfcheck.py
+if errorlevel 1 (
+  echo [ERROR] gate self-check failed.
+  if not defined NOPAUSE pause
+  call :drop_data_dir
+  exit /b 1
+)
 rem 临时目录泄漏门禁（temp_kit）：跑测试前后扫 %TEMP%\<APP_ID>*，本次新增 = 0。
 rem 失败路径也跑门禁：测试失败走 :test_failed（里面先跑门禁再退）。
 "%PY%" tests\temp_gate.py --save
