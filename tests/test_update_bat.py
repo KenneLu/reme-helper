@@ -37,6 +37,7 @@ import time
 from pathlib import Path
 
 from conftest import TOOL  # noqa: E402, F401  (puts src/ on sys.path)
+from _cleanup import scratch_dir  # noqa: E402  (temp_kit 薄封装)
 import main  # noqa: E402
 
 FAILS = []
@@ -325,11 +326,11 @@ def _cleanup_verdict_selftest() -> None:
          这正是"被 start 拉起的进程还占着 cwd"的真实机制；
       ③ 关掉句柄后必须能绿，且**不留残留**（自证过程本身不能变成新的泄漏）。
     """
-    ok_dir = Path(tempfile.mkdtemp(prefix="reme-rmtree-ok-"))
+    ok_dir = Path(scratch_dir("reme-rmtree-ok-"))
     check("cleanup verdict: says OK for a normal dir",
           _rmtree_retry(ok_dir, attempts=3, delay=0.05) and not ok_dir.exists(), str(ok_dir))
 
-    held = Path(tempfile.mkdtemp(prefix="reme-rmtree-held-"))
+    held = Path(scratch_dir("reme-rmtree-held-"))
     handle = open(held / "locked.txt", "wb")          # 故意持有，让删除失败
     try:
         handle.write(b"x")
@@ -364,7 +365,7 @@ def _a_running_image() -> str:
 
 
 def main_test() -> int:
-    root = Path(tempfile.mkdtemp(prefix="reme-update-bat-"))
+    root = Path(scratch_dir("reme-update-bat-"))
     try:
         _static_checks()
         _cleanup_verdict_selftest()

@@ -9,6 +9,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _cleanup import scratch  # noqa: E402  (temp_kit 薄封装)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import main  # noqa: E402
@@ -125,7 +127,7 @@ finally:
 
 
 # ---------------- ④ 崩溃日志：单一落点（logs/crash/），无兜底 ----------------
-with tempfile.TemporaryDirectory(prefix="reme-helper-startup-") as temp:
+with scratch("reme-helper-startup-") as temp:
     root = Path(temp)
     saved_dirs = (main.LOG_DIR,)
     try:

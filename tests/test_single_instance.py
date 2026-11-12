@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _cleanup import scratch  # noqa: E402  (temp_kit 薄封装)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import main  # noqa: E402
@@ -37,7 +39,7 @@ try:
     # ---------------- ① 第二实例：写 show.request + 静默退出 + 不弹模态框 ----------------
     modal_calls = []
     main.warn_duplicate_instance = lambda: modal_calls.append("modal")
-    with tempfile.TemporaryDirectory(prefix="reme-helper-show-") as temp:
+    with scratch("reme-helper-show-") as temp:
         main.SHOW_REQUEST_PATH = Path(temp) / "data" / "show.request"
         rc = main.request_show_existing()
         check("second instance exits with 0", rc == 0, rc)

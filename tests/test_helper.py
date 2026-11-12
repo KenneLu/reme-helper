@@ -7,6 +7,7 @@ import yaml
 from conftest import TOOL  # noqa: E402, F401  (puts src/ on sys.path)
 import main  # noqa: E402
 import test_baseline
+from _cleanup import scratch  # noqa: E402  (temp_kit 薄封装)
 
 
 # 整套测试必须自包含，理由见 test_baseline 模块。快照放在钉死之后：下面 finally
@@ -20,7 +21,7 @@ original = main.deep_copy(main.CFG)
 _saved_read_env = main.read_env_values
 main.read_env_values = lambda: {**_saved_read_env(), "LLM_BACKEND": "openai"}
 try:
-    with tempfile.TemporaryDirectory(prefix="reme-helper-test-") as temp:
+    with scratch("reme-helper-test-") as temp:
         # 显式固定能力集再断言。下面几条断言描述的是「auto_memory 开 / CC 关 / 资料关 /
         # dream 开 / chat 关 / embedding 关」这一种组合的生成结果；不能依赖本机那份
         # config.json 恰好是那个形状——它住在用户数据目录里（见 seed_config），
@@ -405,7 +406,7 @@ assert main.missing_env_text({"EMBEDDING_API_KEY": "k"}, "embedding") == "EMBEDD
 # 13) ReMe 安装探测与 .env 回填
 import tempfile as _tempfile  # noqa: E402
 
-with _tempfile.TemporaryDirectory() as temp:
+with scratch("reme-helper-tmp-") as temp:
     fake = main.Path(temp)
     assert main.looks_like_reme_install(fake) is False, "空目录不算安装"
     assert main.looks_like_reme_install(main.Path("Z:/definitely/missing")) is False
@@ -442,7 +443,7 @@ for needle in ('reme-ai[core]', "service.backend=http", "2333", r"D:\X\ReMe", "h
     assert needle in prompt, needle
 
 # 16) 从日志解析“上次整理结果”；workspace 产物为权威（外部服务的梦也能被看见），日志只作补充
-with _tempfile.TemporaryDirectory() as temp:
+with scratch("reme-helper-tmp-") as temp:
     log_dir = main.Path(temp)
     original_reme_root = main.reme_root
     empty_ws = main.Path(temp) / "empty-ws"
@@ -654,7 +655,7 @@ finally:
 
 # sha256 校验：匹配通过（含 "哈希  文件名" 两列格式）、不匹配失败、空值失败
 import hashlib as _hashlib  # noqa: E402
-with tempfile.TemporaryDirectory(prefix="reme-sha-") as _sha_dir:
+with scratch("reme-sha-") as _sha_dir:
     _pkg = Path(_sha_dir) / "pkg.zip"
     _pkg.write_bytes(b"payload")
     _good = _hashlib.sha256(b"payload").hexdigest()

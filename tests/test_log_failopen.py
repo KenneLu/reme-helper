@@ -18,6 +18,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _cleanup import scratch  # noqa: E402  (temp_kit 薄封装)
+
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
 
@@ -45,7 +47,7 @@ def run_python(code, env):
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="reme-helper-logfail-") as temp:
+    with scratch("reme-helper-logfail-") as temp:
         data = Path(temp) / "data"
         data.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "REME_HELPER_DATA_DIR": str(data), "PYTHONUTF8": "1"}

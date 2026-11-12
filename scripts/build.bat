@@ -19,7 +19,9 @@ cd /d "%~dp0.."
 rem Build and test instances must never share the resident tray data
 rem root (config / log / quit.request). Redirect the whole data root to a temp
 rem folder so a build can never disturb or be disturbed by the running app.
-set "REME_HELPER_DATA_DIR=%TEMP%\reme-helper-builddata"
+rem 数据根钉在仓库内 build\ 下（与另外 3 个工具一致）——不放 %TEMP% 根：
+rem 门禁按 `%TEMP%\<APP_ID>*` 扫，%TEMP% 根的构建数据根会被误报成泄漏。
+set "REME_HELPER_DATA_DIR=%CD%\build\test-data"
 
 set RUN_AFTER=1
 set NOPAUSE=
@@ -210,180 +212,19 @@ if errorlevel 1 (
   call :drop_data_dir
   exit /b 1
 )
-echo [TEST] unit tests + settings matrix ...
-"%PY%" tests\test_helper.py
-if errorlevel 1 (
-  echo [ERROR] test_helper.py failed.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] baseline snapshot ...
-"%PY%" tests\test_baseline.py
-if errorlevel 1 (
-  echo [ERROR] test_baseline.py failed.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-rem The suites write their logs to log\tests\, not to the repository root - see
-rem TOOL in tests/conftest.py. Every "type" below used to look in the root, so
-rem instead of printing the log it printed "The system cannot find the file
-rem specified." six times: the build's own "see <log>" pointer had never worked,
-rem and the noise was indistinguishable from a real error.
+echo [TEST] tests suite (glob tests\test_*.py) ...
+rem 点名清单会漏掉新增测试（实测 20 个文件、点名只 18 个）——改 glob，否证 5 收口。
+rem 各测试的日志写在 log\tests\（见 tests/conftest.py 的 TOOL）。
 set "TEST_LOGS=log\tests"
-
-echo [TEST] i18n table + source coverage ...
-"%PY%" tests\test_i18n.py
-if errorlevel 1 (
-  echo [ERROR] test_i18n.py failed. See %TEST_LOGS%\i18n-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
+set "TESTFAIL=0"
+for %%t in (tests\test_*.py) do (
+  "%PY%" "%%t"
+  if errorlevel 1 (
+    echo [ERROR] test failed: %%t
+    set "TESTFAIL=1"
+  )
 )
-if exist "%TEST_LOGS%\i18n-test.log" type "%TEST_LOGS%\i18n-test.log"
-
-echo [TEST] API key field - load + mask + reveal ...
-"%PY%" tests\test_key_field.py
-if errorlevel 1 (
-  echo [ERROR] test_key_field.py failed. See %TEST_LOGS%\key-field-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-if exist "%TEST_LOGS%\key-field-test.log" type "%TEST_LOGS%\key-field-test.log"
-
-echo [TEST] settings window UI test ...
-"%PY%" tests\test_settings_ui.py
-if errorlevel 1 (
-  echo [ERROR] test_settings_ui.py failed. See %TEST_LOGS%\settings-ui-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-if exist "%TEST_LOGS%\settings-ui-test.log" type "%TEST_LOGS%\settings-ui-test.log"
-
-echo [TEST] theme consistency - no shift, no unreadable text ...
-"%PY%" tests\test_theme_ui.py
-if errorlevel 1 (
-  echo [ERROR] test_theme_ui.py failed. See %TEST_LOGS%\theme-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-if exist "%TEST_LOGS%\theme-test.log" type "%TEST_LOGS%\theme-test.log"
-
-echo [TEST] english mode scan ...
-"%PY%" tests\test_en_mode.py
-if errorlevel 1 (
-  echo [ERROR] test_en_mode.py failed. See %TEST_LOGS%\en-mode-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-if exist "%TEST_LOGS%\en-mode-test.log" type "%TEST_LOGS%\en-mode-test.log"
-
-echo [TEST] console lifecycle - language and theme rebuilds ...
-"%PY%" tests\test_console_lifecycle.py
-if errorlevel 1 (
-  echo [ERROR] test_console_lifecycle.py failed. See %TEST_LOGS%\console-lifecycle-test.log
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-if exist "%TEST_LOGS%\console-lifecycle-test.log" type "%TEST_LOGS%\console-lifecycle-test.log"
-
-echo [TEST] update bat success/failure injection ...
-"%PY%" tests\test_update_bat.py
-if errorlevel 1 (
-  echo [ERROR] update bat test failed.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] local OTA acceptance (template ota_test) ...
-rem Template-owned test: package-root resolution + the REAL download_and_prepare()
-rem + REAL rendered bat replacement chain, no network / no real app / no visible
-rem window. It lives in the template so all four tools share one seam test.
-"%PY%" src\template\ota_test\run_local_ota_test.py --app-id reme-helper
-if errorlevel 1 (
-  echo [ERROR] local OTA acceptance test failed - package-root resolution, replacement,
-  echo         backup rotation or cleanup broke. See the test output above.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] ReMe supported-version pin (four states + prompts) ...
-"%PY%" tests\test_reme_version_pin.py
-if errorlevel 1 (
-  echo [ERROR] ReMe version pin test failed - check that SUPPORTED_REME_VERSION is the
-  echo         single source in app_params.py and that both prompts pin ==that version.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] expose job table - ReMe 0.4.2.1 adaptation ...
-"%PY%" tests\test_expose_jobs.py
-if errorlevel 1 (
-  echo [ERROR] expose job table test failed - check the is_servable enable_serve:false gate,
-  echo         the proactive to proactive_read rename and the list_tags candidate.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] ui_call timeout contract (download dialog unbounded, non-user calls bounded) ...
-"%PY%" tests\test_ui_call.py
-if errorlevel 1 (
-  echo [ERROR] ui_call timeout test failed - the download dialog must stay unbounded
-  echo         default timeout=None while console_*/quit calls pass an explicit timeout.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] log init fail-open - a blocked log path must never block startup ...
-"%PY%" tests\test_log_failopen.py
-if errorlevel 1 (
-  echo [ERROR] Log fail-open test failed - make_logger errors must degrade to no-op closures,
-  echo         never propagate out of module import.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] startup guard - tray creation failure must be readable, not a traceback ...
-"%PY%" tests\test_startup_guard.py
-if errorlevel 1 (
-  echo [ERROR] Startup guard test failed - tray retry, readable failure text and traceback
-  echo         import must keep working; a startup failure must never surface as NameError.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] tray menu - spaced labels + two bold default items ...
-"%PY%" tests\test_tray_menu.py
-if errorlevel 1 (
-  echo [ERROR] Tray menu test failed - Chinese/Latin spacing or the default-item pair broke.
-  echo         "ReMe 设置..." and "Open ReMe Studio" must both be bold default items.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] duplicate launch - second instance silently asks for the settings window ...
-"%PY%" tests\test_single_instance.py
-if errorlevel 1 (
-  echo [ERROR] Single-instance test failed - the second instance must never show a modal,
-  echo         it writes show.request and the resident instance opens/raises settings.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] quit path fail-open (dialog unusable must not lock the user in) ...
-"%PY%" tests\test_quit_failopen.py
-if errorlevel 1 (
-  echo [ERROR] Quit fail-open test failed - a broken dialog chain must NOT trap the user.
-  if not defined NOPAUSE pause
-  call :test_failed
-)
-
-echo [TEST] exe-delete-guard wired in the right window ...
-"%PY%" tests\test_delete_guard_wired.py
-if errorlevel 1 (
-  echo [ERROR] exe delete-guard is not wired between the single-instance guard and the tray
-  echo [ERROR] - the window is the only legal position; see the test docstring.
-  if not defined NOPAUSE pause
+if not "%TESTFAIL%"=="0" (
   call :test_failed
 )
 
