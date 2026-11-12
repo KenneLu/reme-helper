@@ -20,7 +20,8 @@ rem Build and test instances must never share the resident tray data
 rem root (config / log / quit.request). Redirect the whole data root to a temp
 rem folder so a build can never disturb or be disturbed by the running app.
 rem 数据根钉在仓库内 build\ 下（与另外 3 个工具一致）——不放 %TEMP% 根：
-rem 门禁按 `%TEMP%\<APP_ID>*` 扫，%TEMP% 根的构建数据根会被误报成泄漏。
+rem %TEMP% 会被系统/四层清理，构建数据根放那里可能被清掉；且测试数据与构建产物
+rem 同处，便于一次性清理。（门禁已收窄到 %TEMP%\<APP_ID>\，不再扫 %TEMP% 根。）
 set "REME_HELPER_DATA_DIR=%CD%\build\test-data"
 
 set RUN_AFTER=1
@@ -203,7 +204,7 @@ if errorlevel 1 (
   call :drop_data_dir
   exit /b 1
 )
-rem 临时目录泄漏门禁（temp_kit）：跑测试前后扫 %TEMP%\<APP_ID>*，本次新增 = 0。
+rem 临时目录泄漏门禁（temp_kit）：跑测试前后扫 %TEMP%\<APP_ID>\（收窄：只认工具目录本身），本次新增 = 0。
 rem 失败路径也跑门禁：测试失败走 :test_failed（里面先跑门禁再退）。
 "%PY%" tests\temp_gate.py --save
 if errorlevel 1 (

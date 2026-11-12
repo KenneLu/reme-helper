@@ -37,7 +37,7 @@ import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语�
 from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
 from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.3
 from template import update_ui  # noqa: F402  统一更新弹窗（进度/立即更新/稍后更新）
-from template import temp_kit  # noqa: F402  临时目录/崩溃日志标准件（logs\crash\，不放 %TEMP%）
+from template import temp_kit  # noqa: F402  临时目录/崩溃日志标准件（logs\crash\；不可写时兜底 %TEMP%\<APP_ID>\crash\）
 from template.tray_icons import tray_icons
 from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
 from template import log_kit as _log_kit  # noqa: F402  log_kit 模块（读 LAST_INIT_ERROR；1.0.5 起初始化失败在模板层静默）
