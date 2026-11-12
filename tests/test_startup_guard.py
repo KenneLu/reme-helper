@@ -5,6 +5,7 @@
 旧版顶层 except 还引用了未导入的 traceback → NameError 把真实错误吞掉。
 本测试离线运行：不建真实托盘窗口、不启 GUI/服务、不依赖 AppData。
 """
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -140,10 +141,13 @@ with scratch("reme-helper-startup-") as temp:
         blocker = root / "blocker"
         blocker.write_text("x", encoding="utf-8")
         main.LOG_DIR = blocker / "logs"   # 父路径是文件 → 落点必失败
-        none_path = main._write_startup_failure_log("boom-2")
-        check("unusable crash-log dir -> None, no fallback, no raise", none_path is None, none_path)
+        fallback = main._write_startup_failure_log("boom-2")
+        check("unusable LOG_DIR -> crash log falls back to %TEMP%\\<APP_ID>\\crash\\",
+              fallback is not None and fallback.parent == main.temp_kit.temp_root() / "crash"
+              and "boom-2" in Path(fallback).read_text(encoding="utf-8"), fallback)
     finally:
         (main.LOG_DIR,) = saved_dirs
+        shutil.rmtree(main.temp_kit.temp_root() / "crash", ignore_errors=True)
 
 
 # ---------------- ⑤ 启动失败展示：不抛 + 可读入口不弹窗 ----------------
