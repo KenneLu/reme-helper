@@ -124,34 +124,24 @@ finally:
     main.ctypes = saved_ctypes
 
 
-# ---------------- ④ 崩溃日志 best-effort 多落点 ----------------
+# ---------------- ④ 崩溃日志：单一落点（logs/crash/），无兜底 ----------------
 with tempfile.TemporaryDirectory(prefix="reme-helper-startup-") as temp:
     root = Path(temp)
-    saved_dirs = (main.LOG_DIR, main.DIAG_LOG_DIR)
+    saved_dirs = (main.LOG_DIR,)
     try:
-        main.LOG_DIR = root / "appdata" / "log"
-        main.DIAG_LOG_DIR = root / "diag"
+        main.LOG_DIR = root / "appdata" / "logs"
         first = main._write_startup_failure_log("boom-1")
-        check("crash log written to the first available path",
-              first is not None and "boom-1" in Path(first).read_text(encoding="utf-8"), first)
+        check("crash log written under logs/crash/ (one file per incident)",
+              first is not None and first.parent.name == "crash"
+              and "boom-1" in Path(first).read_text(encoding="utf-8"), first)
 
         blocker = root / "blocker"
         blocker.write_text("x", encoding="utf-8")
-        main.LOG_DIR = blocker / "log"   # 父路径是文件 → 第一个落点必失败
-        fallback = main._write_startup_failure_log("boom-2")
-        check("crash log falls back when the first path is unusable",
-              fallback is not None and "boom-2" in Path(fallback).read_text(encoding="utf-8"), fallback)
-
-        main.DIAG_LOG_DIR = blocker / "diag"
-        saved_tempdir = main.tempfile.gettempdir
-        main.tempfile.gettempdir = lambda: str(blocker)
-        try:
-            none_path = main._write_startup_failure_log("boom-3")
-        finally:
-            main.tempfile.gettempdir = saved_tempdir
-        check("all log paths blocked -> None, no raise", none_path is None, none_path)
+        main.LOG_DIR = blocker / "logs"   # 父路径是文件 → 落点必失败
+        none_path = main._write_startup_failure_log("boom-2")
+        check("unusable crash-log dir -> None, no fallback, no raise", none_path is None, none_path)
     finally:
-        main.LOG_DIR, main.DIAG_LOG_DIR = saved_dirs
+        (main.LOG_DIR,) = saved_dirs
 
 
 # ---------------- ⑤ 启动失败展示：不抛 + 可读入口不弹窗 ----------------

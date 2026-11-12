@@ -37,6 +37,7 @@ import i18n_bridge  # noqa: F402  迁移垫层：中文原文→键反查 + 语�
 from template.autostart import autostart  # noqa: F402  autostart 开机自启（1.2.0：键名 AUTOSTART_KEY=APP_ID）
 from template.update_helper import update_helper  # noqa: F402  update_helper 在线更新 1.5.3
 from template import update_ui  # noqa: F402  统一更新弹窗（进度/立即更新/稍后更新）
+from template import temp_kit  # noqa: F402  临时目录/崩溃日志标准件（logs\crash\，不放 %TEMP%）
 from template.tray_icons import tray_icons
 from template.tunnel_kit import tunnel_kit  # noqa: F402  ：隧道参数正本
 from template import log_kit as _log_kit  # noqa: F402  log_kit 模块（读 LAST_INIT_ERROR；1.0.5 起初始化失败在模板层静默）
@@ -8255,21 +8256,15 @@ def _startup_failure_text(exc, detail):
 
 
 def _write_startup_failure_log(text):
-    """best-effort 写崩溃信息：LOG_DIR -> DIAG_LOG_DIR -> %TEMP%；全失败返回 None。"""
-    candidates = [
-        LOG_DIR / (APP_ID + ".log"),
-        DIAG_LOG_DIR / "startup-error.log",
-        Path(tempfile.gettempdir()) / (APP_ID + "-startup-error.log"),
-    ]
-    for path in candidates:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))
-            return path
-        except Exception:  # noqa: BLE001 - 换下一个落点
-            continue
-    return None
+    """写崩溃日志：``<LOG_DIR>\\crash\\startup-<时间戳>-<随机>.log``（一件一文件，保留 10 份）。
+
+    走模板标准件 temp_kit：**不放 %TEMP%**（会被清理，证据会丢）、不追加进主日志。
+    写失败绝不拦住退出。
+    """
+    try:
+        return temp_kit.write_crash_log("startup", text, directory=LOG_DIR / "crash")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _message_box(text, title=None):
