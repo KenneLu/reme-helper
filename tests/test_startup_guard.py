@@ -127,7 +127,7 @@ finally:
     main.ctypes = saved_ctypes
 
 
-# ---------------- ④ 崩溃日志：单一落点（logs/crash/），无兜底 ----------------
+# ---------------- ④ 崩溃日志：首选 logs/crash/，不可写时兜底 %TEMP%\<APP_ID>\crash\ ----------------
 with scratch("reme-helper-startup-") as temp:
     root = Path(temp)
     saved_dirs = (main.LOG_DIR,)
