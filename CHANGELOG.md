@@ -3,9 +3,12 @@
 本工具的开发记录（中文）。面向使用者的入口文档见 [中文 README](README.zh-CN.md) / [English README](README.md)；
 把客户端接入 ReMe 的步骤见 `docs/zh/setup.md`（也可在应用里「阅读接入文档」）。
 
-## Unreleased
+## 1.2.25
 
 - **适配 ReMe 0.4.2.3**（2026-11-18）：`SUPPORTED_REME_VERSION` 0.4.2.1 → **0.4.2.3**、`AGENTSCOPE_PIN_FALLBACK` 2.0.10 → **2.0.11**；CI（`.github/actions/setup-reme/action.yml` 的 `REME_VERSION`、`.github/workflows/tests.yml` 注释/步骤名）同步到 0.4.2.3；README 双语更新 ReMe 版本表述、删改「0.4.2.2 尚未发布」句，并修正 helper `VERSION` 漂移（1.2.23 → 1.2.24，与 `src/main.py` 一致）。适配内容：① EXPOSE 追加 5 个新 job（`session_read/session_status/session_append`、`job_status`、`dashscope_search`），全部进 `EXPOSE_DEFAULT_OFF`（`session_append` 标「慎开」），补 LABELS/INFO/NOTES 与 locales 双语；② `custom_job_removals()` 加 `mode` 形参（模块私有），`agent_wrapper` 被 pop（minimal，或 custom 且无 LLM）时一并移除 `session_*`，调用点与测试同步；③ 凭据处理扩到 `components.codex_app_server.default`（api_key/base_url）、`.oauth`（codex_home，读 `CODEX_HOME`）与 `jobs.dashscope_search.steps[0].api_key`，`generate_full_config` 补 deep-copy `codex_app_server`；④ 新增 `tests/test_config_structure.py`（内置上游 v0.4.2.3 `default.yaml` 快照夹具，结构等价 + 凭据不被 int 化 + 白名单规则），挂进 CI（`build.bat` 走 `tests\test_*.py` glob 自动纳入）。`CODEX_HOME` 的 `.env` 登记放 Wave 3.3；`CODEX_OAUTH_MODEL_NAME` 是否进设置页记入执行文档未来规划。
+
+## Unreleased
+
 - Documentation directory renamed from `doc/` to `docs/`; runtime document lookup and release packaging follow the new path.
 - **CI-only hotfix for the 1.2.15 release gate（VERSION 1.2.15 → 1.2.16）**（2026-10-20）：`tests/test_single_instance.py` 断言托盘气泡中文文案「已在运行」，但 GitHub Actions 运行器的 Windows UI 语言是英文，本地化后的气泡是英文 → tag 构建的测试门禁红（本地 zh-CN 机器是绿的）。修法：测试在断言前显式 `i18n.init("zh")` 钉死界面语言；产品本地化本身仍由 `test_i18n` / `test_en_mode` 覆盖。无运行行为变化。
 - **设置页/提示语中英文空格全量修正 + i18n 空格门禁（VERSION 1.2.14 → 1.2.15）**（2026-10-20）：托盘菜单之外的用户可见文案按「汉字与拉丁字母/英文词之间留一个半角空格」统一清理（`src/main.py` + `locales/zh.json` **逐条同步**——i18n 是「中文原文→键」反查，两边不同步会漏翻）：`src/main.py` 38 个整句/表头字面量（设置页 FEATURES 的 effect/impact：daily / Claude Code / resource / digest / Agent / unit / token / Embedding / API / LLM / Web / MCP / Job；SSH 隧道目标对话框、表头与校验错误：ssh / SSH / VM / IP；ReMe 启停/版本/目录/官方 default 配置的提示与错误；「ReMe 已停止」状态文案）+ 7 个 f-string 错误前缀 + 4 处「变量紧贴中文」的运行时拼接（目标名与「隧道已经连接/已连接/连接失败」、日志路径与「请查看」）+ 1 处引用设置项名的 docstring；`locales/zh.json` 46 条值同步（其中 3 条只被键引用的词条无源码字面量）。`ssh 目标` 按 1.2.11 用户要求保留小写；URL/路径/命令/占位符原样，数字与中文单位不强制（仅「默认最多 5 个 unit」随该词条按仓库既有「30 分钟」写法补齐）。en 表不动（英文自然写法，粘连 0 处）。词表顺带删掉 2 条与主键同值同义、无调用点的孤儿重键（`open_workspace_2`、`reme_folder_does_not_exist_2`）——否则主键加空格后会撞「中文值唯一」约束。`tests/test_i18n.py` 新增机械门禁「中文词表值里汉字与拉丁字母之间都有空格」：白名单在测试内逐条列明（URL / Windows 与 POSIX 路径 / printf 占位符 / format 占位符 / 命令行参数），整条词条白名单当前为空；旧词表命中 46、新词表 0（先红后绿）。VERSION 1.2.14 → 1.2.15；README 双语版本事实同步。
