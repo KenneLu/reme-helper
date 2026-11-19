@@ -124,16 +124,17 @@ build.bat norun    :: build without launching it
 release.bat        :: tag v<version> and push; CI publishes the zip
 ```
 
-`src/` holds the application, `tests/` the test files (20 in all; 18 of them run as build gate sections),
+`src/` holds the application, `tests/` the test files (all of them run as build gates),
 `scripts/` the build and the release-config generator, and `docs/` the documentation the app reads at runtime.
-The version lives in `src/main.py` (`VERSION`, currently `1.2.23`) — the single source of truth for the app,
+The version lives in `src/main.py` (`VERSION`, currently `1.2.24`) — the single source of truth for the app,
 the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
 [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 **Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
-folder is allowed. `VERSION` is currently `1.2.23`, and the frozen `1.2.23` build has been produced
-and installed locally for field replacement; the release folder is a local artifact and is not committed. Published
+folder is allowed. `VERSION` is currently `1.2.24`; the frozen `1.2.23` build has been produced and installed
+locally for field replacement, and this 0.4.2.3 adaptation has **not** been built or deployed
+yet (Wave 3.1 produces and installs it). The release folder is a local artifact and is not committed. Published
 artifacts still come from CI on a clean checkout, so a repository without a release folder is an
 expected state, not a lost artifact.
 
@@ -145,15 +146,14 @@ a schedule is not a permission. `src/template/` is a git submodule borrow pinned
 `diy-tool-kit` (one source for all family modules; a fresh clone needs
 `git clone --recurse-submodules`); tool differences live in the tool-owned card
 `src/app_params.py` — including the proprietary `SUPPORTED_REME_VERSION` pin, which the
-kit does not cover. The supported ReMe version is **0.4.2.1** (full-adaptation target:
-job-table shape, the `proactive` → `proactive_read` rename, the `enable_serve: false`
-gate for `proactive_refresh`, the new `list_tags` tool, and the agentscope pin). 0.4.2.1
-was released on 2026-10-27 and has been evaluated: its job table is identical to
-0.4.1.13 (no additions, removals or renames — only incremental field changes), so the
-EXPOSE whitelist logic carries over unchanged. 0.4.2.2 is unreleased and not followed.
-`VERSION` is `1.2.23`; the frozen
-`1.2.23` build has been produced and installed, and the build runs 18 gate sections drawn from the
-20 test files before packaging. The 工程·运行检测串 gate still refuses to build over a live
+kit does not cover. The supported ReMe version is **0.4.2.3** (full-adaptation target:
+the 45-job table including `session_read`/`session_status`/`session_append`, `job_status`
+and `dashscope_search`; the new `codex_app_server` component and the codex credential
+migration; the `agent_wrapper.codex` `app_server`/`effort` additions; and the agentscope
+pin). 0.4.2.3 was released on 2026-11-17 and has been evaluated against 0.4.2.1: the
+job table grew 40 → 45 (the five additions above, all introduced in 0.4.2.2), so the
+EXPOSE whitelist, removals, credentials and structural-equivalence tests were updated
+accordingly. The source `VERSION` is `1.2.24`; this 0.4.2.3 adaptation has **not** been built or deployed yet — the artifact is produced and deployed in Wave 3.1 — and every test file under `tests/` runs as a gate before packaging. The 工程·运行检测串 gate still refuses to build over a live
 instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
 ## License

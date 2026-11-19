@@ -169,11 +169,12 @@ EXPOSE_JOB_GROUPS = (
     ("记忆读写", ("read", "write", "edit", "save", "load", "daily_write", "read_image",
                   "frontmatter_read", "frontmatter_update", "frontmatter_delete")),
     ("检索与浏览", ("search", "node_search", "traverse", "graph_snapshot",
-                    "list", "stat", "daily_list", "list_tags")),
+                    "list", "stat", "daily_list", "list_tags", "dashscope_search")),
     ("索引与维护", ("reindex", "daily_reindex", "move", "delete")),
     ("自动记忆", ("auto_memory", "auto_memory_cc", "auto_dream", "auto_resource",
                   "proactive_read", "chat")),
-    ("服务信息", ("health_check", "status", "version", "help", "app_config")),
+    ("主动会话", ("session_read", "session_status", "session_append")),
+    ("服务信息", ("health_check", "status", "version", "help", "app_config", "job_status")),
 )
 EXPOSE_JOB_LABELS = {
     "read": "read（读一个记忆文件）",
@@ -209,11 +210,20 @@ EXPOSE_JOB_LABELS = {
     "version": "version（版本号）",
     "help": "help（列出全部 Job）",
     "app_config": "app_config（导出生效配置，密钥已脱敏）",
+    "session_read": "session_read（读会话历史）",
+    "session_status": "session_status（查会话状态）",
+    "session_append": "session_append（向会话追加消息）",
+    "job_status": "job_status（查任务执行状态）",
+    "dashscope_search": "dashscope_search（联网搜索）",
 }
-# 默认不勾的理由只有两类：会改动 / 删除已有记忆，或代价明显（重建索引）。
+# 默认不勾的理由只有两类：会改动 / 删除已有记忆，或代价明显（重建索引 / 主动注入会话）。
 # health_check 与 status 必须默认勾上——helper 自己的健康探测打的就是 /health_check，
 # 官方 DSH 插件的状态卡片读的也是这两个，漏掉它们会让人以为服务挂了。
-EXPOSE_DEFAULT_OFF = ("delete", "move", "frontmatter_delete", "reindex", "daily_reindex")
+# 0.4.2.3 新增的 5 个 job（session_read/status/append、job_status、dashscope_search）
+# 一律默认不勾：session_* 依赖 agent_wrapper，job_status / dashscope_search 非默认必需。
+EXPOSE_DEFAULT_OFF = ("delete", "move", "frontmatter_delete", "reindex", "daily_reindex",
+                      "session_read", "session_status", "session_append", "job_status",
+                      "dashscope_search")
 # 官方 default.yaml 读不到时的兜底（正常安装不会走到）：只用来建界面，写盘前一定再过滤。
 EXPOSE_JOBS_FALLBACK = tuple(job for _group, jobs in EXPOSE_JOB_GROUPS for job in jobs)
 EXPOSE_DEFAULT_FALLBACK = tuple(job for job in EXPOSE_JOBS_FALLBACK
@@ -254,6 +264,11 @@ EXPOSE_JOB_INFO = {
     "version": ("可选", "返回 ReMe 版本号。无副作用，排查问题时有用。"),
     "help": ("可选", "列出全部 Job 及其参数。排查与探索用。"),
     "app_config": ("可选", "导出生效配置。密钥类字段会被脱敏（api_key / token 等显示成 ***）。"),
+    "session_read": ("可选", "读取会话历史（含 proactive 助手消息）。依赖 agent_wrapper，基础模式不含。"),
+    "session_status": ("可选", "查看会话活动状态，不等待生成完成。依赖 agent_wrapper，基础模式不含。"),
+    "session_append": ("慎开", "向会话追加一条 proactive 助手消息，会主动注入会话内容。"),
+    "job_status": ("可选", "查询内存中的任务执行记录与当前步骤路径（newest first）。"),
+    "dashscope_search": ("可选", "用 qwen3.8-flash 联网搜索，需 DASHSCOPE_API_KEY。"),
     "delete": ("慎开", "删除记忆文件。删掉就没了，外部 Agent 一旦被误导会真的删数据。"),
     "move": ("慎开", "移动 / 重命名记忆文件，会改变引用路径。"),
     "frontmatter_delete": ("慎开", "删除文件头字段，属于破坏性修改。"),
@@ -265,6 +280,7 @@ EXPOSE_GROUP_NOTES = {
     "检索与浏览": "把记忆找出来。这一组都是只读的。",
     "索引与维护": "会改动已有数据、或重建索引，默认不勾。",
     "自动记忆": "触发 ReMe 的记忆生产线（提炼、整理、资料转卡）。",
+    "主动会话": "读取 / 操作 agent 会话。依赖 agent_wrapper，基础模式不含。",
     "服务信息": "服务自身的信息类 Job，无副作用；其中 health_check 与 status 是必留项。",
     "其他 Job": "官方新增、分组表里还没归档的 Job。",
 }
@@ -1014,13 +1030,26 @@ def servable_job_names() -> tuple:
     return grouped + extra
 
 
-def custom_job_removals(selected: dict) -> set:
-    """当前功能选择会砍掉哪些 job —— generate_custom_config 与界面共用这一份规则。
+def custom_job_removals(mode: str, selected: dict) -> set:
+    """当前功能选择会砍掉哪些 job —— generate_mode_config 与界面（existing_job_names）共用这一份规则。
 
     以前两处各写一份，界面上标着「可用」的 job 在生成出来的配置里可能并不存在，
     白名单一旦引用它就会让 ReMe 起不来。
+
+    mode 决定 agent_wrapper 是否被 pop：session_read/status/append 依赖它，pop 后必须
+    一并移除，否则配置里留下悬空的 agent_wrapper 引用。
     """
     removals = set()
+    if mode == "full":
+        llm_needed = True
+    elif mode != "custom":
+        llm_needed = False
+    else:
+        # 与 mode_needs_llm 的 custom 分支同口径，但用传入的 selected（界面会用合成选择调用）。
+        llm_needed = any(selected.get(key) for key in
+                         ("auto_memory", "auto_memory_cc", "auto_resource", "auto_dream", "chat"))
+    if not llm_needed:
+        removals.update({"session_read", "session_status", "session_append"})
     if not selected.get("auto_memory"):
         removals.add("auto_memory")
     if not selected.get("auto_memory_cc"):
@@ -1052,7 +1081,7 @@ def existing_job_names(mode: str, selected: dict | None = None) -> set:
         features = selected if selected is not None else CFG.get("custom") or {}
     else:
         features = preset_features(mode)
-    return set(declared) - custom_job_removals(features)
+    return set(declared) - custom_job_removals(mode, features)
 
 
 def default_expose_jobs() -> list:
@@ -1632,13 +1661,13 @@ def official_default_path() -> Path:
 # agentscope 版本（helper 进程里没有 agentscope，与 `_run_model_library_effort_script`
 # 同一手法：短超时子进程）；读不到回退这个常量。
 # 一次性缓存：提示词可能连开两次，不值得每次都起子进程。
-# 回退值随适配版本走：0.4.2.1 的 pyproject 钉 `agentscope[model-ollama]==2.0.10`。
-AGENTSCOPE_PIN_FALLBACK = "2.0.10"
+# 回退值随适配版本走：0.4.2.3 的 pyproject 钉 `agentscope[model-ollama]==2.0.11`。
+AGENTSCOPE_PIN_FALLBACK = "2.0.11"
 _AGENTSCOPE_PIN_CACHE: dict = {"value": None}
 
 
 def agentscope_pin() -> str:
-    """已装 ReMe venv 里的 agentscope 版本；读不到回退 2.0.10（0.4.2.1 的 pyproject pin）。仅用于提示词展示。"""
+    """已装 ReMe venv 里的 agentscope 版本；读不到回退 2.0.11（0.4.2.3 的 pyproject pin）。仅用于提示词展示。"""
     cached = _AGENTSCOPE_PIN_CACHE.get("value")
     if cached:
         return cached
@@ -2418,8 +2447,12 @@ def apply_wrapper_credentials(config: dict, env: dict) -> None:
     """同一类坑：agent_wrapper 的 claude_code / codex 也用裸 ``${...}`` 写凭据。
 
     保留原占位符文本（含它自己的 ``:-`` 默认值），只在值会被改型时写死字面量。
+
+    0.4.2.3 起凭据还散落在两处：``components.codex_app_server``（default 的
+    api_key/base_url、oauth 的 codex_home）与 ``jobs.dashscope_search.steps[0].api_key``。
     """
-    wrappers = ((config.get("components") or {}).get("agent_wrapper") or {})
+    components = config.get("components") or {}
+    wrappers = (components.get("agent_wrapper") or {})
     for wrapper_name, env_prefix in (("claude_code", "CLAUDE_CODE"),
                                      ("codex", "CODEX"), ("codex_oauth", "CODEX")):
         wrapper = wrappers.get(wrapper_name)
@@ -2430,6 +2463,32 @@ def apply_wrapper_credentials(config: dict, env: dict) -> None:
             if isinstance(placeholder, str) and placeholder.startswith("${"):
                 env_name = f"{env_prefix}_{suffix}"
                 wrapper[field] = credential_field(env_name, env.get(env_name, ""), placeholder)
+
+    app_server = components.get("codex_app_server")
+    if isinstance(app_server, dict):
+        default_server = app_server.get("default")
+        if isinstance(default_server, dict):
+            for field, env_name in (("api_key", "CODEX_API_KEY"), ("base_url", "CODEX_BASE_URL")):
+                placeholder = default_server.get(field)
+                if isinstance(placeholder, str) and placeholder.startswith("${"):
+                    default_server[field] = credential_field(env_name, env.get(env_name, ""), placeholder)
+        oauth_server = app_server.get("oauth")
+        if isinstance(oauth_server, dict):
+            placeholder = oauth_server.get("codex_home")
+            if isinstance(placeholder, str) and placeholder.startswith("${"):
+                oauth_server["codex_home"] = credential_field(
+                    "CODEX_HOME", env.get("CODEX_HOME", ""), placeholder)
+
+    dashscope = (config.get("jobs") or {}).get("dashscope_search")
+    steps = dashscope.get("steps") if isinstance(dashscope, dict) else None
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            placeholder = step.get("api_key")
+            if isinstance(placeholder, str) and placeholder.startswith("${"):
+                step["api_key"] = credential_field(
+                    "DASHSCOPE_API_KEY", env.get("DASHSCOPE_API_KEY", ""), placeholder)
 
 
 def apply_pipeline_settings(config: dict) -> None:
@@ -2469,14 +2528,23 @@ def generate_full_config(destination: Path | None = None) -> Path:
     config.update(local_config_overrides(preset_features("full")))
     official = official_default_config()
     jobs = official.get("jobs") or {}
-    # 只带需要打补丁的两个 job；其余全部继承，保持这份配置短小
+    # 带需要打补丁的 job：dream_cron/auto_dream（整理参数）、dashscope_search（内联凭据，
+    # 继承块同样会被 ReMe 插值，纯数字 Key 会 int 化）。其余全部继承，保持这份配置短小。
     config["jobs"] = {name: deep_copy(jobs[name])
-                      for name in ("dream_cron", "auto_dream") if isinstance(jobs.get(name), dict)}
+                      for name in ("dream_cron", "auto_dream", "dashscope_search")
+                      if isinstance(jobs.get(name), dict)}
     apply_pipeline_settings(config)
     components = {"as_llm": {"default": {"parameters": {}, "credential": {}}}}
-    wrappers = ((official.get("components") or {}).get("agent_wrapper") or {})
+    official_components = official.get("components") or {}
+    wrappers = official_components.get("agent_wrapper") or {}
     if wrappers:
         components["agent_wrapper"] = deep_copy(wrappers)
+    # full 是 extends:default，官方 default 已含 codex_app_server；仍 deep-copy 出来，
+    # 让它的凭据（default 的 api_key/base_url、oauth 的 codex_home）过 credential_field，
+    # 否则继承块里的纯数字 Key 会被 ReMe 插值成 int。
+    app_server = official_components.get("codex_app_server") or {}
+    if app_server:
+        components["codex_app_server"] = deep_copy(app_server)
     config["components"] = components
     apply_llm_settings(config, env)
     apply_wrapper_credentials(config, env)
@@ -2500,7 +2568,7 @@ def generate_mode_config(mode: str, destination: Path | None = None) -> Path:
     selected = CFG["custom"] if mode == "custom" else preset_features(mode)
     env = read_env_values()
     jobs = config.get("jobs", {})
-    removals = custom_job_removals(selected)
+    removals = custom_job_removals(mode, selected)
     config["jobs"] = {name: value for name, value in jobs.items() if name not in removals}
 
     components = config.setdefault("components", {})

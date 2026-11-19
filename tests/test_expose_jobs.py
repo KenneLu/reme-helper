@@ -94,12 +94,24 @@ try:
           bool(main.EXPOSE_JOB_INFO.get("proactive_read")))
     check("info: no orphan 'proactive' entry", "proactive" not in main.EXPOSE_JOB_INFO)
 
-    removals_off = main.custom_job_removals({"proactive_read": False})
+    removals_off = main.custom_job_removals("custom", {"proactive_read": False})
     check("removals: disabling proactive_read removes the RENAMED job",
           "proactive_read" in removals_off and "proactive" not in removals_off, removals_off)
-    removals_on = main.custom_job_removals({"proactive_read": True})
+    removals_on = main.custom_job_removals("custom", {"proactive_read": True})
     check("removals: enabling proactive_read removes nothing of it",
           "proactive_read" not in removals_on and "proactive" not in removals_on, removals_on)
+    # mode 感知：agent_wrapper 被 pop（minimal，或 custom 且无 LLM）时一并移除 session_*。
+    minimal_removals = main.custom_job_removals("minimal", main.preset_features("minimal"))
+    check("removals: minimal drops session_* (agent_wrapper popped)",
+          {"session_read", "session_status", "session_append"} <= minimal_removals, minimal_removals)
+    custom_no_llm = main.custom_job_removals("custom", {"auto_memory": False, "auto_memory_cc": False,
+                                                        "auto_resource": False, "auto_dream": False,
+                                                        "chat": False})
+    check("removals: custom without LLM drops session_*",
+          {"session_read", "session_status", "session_append"} <= custom_no_llm, custom_no_llm)
+    custom_llm = main.custom_job_removals("custom", {"auto_memory": True})
+    check("removals: custom with LLM keeps session_*",
+          not ({"session_read", "session_status", "session_append"} & custom_llm), custom_llm)
 finally:
     main.official_jobs = _saved_official
 

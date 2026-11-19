@@ -78,10 +78,15 @@ jobs:
       - name: Local OTA acceptance (template ota_test)
         run: python src/template/ota_test/run_local_ota_test.py --app-id reme-helper
 
-      # 0.4.2.1 job-table adaptation: is_servable(enable_serve:false / enabled:false),
-      # the proactive -> proactive_read rename and the new list_tags candidate.
-      - name: Expose job table (0.4.2.1 adaptation)
+      # 0.4.2.3 job-table adaptation: the five added jobs, the codex_app_server
+      # component, mode-aware removals and the structural-equivalence fixture.
+      - name: Expose job table (0.4.2.3 adaptation)
         run: python tests/test_expose_jobs.py
+
+      # 0.4.2.3 structural equivalence + credential guarding + allowlist rules
+      # (runs against the pinned upstream snapshot fixture).
+      - name: Config structure and credentials (0.4.2.3 adaptation)
+        run: python tests/test_config_structure.py
 
       # ui_call timeout contract: the modal download dialog must stay unbounded
       # (default timeout=None); non-user-paced calls (console_*/quit) must pass an

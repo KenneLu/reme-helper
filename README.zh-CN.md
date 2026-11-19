@@ -106,12 +106,12 @@ build.bat norun    :: 只构建，不启动
 release.bat        :: 打 v<版本> 标签并推送，由 CI 产出 zip
 ```
 
-`src/` 是应用源码，`tests/` 是测试脚本（共 20 个测试文件，其中 18 个作为构建门禁节运行），`scripts/` 是构建脚本与发布配置生成器，`docs/` 是应用运行时读取的文档。
-版本号只写在 `src/main.py` 的 `VERSION` 里（当前 `1.2.23`）——应用、发布目录名、git 标签都从它来；**推一个 `v*` 标签就是发布**。
+`src/` 是应用源码，`tests/` 是测试脚本（全部作为构建门禁运行），`scripts/` 是构建脚本与发布配置生成器，`docs/` 是应用运行时读取的文档。
+版本号只写在 `src/main.py` 的 `VERSION` 里（当前 `1.2.24`）——应用、发布目录名、git 标签都从它来；**推一个 `v*` 标签就是发布**。
 历次改动见 [CHANGELOG.md](CHANGELOG.md)。
 
 **本地构建**：运行检测闸（工程·运行检测串，已精化）**只在"构建目标目录 == 运行实例所在目录"时拒绝**；
-构建到**另一个**版本目录是允许的。当前 `VERSION` 为 `1.2.23`，冻结的 `1.2.23` 构建已产出并安装（用于现场替换）；
+构建到**另一个**版本目录是允许的。当前 `VERSION` 为 `1.2.24`；冻结的 `1.2.23` 构建已产出并安装（用于现场替换），**本次 0.4.2.3 适配尚未构建部署**（Wave 3.1 产出并整包部署）；
 release 目录是本地产物、不入库。正式发布物仍由 CI 从干净检出构建，所以仓库里没有 release 目录
 是预期状态，不是产物丢失。
 
@@ -121,11 +121,11 @@ release 目录是本地产物、不入库。正式发布物仍由 CI 从干净�
 `src/template/` 是钉住 `diy-tool-kit` 的 git submodule 借条（家族模块只有一份来源；
 全新 clone 需 `git clone --recurse-submodules`）；工具差异参数住在工具自持的参数卡
 `src/app_params.py`——含 kit 不覆盖的专有键 `SUPPORTED_REME_VERSION`。**本助手适配的 ReMe 版本为
-`0.4.2.1`**（完整适配档：job 表形态、`proactive` → `proactive_read` 改名、`proactive_refresh`
-的 `enable_serve: false` 判定、新增 `list_tags` 工具、agentscope 依赖 pin）；0.4.2.1 已于
-2026-10-27 发布并完成评估——job 表与 0.4.1.13 完全一致（无新增 / 删除 / 改名，只有增量字段
-变化），EXPOSE 白名单逻辑原样沿用；0.4.2.2 尚未发布，不跟。`VERSION` 为 `1.2.23`；冻结的 `1.2.23` 构建已产出并安装，构建在打包前跑 18 个门禁节
-（来自 20 个测试文件）。工程·运行检测串 闸门仍拒绝在常驻实例运行时构建；推 `v*` 标签后仍由
+`0.4.2.3`**（完整适配档：45 个 job 的表形态，含 `session_read`/`session_status`/`session_append`、
+`job_status`、`dashscope_search`；新增 `codex_app_server` 组件与 codex 认证迁移；
+`agent_wrapper.codex` 新增 `app_server`/`effort`；agentscope 依赖 pin）；0.4.2.3 已于 2026-11-17
+发布并完成评估——job 表相对 0.4.2.1 由 40 增至 45（上述 5 项均在 0.4.2.2 引入），据此同步了
+EXPOSE 白名单、removals、凭据与结构等价测试。源码 `VERSION` 为 `1.2.24`；**本次 0.4.2.3 适配尚未构建部署**，产物将在 Wave 3.1 构建并整包部署；构建在打包前把 `tests/` 下的测试文件全部作为门禁跑一遍。工程·运行检测串 闸门仍拒绝在常驻实例运行时构建；推 `v*` 标签后仍由
 `release.yml` 从干净检出构建发布物。
 
 ## 许可证

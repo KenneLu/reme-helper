@@ -35,7 +35,13 @@ EXE_NAME = "reme-helper.exe"
 # `search.min_score` 描述、注释掉的 `as_decision_model`），故 EXPOSE 白名单逻辑无需改动，
 # pin 推进到 0.4.2.1；0.4.2.1 的 pyproject 把 agentscope 钉到 2.0.10（main.py 的
 # AGENTSCOPE_PIN_FALLBACK 同步）。
-SUPPORTED_REME_VERSION = "0.4.2.1"
+# 2026-11-17 发布的 0.4.2.3 已逐字复核（跨 0.4.2.2 + 0.4.2.3）：job 表 40 → 45，新增
+# `session_read/session_status/session_append`、`job_status`、`dashscope_search`（均在 0.4.2.2
+# 引入）；新增组件 `codex_app_server`（default/oauth），codex 认证迁移至此；
+# `agent_wrapper.codex` 新增 `app_server: default` 与 `effort: xhigh`、model 默认值由空变为
+# `qwen3.8-max`；`dashscope_search.steps[0].api_key` 为内联 `${DASHSCOPE_API_KEY:-}`。0.4.2.3
+# 的 pyproject 钉 agentscope 2.0.11。pin 推进到 0.4.2.3。
+SUPPORTED_REME_VERSION = "0.4.2.3"
 
 # W6 状态贴图：4 形态全量图（D6）。绘制器在构建侧 src/icon_pipeline.py（与 main.py
 # 归一后零共享——运行时 tray_icons 只按档加载，包内零绘制代码）。
