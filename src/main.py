@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -83,7 +84,7 @@ from PIL import Image, ImageDraw, ImageFont
 #     导致 1.2.16→1.2.17 的托盘更新 STAGE INVALID——安装目录未动，但更新装不上）；
 #   icons 已于 （2026-09-28）接入静态贴图：绘制挪构建侧 src/icon_pipeline.py（4 形态
 #     全量图构建期产出），运行时 tray_icons 按档加载零绘制；NOT-WIRED 申报删除。
-VERSION = "1.2.25"
+VERSION = "1.2.26"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_REME_ROOT = r"H:\Tools\ReMe"
 MODE_NAMES = {"minimal": "基础模式", "full": "全功能模式", "custom": "自定义模式"}
@@ -2946,6 +2947,30 @@ def set_state(**values) -> None:
         STATE.update(values)
 
 
+# 启动就绪判定（1.2.26）。1.2.25 及以前单次探测只给 1.5s、总窗口 35s：ReMe 冷启动重建
+# 索引时 health_check 的响应会贴着 1.5s 边缘，探针连续超时 -> 一个已经健康、只是还没被
+# 探到的服务被 terminate_process_tree 杀掉（2026-11-23 现场：reme 侧同一时段 16 条
+# health collection 全 healthy:True，其中 09:16:26 那条来自监控线程的 3s 探测；helper
+# 仍判「启动后健康检查失败」并终止进程）。现在单次探测回到 3s、窗口维持 35s，且超时后
+# 先复核再决定是否终止。
+# 窗口不延长：现场证据（监控线程的 3s 探测在等待开始后约 17s 成功）表明 35s 本就够，
+# 真正救场的是放宽单次探测；延长窗口只会把「失败判定要等多久」一起拖长。
+START_HEALTH_TIMEOUT = 35.0
+# 原 1.5s 是误杀根因：服务端延迟落在 (1.5, 3] 区间（1.5s 一律放弃、3s 能成功）。
+START_PROBE_TIMEOUT = 3.0
+# 停止流程要快：保持原来的 1.5s 语义，不让「停止」因为放宽启动判定而变慢。
+STOP_PROBE_TIMEOUT = 1.5
+# 超时后的「最后一搏」用更宽的预算：它决定要不要杀掉一个进程，比常规探测更该保守。
+CONFIRM_PROBE_TIMEOUT = 5.0
+# 探测依据按线程隔离：启动 worker 与监控线程并发探测时，失败日志不能互相串台。
+_PROBE_LOCAL = threading.local()
+
+
+def last_probe_detail() -> str:
+    """当前线程最近一次探测的判定依据（成功也记；只用于失败日志）。"""
+    return getattr(_PROBE_LOCAL, "detail", "")
+
+
 def health_url() -> str:
     return "http://127.0.0.1:2333/health_check"
 
@@ -2955,13 +2980,30 @@ def probe_health(timeout: float = 3.0) -> bool:
         health_url(), data=b"{}", headers={"Content-Type": "application/json"}, method="POST"
     )
     try:
+        # status 在 with 内取：不是为了回避未定义行为（属性关连接后仍可读），而是让
+        # 「响应完整到手」和「读状态码」发生在同一段生命周期里，读代码时不会误以为
+        # 这里还在用已关闭的连接。
         with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = response.status
             data = json.load(response)
-        answer = str(data.get("answer") or "")
-        version = str((data.get("metadata") or {}).get("health", {}).get("version") or "")
-        return response.status == 200 and bool(data.get("success")) and ("ReMe" in answer or bool(version))
-    except (OSError, ValueError, urllib.error.URLError):
+    except Exception as exc:  # noqa: BLE001  探测函数不得向外抛，理由见下
+        # http.client.IncompleteRead / BadStatusLine 等 HTTPException 既不是 OSError 也
+        # 不是 ValueError（实测 chunked 响应中途断开就会抛它）。让它逃出去会弄死没有兜
+        # 底的 monitor_loop，托盘状态从此冻结——比「探不到」严重得多。但预期集合之外的
+        # 类型必须留痕，否则将来一个编程错误会表现成「服务永远不健康」且毫无线索。
+        _PROBE_LOCAL.detail = f"{type(exc).__name__} within {timeout:.1f}s: {exc}"
+        if not isinstance(exc, (OSError, ValueError, urllib.error.URLError, http.client.HTTPException)):
+            log(f"probe_health unexpected {type(exc).__name__}: {exc}")
         return False
+    if not isinstance(data, dict):
+        _PROBE_LOCAL.detail = f"status={status} non-object body: {type(data).__name__}"
+        return False
+    answer = str(data.get("answer") or "")
+    metadata = data.get("metadata")
+    health = metadata.get("health") if isinstance(metadata, dict) else None
+    version = str(health.get("version") or "") if isinstance(health, dict) else ""
+    _PROBE_LOCAL.detail = f"status={status} success={data.get('success')!r} answer={answer[:80]!r}"
+    return status == 200 and bool(data.get("success")) and ("ReMe" in answer or bool(version))
 
 
 def service_up(timeout: float = 3.0) -> bool:
@@ -2997,17 +3039,28 @@ def refresh_service_state() -> None:
     set_state(phase=phase, healthy=healthy, pid=pid, managed=bool(SERVICE_PROCESS), message="")
 
 
-def wait_for_health(expected: bool, timeout: float) -> bool:
+def wait_for_health(expected: bool, timeout: float, probe_timeout: float = START_PROBE_TIMEOUT) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         # A start operation may be racing with Exit. Stop waiting immediately so the start worker
         # can release ACTION_LOCK and the shutdown worker can perform one final, ordered cleanup.
         if expected and STOP_EVENT.is_set():
             return False
-        if probe_health(1.5) is expected:
+        if probe_health(probe_timeout) is expected:
             return True
         time.sleep(0.5)
     return False
+
+
+def confirm_start_after_timeout(process) -> bool:
+    """启动等待超时后的复核：进程还在、且此刻真的探测得到，才算起来了。
+
+    1.2.26 起超时不再直接判失败——冷启动重建索引时探针会被拖到秒级，窗口边缘才就绪的
+    服务不该被终止（1.2.25 曾用 1.5s 单次超时在此处误杀健康进程）。
+    预算比常规探测宽（CONFIRM_PROBE_TIMEOUT）：这一步决定要不要杀掉一个进程，比
+    「再探一次」更该保守。
+    """
+    return bool(process.poll() is None and probe_health(CONFIRM_PROBE_TIMEOUT))
 
 
 def terminate_process_tree(pid: int) -> None:
@@ -3061,16 +3114,46 @@ def start_service(mode: str | None = None) -> tuple[bool, str]:
         SERVICE_PROCESS = None
         set_state(phase="error", message=str(exc))
         return False, f"启动失败：{exc}"
-    if not wait_for_health(True, 35):
-        code = SERVICE_PROCESS.poll()
-        if code is None:
-            terminate_process_tree(SERVICE_PROCESS.pid)
+    if not wait_for_health(True, START_HEALTH_TIMEOUT):
+        if STOP_EVENT.is_set():
+            # 退出请求打断了等待：这不是"慢启动"，绝不能走复核成功分支——否则退出的
+            # 过程中会报「ReMe 已启动」、写 running、还会去起隧道。保持 1.2.25 的
+            # 「终止进程 + 取消启动」语义，让 shutdown 拿到干净的收尾。
+            log("start aborted by exit request")
+            if SERVICE_PROCESS.poll() is None:
+                terminate_process_tree(SERVICE_PROCESS.pid)
+            SERVICE_PROCESS = None
+            if SERVICE_LOG_HANDLE:
+                SERVICE_LOG_HANDLE.close()
+                SERVICE_LOG_HANDLE = None
+            set_state(phase="stopped", healthy=False, pid=None, managed=False, message="start cancelled")
+            return False, "应用正在退出，已取消启动 ReMe"
+        # 窗口边缘才就绪是常态（冷启动重建索引时 health_check 会被拖到秒级）。先复核
+        # 「进程还在 + 现在探得到」，再决定是否终止——不把慢启动当失败。
+        alive = SERVICE_PROCESS.poll() is None
+        if confirm_start_after_timeout(SERVICE_PROCESS):
+            log("ReMe slow start: healthy only on the timeout re-check")
+        else:
+            log(f"ReMe start failed: process_alive={alive} probe={last_probe_detail() or 'no probe attempted'}")
+            if alive:
+                terminate_process_tree(SERVICE_PROCESS.pid)
+            SERVICE_PROCESS = None
+            if SERVICE_LOG_HANDLE:
+                SERVICE_LOG_HANDLE.close()
+                SERVICE_LOG_HANDLE = None
+            set_state(phase="error", message="health timeout")
+            return False, f"启动后健康检查失败，请查看 {log_file}"
+    if STOP_EVENT.is_set():
+        # 探测成功与退出请求同一瞬间落下时，超时分支根本不会执行；这里再收一次尾，
+        # 避免退出过程中写 running、起隧道（隧道侧虽有守卫，但不该靠第二道防线兜底）。
+        log("start aborted by exit request after readiness")
+        terminate_process_tree(SERVICE_PROCESS.pid)
         SERVICE_PROCESS = None
         if SERVICE_LOG_HANDLE:
             SERVICE_LOG_HANDLE.close()
             SERVICE_LOG_HANDLE = None
-        set_state(phase="error", message="health timeout")
-        return False, f"启动后健康检查失败，请查看 {log_file}"
+        set_state(phase="stopped", healthy=False, pid=None, managed=False, message="start cancelled")
+        return False, "应用正在退出，已取消启动 ReMe"
     set_state(phase="running", healthy=True, pid=SERVICE_PROCESS.pid, managed=True, message="")
     log(f"ReMe started mode={selected} pid={SERVICE_PROCESS.pid} config={config}")
     if CFG.get("start_tunnels_with_reme"):
@@ -3113,7 +3196,7 @@ def stop_service(include_tunnels: bool = True, only_attached: bool = True) -> tu
         terminate_process_tree(proc.pid)
     if SERVICE_PROCESS and SERVICE_PROCESS.poll() is None:
         terminate_process_tree(SERVICE_PROCESS.pid)
-    wait_for_health(False, 10)
+    wait_for_health(False, 10, STOP_PROBE_TIMEOUT)
     SERVICE_PROCESS = None
     if SERVICE_LOG_HANDLE:
         SERVICE_LOG_HANDLE.close()

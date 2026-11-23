@@ -126,13 +126,13 @@ release.bat        :: tag v<version> and push; CI publishes the zip
 
 `src/` holds the application, `tests/` the test files (all of them run as build gates),
 `scripts/` the build and the release-config generator, and `docs/` the documentation the app reads at runtime.
-The version lives in `src/main.py` (`VERSION`, currently `1.2.25`) — the single source of truth for the app,
+The version lives in `src/main.py` (`VERSION`, currently `1.2.26`) — the single source of truth for the app,
 the folder name, and the git tag; pushing a `v*` tag is what publishes a release. See
 [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 **Building locally.** The running-instance gate (工程·运行检测串, refined) refuses only when the build's
 target folder **is the folder the live instance runs from** - building a *different* version
-folder is allowed. `VERSION` is currently `1.2.25`; the frozen `1.2.23` build has been produced and installed
+folder is allowed. `VERSION` is currently `1.2.26`; the frozen `1.2.23` build has been produced and installed
 locally for field replacement, and the 0.4.2.3 adaptation was built and deployed locally in Wave 3.1. The release folder is a local artifact and is not committed. Published
 artifacts still come from CI on a clean checkout, so a repository without a release folder is an
 expected state, not a lost artifact.
@@ -152,7 +152,7 @@ migration; the `agent_wrapper.codex` `app_server`/`effort` additions; and the ag
 pin). 0.4.2.3 was released on 2026-11-17 and has been evaluated against 0.4.2.1: the
 job table grew 40 → 45 (the five additions above, all introduced in 0.4.2.2), so the
 EXPOSE whitelist, removals, credentials and structural-equivalence tests were updated
-accordingly. The source `VERSION` is `1.2.25`; the 0.4.2.3 adaptation was built and deployed locally in Wave 3.1, and every test file under `tests/` runs as a gate before packaging. The 工程·运行检测串 gate still refuses to build over a live
+accordingly. The source `VERSION` is `1.2.26`; the 0.4.2.3 adaptation was built and deployed locally in Wave 3.1, and every test file under `tests/` runs as a gate before packaging. The 工程·运行检测串 gate still refuses to build over a live
 instance; tagging `v*` lets `release.yml` build the published artifact from a clean checkout.
 
 ## License

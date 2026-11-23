@@ -103,6 +103,11 @@ jobs:
       - name: Startup guard (tray fail-open)
         run: python tests/test_startup_guard.py
 
+      # 1.2.26 start readiness: a 1.5s probe + no re-check killed a healthy service.
+      # Locks the widened probe, the timeout re-check, the abort path and the stop budget.
+      - name: Start readiness window (timeout re-check)
+        run: python tests/test_start_health_window.py
+
       # 1.2.11 menu polish: Chinese/Latin spacing and the two bold default items.
       - name: Tray menu labels and default items
         run: python tests/test_tray_menu.py
